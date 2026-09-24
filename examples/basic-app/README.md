@@ -10,3 +10,7 @@ npm run example:dev
 ```
 
 Edit the name field or click the button to see the Canvas UI update. Run `npm run verify:consumer` to typecheck and build the example against the packed library.
+
+## GitHub Pages
+
+The repository's deployment workflow builds this example with the `/directsurface/` asset base and publishes only `dist/` to GitHub Pages. Local development keeps the `/` base.
