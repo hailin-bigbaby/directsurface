@@ -1,0 +1,20 @@
+{
+  "name": "directsurface-basic-app",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "ds-ui": "file:../../.packs/ds-ui.tgz"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.39",
+    "typescript": "5.9.3",
+    "vite": "5.4.21"
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "name": "ds-ui",
+  "version": "0.1.0",
+  "description": "DirectSurface Canvas GUI framework and component library",
+  "type": "module",
+  "module": "./dist-lib/index.mjs",
+  "types": "./dist-lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist-lib/types/index.d.ts",
+      "import": "./dist-lib/index.mjs"
+    }
+  },
+  "files": [
+    "dist-lib",
+    "README.md",
+    "THIRD_PARTY_NOTICES.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "check": "tsc --noEmit",
+    "build": "vite build --config vite.lib.config.ts && tsc -p tsconfig.lib.json",
+    "test": "vitest --run --environment jsdom",
+    "pack:check": "npm pack --dry-run",
+    "prepack": "npm run check:icons && npm run check:docs && npm run check && npm test && npm run build && npm run verify:package",
+    "verify:package": "node scripts/verify_package.mjs",
+    "generate:icons": "node scripts/generate_icon_catalog.mjs",
+    "check:icons": "node scripts/generate_icon_catalog.mjs --check",
+    "verify:consumer": "node scripts/setup_example.mjs && npm --prefix examples/basic-app run typecheck && npm --prefix examples/basic-app run build",
+    "example:dev": "node scripts/setup_example.mjs && npm --prefix examples/basic-app run dev",
+    "check:docs": "node scripts/check_docs.mjs",
+    "test:browser": "node tests/browser/basic_app_smoke.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vite": "^5.2.0",
+    "vitest": "^1.5.0",
+    "jsdom": "^24.0.0",
+    "@types/node": "^20.12.0",
+    "playwright": "1.61.1"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hailin-bigbaby/directsurface.git"
+  },
+  "homepage": "https://github.com/hailin-bigbaby/directsurface#readme",
+  "bugs": {
+    "url": "https://github.com/hailin-bigbaby/directsurface/issues"
+  },
+  "keywords": [
+    "directsurface",
+    "canvas",
+    "ui",
+    "typescript"
+  ]
+}
