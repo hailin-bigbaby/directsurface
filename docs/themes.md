@@ -5,7 +5,7 @@ Applications pass a complete `ResolvedTheme` to `Application.run()`. The package
 Use `createTheme()` to change semantic tokens without copying component paint logic:
 
 ```ts
-import { ImGuiLightTheme, createTheme, rgba } from 'ds-ui'
+import { ImGuiLightTheme, createTheme, rgba } from 'directsurface'
 
 const theme = createTheme(ImGuiLightTheme, {
   accentPrimary: rgba(28, 105, 188),

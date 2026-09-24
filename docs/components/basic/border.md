@@ -12,7 +12,7 @@ import {
   RenderBorder,
   type BorderAccentSide,
   type RenderBorderOptions,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 ## 何时使用

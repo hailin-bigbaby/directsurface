@@ -13,7 +13,7 @@ DirectSurface UI 的列表组件公共类名是 `RenderListView`。它用于展�
 import {
   RenderListView,
   type ListViewItem,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 | API | 类型 | 用途 |

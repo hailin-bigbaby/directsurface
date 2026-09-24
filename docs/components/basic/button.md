@@ -19,7 +19,7 @@ DirectSurface UI 的普通按钮公共类名是 `RenderButton`。它用于触发
 导入：
 
 ```ts
-import { RenderButton, type ButtonVariant } from 'ds-ui'
+import { RenderButton, type ButtonVariant } from 'directsurface'
 ```
 
 `RenderButton` 的构造参数是公开 options 对象，但当前没有单独导出的按钮 options 类型。业务代码直接按本文的参数表传入对象。
@@ -42,7 +42,7 @@ import { RenderButton, type ButtonVariant } from 'ds-ui'
 ## 最小示例
 
 ```ts
-import { RenderButton } from 'ds-ui'
+import { RenderButton } from 'directsurface'
 
 const saveButton = new RenderButton({
   label: '保存',

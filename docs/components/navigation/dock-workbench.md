@@ -19,7 +19,7 @@ import {
   RenderDockWorkbench,
   RenderText,
   RenderWindow,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 | API | 类型 | 用途 |

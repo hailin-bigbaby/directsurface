@@ -17,7 +17,7 @@ import {
   type AppConfirmDialogOptions,
   type AppModalOptions,
   type ModalButton,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 | API | 类型 | 用途 |

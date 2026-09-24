@@ -11,7 +11,7 @@
 import {
   RenderProgressBar,
   type Color,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 | API | 类型 | 用途 |
@@ -38,7 +38,7 @@ import {
 ## 最小示例
 
 ```ts
-import { RenderProgressBar } from 'ds-ui'
+import { RenderProgressBar } from 'directsurface'
 
 const progress = new RenderProgressBar({
   value: 0.35,
@@ -51,7 +51,7 @@ progress.setValue(0.8)
 ## 不确定进度
 
 ```ts
-import { RenderProgressBar } from 'ds-ui'
+import { RenderProgressBar } from 'directsurface'
 
 const progress = new RenderProgressBar({
   value: -1,

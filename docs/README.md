@@ -1,6 +1,6 @@
 # DirectSurface documentation
 
-These pages describe the public `ds-ui` package and the source repository that builds it.
+These pages describe the public `directsurface` package and the source repository that builds it.
 
 1. [Getting started](getting-started.md) — install, mount a Canvas, and run the component showcase.
 2. [Runtime and lifecycle](lifecycle.md) — render tree ownership, input, and disposal.

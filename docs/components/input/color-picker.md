@@ -32,7 +32,7 @@ import {
   RenderColorPicker,
   type Color,
   type FormFieldStatus,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 `RenderColorPicker` 的构造参数是公开 options 对象，但当前没有单独导出的 ColorPicker options 类型。业务代码直接按本文参数表传入对象。
@@ -58,7 +58,7 @@ import {
 ## 最小示例
 
 ```ts
-import { RenderColorPicker, type Color } from 'ds-ui'
+import { RenderColorPicker, type Color } from 'directsurface'
 
 const colorState: { color: Color } = {
   color: { r: 47, g: 111, b: 237, a: 1 },
@@ -99,7 +99,7 @@ const readonlyColor = new RenderColorPicker({
 颜色使用框架统一的 `Color` 类型：
 
 ```ts
-import type { Color } from 'ds-ui'
+import type { Color } from 'directsurface'
 
 const color: Color = {
   r: 47,

@@ -26,7 +26,7 @@ import {
   type BarcodeMetrics,
   type BarcodeOptions,
   type BarcodeType,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 | API | 类型 | 用途 |

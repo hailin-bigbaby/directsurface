@@ -18,7 +18,7 @@ import {
   type TableColumn,
   type TableSortOrder,
   type TableSortState,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 | API | 类型 | 用途 |
@@ -49,7 +49,7 @@ import {
 ## 最小示例
 
 ```ts
-import { RenderTable, type TableColumn } from 'ds-ui'
+import { RenderTable, type TableColumn } from 'directsurface'
 
 interface ProjectRow {
   id: number
@@ -97,7 +97,7 @@ const table = new RenderTable<ProjectRow>({
 | `onSortChange` | `(sort) => void` | `undefined` | 点击 sortable 表头改变排序时触发。 |
 
 ```ts
-import { RenderTable, type TableColumn } from 'ds-ui'
+import { RenderTable, type TableColumn } from 'directsurface'
 
 interface ProjectRow {
   id: number
@@ -141,7 +141,7 @@ const compactTable = new RenderTable<ProjectRow>({
 | `renderColor` | `(value, row, context) => Color` | 自定义单元格文字颜色；context 提供主题、实际背景、行列索引和选中/悬浮/焦点状态。旧的两参数回调仍兼容。 |
 
 ```ts
-import { resolveContrastText, type TableColumn } from 'ds-ui'
+import { resolveContrastText, type TableColumn } from 'directsurface'
 
 interface ProjectRow {
   id: number
@@ -197,7 +197,7 @@ const scoreColumns: TableColumn<ProjectRow>[] = [
 | `isFocused` | `boolean` | 是否有 focused row。 |
 
 ```ts
-import { RenderTable } from 'ds-ui'
+import { RenderTable } from 'directsurface'
 
 interface ProjectRow {
   id: number
@@ -237,7 +237,7 @@ table.cellTextOverflow = 'clip'
 | `dispose()` | `void` | 注销焦点、清理滚动条 drag/hover、hover/focus 和选择范围。 |
 
 ```ts
-import { RenderTable } from 'ds-ui'
+import { RenderTable } from 'directsurface'
 
 const table = new RenderTable({
   columns: [{ key: 'name', title: '名称' }],
@@ -289,7 +289,7 @@ const sort: TableSortState = {
 | `colWidths` | `number[]` | 当前列宽，包含拖拽后的状态。 |
 
 ```ts
-import { RenderTable } from 'ds-ui'
+import { RenderTable } from 'directsurface'
 
 const table = new RenderTable({
   columns: [{ key: 'name', title: '名称' }],
@@ -316,7 +316,7 @@ state.tableColumns = tableState.colWidths.length
 - 拖拽表头列分隔线可调整该列宽度。
 
 ```ts
-import { RenderTable, type TableColumn } from 'ds-ui'
+import { RenderTable, type TableColumn } from 'directsurface'
 
 interface ProjectRow {
   id: number
@@ -404,7 +404,7 @@ hover 单元格时，如果完整文本宽度超过可用列宽，会把 `table.
 ## 动态更新
 
 ```ts
-import { RenderTable } from 'ds-ui'
+import { RenderTable } from 'directsurface'
 
 interface ProjectRow {
   id: number

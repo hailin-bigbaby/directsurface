@@ -23,7 +23,7 @@ import {
   type RenderTokenEditOptions,
   type TokenEditOption,
   type TokenEditToken,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 ## 何时使用
@@ -45,7 +45,7 @@ import {
 import {
   RenderTokenEdit,
   type TokenEditOption,
-} from 'ds-ui'
+} from 'directsurface'
 
 const allergyOptions: TokenEditOption[] = [
   { value: 'penicillin', label: '青霉素' },

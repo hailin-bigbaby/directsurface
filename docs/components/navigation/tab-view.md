@@ -16,7 +16,7 @@ import {
   RenderText,
   type RenderTabControlOptions,
   type RenderTabItemOptions,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 | API | 类型 | 用途 |

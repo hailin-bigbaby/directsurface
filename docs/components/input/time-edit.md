@@ -8,7 +8,7 @@
 ## 基本使用
 
 ```ts
-import { RenderTimeEdit } from 'ds-ui'
+import { RenderTimeEdit } from 'directsurface'
 
 const time = new RenderTimeEdit({
   value: '08:30',

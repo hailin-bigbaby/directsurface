@@ -16,7 +16,7 @@ import {
   type NavigationMenuGroup,
   type NavigationMenuItem,
   type NavigationMenuItemStatus,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 | API | 类型 | 用途 |

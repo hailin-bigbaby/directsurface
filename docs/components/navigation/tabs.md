@@ -15,7 +15,7 @@ import {
   type TabContextMenuHandler,
   type TabDragHandler,
   type TabItem,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 | API | 类型 | 用途 |

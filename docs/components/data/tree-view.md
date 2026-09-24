@@ -35,7 +35,7 @@ import {
   type TreeViewDebugState,
   type TreeVisibleNodeDebugTarget,
   type SurfaceAppearance,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 | API | 类型 | 用途 |
@@ -50,12 +50,12 @@ import {
 | `TreeLabelToken` | type | 分段着色 label token。 |
 | `TreeLabelTokenKind` | type | label token 语义类型。 |
 
-最小装配顺序是：准备稳定 key 的 `TreeNode<T>[]`，创建 `RenderTreeView({ roots })`，再按需配置选择、勾选、展开和回调。业务代码应只从 `ds-ui` 包入口导入这些类型，不要从 `src/widgets/tree` 等内部路径导入。
+最小装配顺序是：准备稳定 key 的 `TreeNode<T>[]`，创建 `RenderTreeView({ roots })`，再按需配置选择、勾选、展开和回调。业务代码应只从 `directsurface` 包入口导入这些类型，不要从 `src/widgets/tree` 等内部路径导入。
 
 ## 最小示例
 
 ```ts
-import { RenderTreeView, type TreeNode } from 'ds-ui'
+import { RenderTreeView, type TreeNode } from 'directsurface'
 
 interface DocEntry {
   path: string

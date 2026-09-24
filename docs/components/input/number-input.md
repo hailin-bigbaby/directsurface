@@ -20,7 +20,7 @@
 导入：
 
 ```ts
-import { RenderNumberInput, type FormFieldStatus } from 'ds-ui'
+import { RenderNumberInput, type FormFieldStatus } from 'directsurface'
 ```
 
 `RenderNumberInput` 的构造参数是公开 options 对象，但当前没有单独导出的 NumberInput options 类型。业务代码直接按本文参数表传入对象。
@@ -44,7 +44,7 @@ import { RenderNumberInput, type FormFieldStatus } from 'ds-ui'
 ## 最小示例
 
 ```ts
-import { RenderNumberInput } from 'ds-ui'
+import { RenderNumberInput } from 'directsurface'
 
 const countState = {
   count: 1,
@@ -65,7 +65,7 @@ const count = new RenderNumberInput({
 带单位：
 
 ```ts
-import { RenderNumberInput } from 'ds-ui'
+import { RenderNumberInput } from 'directsurface'
 
 const temperature = new RenderNumberInput({
   value: 36.8,
@@ -80,7 +80,7 @@ const temperature = new RenderNumberInput({
 带表单状态：
 
 ```ts
-import { RenderNumberInput } from 'ds-ui'
+import { RenderNumberInput } from 'directsurface'
 
 const age = new RenderNumberInput({
   value: 32,
@@ -94,7 +94,7 @@ const age = new RenderNumberInput({
 ## 构造参数
 
 ```ts
-import { RenderNumberInput } from 'ds-ui'
+import { RenderNumberInput } from 'directsurface'
 
 const numberFormState = {
   value: 12,
@@ -188,7 +188,7 @@ type FormFieldStatus = 'default' | 'success' | 'warning' | 'error'
 2. 按 `min/max` 裁剪。
 
 ```ts
-import { RenderNumberInput } from 'ds-ui'
+import { RenderNumberInput } from 'directsurface'
 
 const input = new RenderNumberInput({
   value: 12.34,
@@ -344,7 +344,7 @@ input.value // 10
 - 字段标题建议由表单布局或 [EntryGrid](../data/entry-grid.md) 提供；`label` 更适合紧跟输入框右侧的小提示。
 
 ```ts
-import { RenderNumberInput } from 'ds-ui'
+import { RenderNumberInput } from 'directsurface'
 
 const price = new RenderNumberInput({
   value: 20,

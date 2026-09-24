@@ -1,6 +1,6 @@
 # Component guides
 
-These 83 detailed component guides are adapted for the public `ds-ui` API. One additional page covers framework foundations and diagnostics. A guide can cover several render classes, so the guide count differs from the 117 exported `Render*` values. The original guides are in Chinese; see the [English catalog](../components.md) for the full export list.
+These 83 detailed component guides are adapted for the public `directsurface` API. One additional page covers framework foundations and diagnostics. A guide can cover several render classes, so the guide count differs from the 117 exported `Render*` values. The original guides are in Chinese; see the [English catalog](../components.md) for the full export list.
 
 ## Framework foundations and diagnostics
 

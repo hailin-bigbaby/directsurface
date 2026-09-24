@@ -18,7 +18,7 @@ import {
   RenderWrapPanel,
   type AppHost,
   type RenderBox,
-} from 'ds-ui'
+} from 'directsurface'
 import {
   WorkbenchStore,
   dateKey,

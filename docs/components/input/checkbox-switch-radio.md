@@ -30,7 +30,7 @@ import {
   RenderRadioGroup,
   RenderSwitch,
   type RadioOption,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 三个组件的构造参数都是公开 options 对象；`RadioOption` 从包入口导出，可用于声明单选项数组。
@@ -53,7 +53,7 @@ import {
 ## Checkbox 最小示例
 
 ```ts
-import { RenderCheckbox } from 'ds-ui'
+import { RenderCheckbox } from 'directsurface'
 
 const checkboxState = {
   enabled: false,
@@ -140,7 +140,7 @@ const checkbox = new RenderCheckbox({
 ## Switch 最小示例
 
 ```ts
-import { RenderSwitch } from 'ds-ui'
+import { RenderSwitch } from 'directsurface'
 
 const switchState = {
   debugVisible: false,
@@ -215,7 +215,7 @@ const switcher = new RenderSwitch({
 ## RadioGroup 最小示例
 
 ```ts
-import { RenderRadioGroup, type RadioOption } from 'ds-ui'
+import { RenderRadioGroup, type RadioOption } from 'directsurface'
 
 const shiftOptions: RadioOption[] = [
   { value: 'day', label: '日间' },

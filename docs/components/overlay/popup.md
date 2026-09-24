@@ -9,7 +9,7 @@ Popup 是所有浮层能力的底层机制。`PopupManager` 负责 popup 栈、�
 核心边界：
 
 - `PopupManager`、`Popup`、`PopupContext`、`PopupOpenOptions`、`PopupAnchor` 等是公共 API。
-- 未从 `ds-ui` 包入口导出的 popup 基础类型属于内部实现，外部业务不应依赖。
+- 未从 `directsurface` 包入口导出的 popup 基础类型属于内部实现，外部业务不应依赖。
 - 业务组件需要自定义浮层时，优先组合公共 popup API；应用特有行为应封装在业务模块中，不要自行复制一套 popup 管线。
 
 
@@ -42,7 +42,7 @@ import {
   type PopupViewport,
   type TooltipContent,
   type TooltipPresenter,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 | API | 类型 | 用途 |
@@ -361,7 +361,7 @@ const result = resolveAnchoredPopupRect({
 
 ## 公共使用边界
 
-业务项目应使用本页列出的公共 popup API，或优先选择下方对应的具体浮层组件。未从 `ds-ui` 包入口导出的 shell、surface 和 host 类型不属于兼容性承诺，不应通过包内路径引用或继承。
+业务项目应使用本页列出的公共 popup API，或优先选择下方对应的具体浮层组件。未从 `directsurface` 包入口导出的 shell、surface 和 host 类型不属于兼容性承诺，不应通过包内路径引用或继承。
 
 ## 与具体浮层组件的关系
 
@@ -418,7 +418,7 @@ popup 的 `onWheel()` 返回了 `false` 或没有实现。需要阻止外层滚�
 
 ### 可以从包内路径导入未公开的 popup 类型吗？
 
-不可以。业务项目只应组合 `ds-ui` 包入口导出的公共 popup API；如果公共能力不足，应提出稳定的扩展需求，而不是 deep import 包内实现。
+不可以。业务项目只应组合 `directsurface` 包入口导出的公共 popup API；如果公共能力不足，应提出稳定的扩展需求，而不是 deep import 包内实现。
 
 ## 相关文档
 

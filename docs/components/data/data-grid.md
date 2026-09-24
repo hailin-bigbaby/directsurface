@@ -67,12 +67,12 @@
 - `GridCellEditPolicy`
 - `GridCellEditState`
 
-这些类型都从 `ds-ui` 包入口导出。
+这些类型都从 `directsurface` 包入口导出。
 
 ## 最小示例
 
 ```ts
-import { RenderDataGrid, type GridColumnDef } from 'ds-ui'
+import { RenderDataGrid, type GridColumnDef } from 'directsurface'
 
 interface ItemRow {
   id: string
@@ -289,7 +289,7 @@ Grid 校验只负责输入值是否合法，不负责业务提交、后台保存
 - 校验错误沿用单元格错误边框，hover 显示错误文本。`focusFirstError()` 只定位当前可见且列未隐藏的第一个错误。
 
 ```ts
-import { RenderDataGrid, type GridColumnDef } from 'ds-ui'
+import { RenderDataGrid, type GridColumnDef } from 'directsurface'
 
 interface OrderRow {
   itemCode: string
@@ -335,7 +335,7 @@ if (!result.valid) grid.focusFirstError()
 列的 `editor` 和 `key` 仍然固定；需要让同一列在不同行具有不同权限时，使用 `resolveCellEditPolicy`，不要动态切换编辑器或字段绑定。
 
 ```ts
-import { RenderDataGrid, type GridColumnDef } from 'ds-ui'
+import { RenderDataGrid, type GridColumnDef } from 'directsurface'
 
 interface OrderRow {
   itemCode: string
@@ -392,7 +392,7 @@ const grid = new RenderDataGrid<OrderRow>({
 Grid 列的 `lookup.queryProcessor` 除了查询选项，还会收到 `context.cell`。可用它根据当前订单行过滤候选项，而不需要为每一行创建不同编辑器：
 
 ```ts
-import type { GridLookupQueryProcessor } from 'ds-ui'
+import type { GridLookupQueryProcessor } from 'directsurface'
 
 interface OrderRow {
   orderType: 'goods' | 'service'
@@ -732,7 +732,7 @@ observedGrid.dispose()
 import {
   DataGridEditSession,
   RenderDataGrid,
-} from 'ds-ui'
+} from 'directsurface'
 
 const sessionRows = [{ quantity: 1 }]
 const sessionGrid = new RenderDataGrid({
@@ -859,7 +859,7 @@ void gridChanges
 示例：
 
 ```ts
-import type { RenderDataGrid } from 'ds-ui'
+import type { RenderDataGrid } from 'directsurface'
 
 declare const grid: RenderDataGrid<any>
 

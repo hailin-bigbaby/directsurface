@@ -26,7 +26,7 @@ import {
   RenderComboBox,
   type DropdownOption,
   type FormFieldStatus,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 `RenderComboBox` 的构造参数是公开 options 对象，但当前没有单独导出的 ComboBox options 类型。业务代码直接按本文参数表传入对象。
@@ -49,7 +49,7 @@ import {
 ## 最小示例
 
 ```ts
-import { RenderComboBox, type DropdownOption } from 'ds-ui'
+import { RenderComboBox, type DropdownOption } from 'directsurface'
 
 const statusOptions: DropdownOption[] = [
   { value: 'active', label: '启用' },

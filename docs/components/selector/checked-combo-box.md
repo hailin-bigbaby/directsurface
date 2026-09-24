@@ -23,7 +23,7 @@ import {
   RenderCheckedComboBox,
   type DropdownOption,
   type RenderCheckedComboBoxOptions,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 ## 何时使用
@@ -46,7 +46,7 @@ import {
 import {
   RenderCheckedComboBox,
   type DropdownOption,
-} from 'ds-ui'
+} from 'directsurface'
 
 const statusOptions: DropdownOption[] = [
   { value: 'draft', label: '暂存' },

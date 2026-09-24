@@ -10,7 +10,7 @@
 ```ts
 import {
   RenderPagination,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 | API | 类型 | 用途 |
@@ -37,7 +37,7 @@ import {
 ## 最小示例
 
 ```ts
-import { RenderPagination } from 'ds-ui'
+import { RenderPagination } from 'directsurface'
 
 const pager = new RenderPagination({
   currentPage: 1,

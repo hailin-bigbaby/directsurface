@@ -1,5 +1,5 @@
 {
-  "name": "ds-ui",
+  "name": "directsurface",
   "version": "0.1.0",
   "description": "Canvas GUI framework for desktop-grade browser workspaces",
   "type": "module",

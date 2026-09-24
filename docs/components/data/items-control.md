@@ -24,7 +24,7 @@ import {
   type ItemsControlSelectionChange,
   type ItemsControlSelectionMode,
   type ItemsControlVirtualizationOptions,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 | API | 类型 | 用途 |
@@ -153,7 +153,7 @@ const items = new RenderItemsControl<ItemCard>({
 `itemStyle: undefined` 表示完全使用 `itemAppearance` 的主题样式。
 
 ```ts
-import { RenderItemsControl, RenderText, rgba } from 'ds-ui'
+import { RenderItemsControl, RenderText, rgba } from 'directsurface'
 
 interface MenuItem {
   id: string

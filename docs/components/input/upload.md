@@ -7,7 +7,7 @@
 ## 基本使用
 
 ```ts
-import { RenderUpload } from 'ds-ui'
+import { RenderUpload } from 'directsurface'
 
 const uploadAttachment = async (
   _file: File,

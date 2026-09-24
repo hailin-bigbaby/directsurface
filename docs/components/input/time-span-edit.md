@@ -7,7 +7,7 @@
 ## 基本使用
 
 ```ts
-import { RenderTimeSpanEdit } from 'ds-ui'
+import { RenderTimeSpanEdit } from 'directsurface'
 
 const duration = new RenderTimeSpanEdit({
   value: 90 * 60 * 1000,

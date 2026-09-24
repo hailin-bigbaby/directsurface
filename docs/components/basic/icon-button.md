@@ -20,7 +20,7 @@ import {
   rgba,
   type IconName,
   type PaintIconGlyphOptions,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 | API | 类型 | 用途 |
@@ -147,7 +147,7 @@ const documentIcon = new RenderIcon({
 需要在自定义组件里直接绘制内置 icon 时，可以使用低层 helper：
 
 ```ts
-import { paintIconGlyph, rgba, type PaintContext } from 'ds-ui'
+import { paintIconGlyph, rgba, type PaintContext } from 'directsurface'
 
 function paintSearchIcon(context: PaintContext, x: number, y: number): void {
   paintIconGlyph(context, {

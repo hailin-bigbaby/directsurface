@@ -16,7 +16,7 @@
 导入：
 
 ```ts
-import { RenderSlider } from 'ds-ui'
+import { RenderSlider } from 'directsurface'
 ```
 
 `RenderSlider` 的构造参数是公开 options 对象，但当前没有单独导出的 Slider options 类型。业务代码直接按本文参数表传入对象。
@@ -42,7 +42,7 @@ import { RenderSlider } from 'ds-ui'
 ## 最小示例
 
 ```ts
-import { RenderSlider } from 'ds-ui'
+import { RenderSlider } from 'directsurface'
 
 const zoomState = {
   zoom: 100,
@@ -63,7 +63,7 @@ const zoom = new RenderSlider({
 隐藏当前值：
 
 ```ts
-import { RenderSlider } from 'ds-ui'
+import { RenderSlider } from 'directsurface'
 
 const opacity = new RenderSlider({
   value: 0.5,
@@ -77,7 +77,7 @@ const opacity = new RenderSlider({
 禁用：
 
 ```ts
-import { RenderSlider } from 'ds-ui'
+import { RenderSlider } from 'directsurface'
 
 const disabled = new RenderSlider({
   value: 30,

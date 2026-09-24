@@ -8,14 +8,14 @@
 
 ## Why DirectSurface
 
-The [Canvas workspace demo](https://hailin-bigbaby.github.io/directsurface/) lets you filter 10,000 locally generated rows, rearrange docked document panels, float and dock an inspector, and switch themes. The Workbench tab shows a complete project-delivery flow with linked filters, metrics, charts, task editing, and date selection. Both demos use the public `ds-ui` package entry and fictional data.
+The [Canvas workspace demo](https://hailin-bigbaby.github.io/directsurface/) lets you filter 10,000 locally generated rows, rearrange docked document panels, float and dock an inspector, and switch themes. The Workbench tab shows a complete project-delivery flow with linked filters, metrics, charts, task editing, and date selection. Both demos use the public `directsurface` package entry and fictional data.
 
 This release does not provide accessibility support for assistive technologies; Canvas controls are not exposed as semantic DOM controls. Task data in the demo resets on refresh, and the displayed user is fictional.
 
 ## Install
 
 ```sh
-npm install ds-ui
+npm install directsurface
 ```
 
 DirectSurface is ESM-only. Add a full-size Canvas to your Vite + TypeScript app:
@@ -34,7 +34,7 @@ Then mount a window and release its host when your page is removed:
 import {
   Application, ImGuiLightTheme, RenderPage,
   RenderStackPanel, RenderText, RenderWindow, loadDirectSurfaceFonts,
-} from 'ds-ui'
+} from 'directsurface'
 
 await loadDirectSurfaceFonts()
 const content = new RenderStackPanel({ padding: 24, spacing: 12 })

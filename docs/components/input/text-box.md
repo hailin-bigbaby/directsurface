@@ -35,7 +35,7 @@ import {
   type IconName,
   type TextBoxAction,
   type TextBoxInputAdapter,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 `RenderTextBox`、`RenderPasswordField` 和 `RenderSearchBox` 的构造参数是公开 options 对象，但当前没有单独导出的 options 类型。业务代码直接按本文的参数表传入对象。
@@ -59,7 +59,7 @@ import {
 ## 最小示例
 
 ```ts
-import { RenderTextBox } from 'ds-ui'
+import { RenderTextBox } from 'directsurface'
 
 const itemFormState = {
   itemName: '',

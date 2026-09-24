@@ -5,7 +5,7 @@ DirectSurface uses parent-to-child constraints. A parent gives each child an all
 `RenderStackPanel` arranges children in a row or column. The optional second argument to `addChild(child, flex)` allocates remaining space when the parent has a finite extent:
 
 ```ts
-import { RenderButton, RenderStackPanel, RenderText } from 'ds-ui'
+import { RenderButton, RenderStackPanel, RenderText } from 'directsurface'
 
 const column = new RenderStackPanel({
   orientation: 'vertical',

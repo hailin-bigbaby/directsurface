@@ -15,7 +15,7 @@ import {
   type ToolbarGroup,
   type ToolbarItem,
   type ToolbarSlot,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 | API | 类型 | 用途 |

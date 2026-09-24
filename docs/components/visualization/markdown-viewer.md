@@ -34,7 +34,7 @@ import {
   type MarkdownViewerShrinkWrap,
   type MarkdownViewerViewportState,
   type RenderMarkdownViewerOptions,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 | API | 类型 | 用途 |
@@ -175,7 +175,7 @@ const commonmarkViewer = new RenderMarkdownViewer({
 
 ## 解析工具
 
-这些函数从 `ds-ui` 包入口导出，可在业务层提前解析、生成目录、做纯文本索引或测试 Markdown 结果。
+这些函数从 `directsurface` 包入口导出，可在业务层提前解析、生成目录、做纯文本索引或测试 Markdown 结果。
 
 | 函数 | 签名 | 说明 |
 | --- | --- | --- |

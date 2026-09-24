@@ -3,7 +3,7 @@
 `HoverCardPopup` 是由指针悬停触发、允许用户进入并操作的 anchored rich popup。它适合语义说明、文档链接、可复制代码和可滚动详情；普通短提示仍应使用 [Tooltip](./tooltip.md)，主动打开的操作面板使用 [Popover](./popover.md)。
 
 ```ts
-import { HoverCardPopup, RenderMarkdownViewer } from 'ds-ui'
+import { HoverCardPopup, RenderMarkdownViewer } from 'directsurface'
 
 const card = new HoverCardPopup()
 card.show({

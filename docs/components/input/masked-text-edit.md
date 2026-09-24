@@ -36,7 +36,7 @@ import {
   type MaskBlockDefinitions,
   type MaskTokenDefinitions,
   type MaskValue,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 ## 何时使用
@@ -58,7 +58,7 @@ import {
 ## 最小示例
 
 ```ts
-import { RenderMaskedTextEdit } from 'ds-ui'
+import { RenderMaskedTextEdit } from 'directsurface'
 
 const itemState = {
   phone: '',

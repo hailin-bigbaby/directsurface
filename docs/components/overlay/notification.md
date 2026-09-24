@@ -26,7 +26,7 @@ import {
   NotificationManager,
   type NotificationHandle,
   type NotificationOptions,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 应用应复用一个 `NotificationManager`，业务页面通常优先使用宿主的 `AppOverlayService`。

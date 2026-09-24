@@ -6,7 +6,7 @@
 ## 基本用法
 
 ```ts
-import { RenderTimeRangeEdit } from 'ds-ui'
+import { RenderTimeRangeEdit } from 'directsurface'
 
 const range = new RenderTimeRangeEdit({
   value: { start: '09:00', end: '17:30' },

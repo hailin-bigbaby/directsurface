@@ -17,7 +17,7 @@ import {
   type StatusBarGroup,
   type StatusBarItem,
   type StatusBarTextTone,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 | API | 类型 | 用途 |
@@ -48,7 +48,7 @@ import {
 ## 最小示例
 
 ```ts
-import { RenderStatusBar } from 'ds-ui'
+import { RenderStatusBar } from 'directsurface'
 
 const statusBar = new RenderStatusBar({
   groups: [
@@ -83,7 +83,7 @@ const statusBar = new RenderStatusBar({
 ## 自定义进度项
 
 ```ts
-import { RenderProgressBar, RenderStatusBar } from 'ds-ui'
+import { RenderProgressBar, RenderStatusBar } from 'directsurface'
 
 const importProgress = new RenderProgressBar({
   value: 0.42,

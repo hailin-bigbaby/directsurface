@@ -6,7 +6,7 @@
 ## 基本用法
 
 ```ts
-import { RenderTimePicker } from 'ds-ui'
+import { RenderTimePicker } from 'directsurface'
 
 const picker = new RenderTimePicker({
   value: '09:30',

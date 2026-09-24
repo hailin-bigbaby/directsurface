@@ -1,6 +1,6 @@
 # Component showcase
 
-This interactive showcase imports only the public `ds-ui` package entry and uses the package tarball produced from this repository. The Workbench tab is a complete sample project delivery application with filters, metrics, charts, task editing, and theme settings. The Controls and Data & charts tabs remain independent component showcases. Canvas workspace demonstrates dockable panels and a 10,000-row local data grid.
+This interactive showcase imports only the public `directsurface` package entry and uses the package tarball produced from this repository. The Workbench tab is a complete sample project delivery application with filters, metrics, charts, task editing, and theme settings. The Controls and Data & charts tabs remain independent component showcases. Canvas workspace demonstrates dockable panels and a 10,000-row local data grid.
 
 From the repository root:
 

@@ -25,7 +25,7 @@
 import {
   RenderButtonEdit,
   type ButtonEditButton,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 ## 何时使用
@@ -47,7 +47,7 @@ import {
 ## 最小示例
 
 ```ts
-import { RenderButtonEdit } from 'ds-ui'
+import { RenderButtonEdit } from 'directsurface'
 
 const openTemplatePicker = (): void => {}
 const pathState = {

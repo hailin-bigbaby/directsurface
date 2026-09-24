@@ -19,7 +19,7 @@ import {
   type FormPanelLabelPlacement,
   type RenderFormFieldOptions,
   type RenderFormPanelOptions,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 普通表单优先使用这两个组件。只有确实需要自定义列轨道、跨行、行级错误反馈或 Enter 导航时，才使用高级 [EntryGrid](../data/entry-grid.md)。
@@ -27,7 +27,7 @@ import {
 ## 最小示例：手动状态，自动布局
 
 ```ts
-import { RenderFormField, RenderFormPanel, RenderTextBox } from 'ds-ui'
+import { RenderFormField, RenderFormPanel, RenderTextBox } from 'directsurface'
 
 const draft = {
   name: '',

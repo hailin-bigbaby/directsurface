@@ -15,7 +15,7 @@ import {
   RenderWindow,
   RenderWrapPanel,
   type RenderBox,
-} from 'ds-ui'
+} from 'directsurface'
 
 interface WorkItem extends Record<string, string | number> {
   id: string
@@ -141,7 +141,7 @@ export function createCanvasWorkspacePage(hostWindow: RenderWindow): RenderBox {
       ], 14),
     }),
     workspace,
-    new RenderText('All records are generated locally. This page demonstrates public ds-ui APIs.', { role: 'secondary' }),
+    new RenderText('All records are generated locally. This page demonstrates public directsurface APIs.', { role: 'secondary' }),
   ], 16)
   page.padding = 24
   return page

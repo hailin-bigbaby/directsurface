@@ -1,6 +1,6 @@
 # Component catalog
 
-These are the `Render*` values exported from the `ds-ui` package entry. The list includes base classes and developer tools; it is not a count of independent controls. Import from `ds-ui` rather than a source or generated declaration path. Detailed usage pages are listed in the [component guides](components/README.md).
+These are the `Render*` values exported from the `directsurface` package entry. The list includes base classes and developer tools; it is not a count of independent controls. Import from `directsurface` rather than a source or generated declaration path. Detailed usage pages are listed in the [component guides](components/README.md).
 
 ## Foundations and layouts
 

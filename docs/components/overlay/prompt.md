@@ -13,7 +13,7 @@ Prompt 不是通用表单容器：当前只支持一个单行输入框，没有�
 import {
   AppOverlayService,
   RenderPromptModal,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 | API | 类型 | 用途 |

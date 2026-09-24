@@ -35,7 +35,7 @@ import {
   type LookupEditQueryContext,
   type LookupEditQueryProcessor,
   type LookupEditQueryResult,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 `RenderLookupEdit` 的构造参数是公开 options 对象，但当前没有单独导出的 LookupEdit options 类型。业务代码直接按本文参数表传入对象。
@@ -58,7 +58,7 @@ import {
 ## 最小示例
 
 ```ts
-import { RenderLookupEdit, type LookupEditColumn } from 'ds-ui'
+import { RenderLookupEdit, type LookupEditColumn } from 'directsurface'
 
 interface CategoryLookupRow {
   code: string

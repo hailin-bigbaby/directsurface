@@ -30,7 +30,7 @@ import {
   type CalendarTimePrecision,
   type FormFieldStatus,
   type ISODate,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 `RenderDatePicker` 的构造参数是公开 options 对象，但当前没有单独导出的 DatePicker options 类型。业务代码直接按本文参数表传入对象。
@@ -53,7 +53,7 @@ import {
 ## 最小示例
 
 ```ts
-import { RenderDatePicker, type ISODate } from 'ds-ui'
+import { RenderDatePicker, type ISODate } from 'directsurface'
 
 const visitDateState: { visitDate: ISODate } = {
   visitDate: '',
@@ -72,7 +72,7 @@ const visitDatePicker = new RenderDatePicker({
 ## 日期时间示例
 
 ```ts
-import { RenderDatePicker, type ISODate } from 'ds-ui'
+import { RenderDatePicker, type ISODate } from 'directsurface'
 
 const visitDateTimeState: { visitDateTime: ISODate } = {
   visitDateTime: '2026-05-14T09:30:00',
@@ -410,7 +410,7 @@ standaloneDatePopup.open({
 纯日期范围直接使用 `RenderDateRangeEdit`：
 
 ```ts
-import { RenderDateRangeEdit } from 'ds-ui'
+import { RenderDateRangeEdit } from 'directsurface'
 
 const admissionRange = new RenderDateRangeEdit({
   value: {

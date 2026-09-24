@@ -1,6 +1,6 @@
 # Contributing to DirectSurface
 
-Thank you for helping improve the public `ds-ui` framework.
+Thank you for helping improve the public `directsurface` framework.
 
 ## Set up
 
@@ -18,7 +18,7 @@ npm run verify:consumer
 ## Make a change
 
 - Keep reusable rendering, layout, interaction, and control behavior in the corresponding `src` area.
-- Import the library from `ds-ui` in examples. Update `src/index.ts` intentionally when changing the public API.
+- Import the library from `directsurface` in examples. Update `src/index.ts` intentionally when changing the public API.
 - Put focused behavioral tests beside the changed source file as `*.test.ts`.
 - Update the relevant documentation and the [component catalog](docs/components.md) when changing a public control.
 - Edit `scripts/icon_manifest.json` and run `npm run generate:icons` when changing built-in icons. Do not edit the generated catalog by hand.

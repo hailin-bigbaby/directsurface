@@ -3,6 +3,7 @@ import { dirname, join, resolve } from 'node:path'
 import ts from 'typescript'
 
 const root = process.cwd()
+const packageName = JSON.parse(readFileSync('package.json', 'utf8')).name
 function markdownFiles(directory) {
   const result = []
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -47,7 +48,9 @@ for (const path of documentation) {
     const snippet = ts.createSourceFile(path, code, ts.ScriptTarget.Latest, true)
     if (snippet.parseDiagnostics.length) throw new Error(`Invalid TypeScript snippet in ${path}: ${snippet.parseDiagnostics[0].messageText}`)
     for (const statement of snippet.statements) {
-      if (!ts.isImportDeclaration(statement) || statement.moduleSpecifier.text !== 'ds-ui') continue
+      if (!ts.isImportDeclaration(statement)) continue
+      if (statement.moduleSpecifier.text === 'ds-ui') throw new Error(`Stale ds-ui import in ${path}`)
+      if (statement.moduleSpecifier.text !== packageName) continue
       const bindings = statement.importClause?.namedBindings
       if (!bindings || !ts.isNamedImports(bindings)) continue
       for (const element of bindings.elements) {

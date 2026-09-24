@@ -26,7 +26,7 @@ import {
   loadDirectSurfaceFonts,
   type AppHost,
   type RenderBox,
-} from 'ds-ui'
+} from 'directsurface'
 import { createWorkbenchPage } from './workbench_page'
 import { createCanvasWorkspacePage } from './canvas_workspace_page'
 import { WorkbenchStore } from './workbench_model'

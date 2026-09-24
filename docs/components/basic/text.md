@@ -22,7 +22,7 @@ import {
   type RenderTextRole,
   type RenderTextSize,
   type RenderTextWeight,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 | API | 类型 | 用途 |

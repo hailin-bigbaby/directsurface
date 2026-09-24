@@ -4,7 +4,7 @@
 
 Initial public release of the reusable DirectSurface Canvas GUI framework.
 
-- Public ESM `ds-ui` package with TypeScript declarations, MIT license, and third-party notices.
+- Public ESM `directsurface` package with TypeScript declarations, MIT license, and third-party notices.
 - Rendering runtime, responsive layouts, themes, forms, data controls, charts, overlays, and dockable workspaces.
 - Standalone project-delivery and Canvas-workspace demos, including a 10,000-row local grid example.
 - Component guides, package checks, external-consumer validation, browser regression, CI, and GitHub Pages demo.

@@ -38,7 +38,7 @@ import {
   type TreeGridOptions,
   type TreeGridSelectionMode,
   type TreeGridSelectionState,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 | API | 类型 | 用途 |
@@ -59,7 +59,7 @@ import {
 ## 最小示例
 
 ```ts
-import { RenderTreeGrid, type GridColumnDef, type TreeGridNode } from 'ds-ui'
+import { RenderTreeGrid, type GridColumnDef, type TreeGridNode } from 'directsurface'
 
 interface TemplateRow {
   name: string

@@ -39,7 +39,7 @@ import {
   type DropTreeEditQueryTextBuilder,
   type FormFieldStatus,
   type TreeNode,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 `RenderDropTreeEdit` 的构造参数是公开 options 对象，但当前没有单独导出的 DropTreeEdit options 类型。业务代码直接按本文参数表传入对象。
@@ -62,7 +62,7 @@ import {
 ## 最小示例
 
 ```ts
-import { RenderDropTreeEdit, type TreeNode } from 'ds-ui'
+import { RenderDropTreeEdit, type TreeNode } from 'directsurface'
 
 const departmentRoots: TreeNode<{ py?: string }>[] = [
   {

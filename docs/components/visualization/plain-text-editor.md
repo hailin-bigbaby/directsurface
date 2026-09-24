@@ -49,7 +49,7 @@ import {
   type TextRange,
   type TextToken,
   type TextTokenizer,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 | API | 类型 | 用途 |
@@ -68,10 +68,10 @@ import {
 ## 最小示例
 
 ```ts
-import { RenderPlainTextEditor } from 'ds-ui'
+import { RenderPlainTextEditor } from 'directsurface'
 
 const jsonEditor = new RenderPlainTextEditor({
-  value: '{\n  "name": "ds-ui"\n}',
+  value: '{\n  "name": "directsurface"\n}',
   language: 'json',
   showLineNumbers: true,
   folding: true,
@@ -91,7 +91,7 @@ const jsonEditor = new RenderPlainTextEditor({
 import {
   PlainTextEditorController,
   RenderPlainTextEditor,
-} from 'ds-ui'
+} from 'directsurface'
 
 const logController = new PlainTextEditorController({
   value: 'INFO service started',
@@ -326,7 +326,7 @@ logEditor.goToLine(1)
 ## 搜索示例
 
 ```ts
-import { PlainTextEditorController, RenderPlainTextEditor } from 'ds-ui'
+import { PlainTextEditorController, RenderPlainTextEditor } from 'directsurface'
 
 const searchController = new PlainTextEditorController({
   value: 'alpha\nbeta\nalpha',
@@ -366,7 +366,7 @@ console.log(firstMatch?.start.line, secondMatch?.start.line)
 import {
   PlainTextEditorController,
   type TextTokenizer,
-} from 'ds-ui'
+} from 'directsurface'
 
 const todoTokenizer: TextTokenizer = {
   languageId: 'todo',

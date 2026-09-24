@@ -8,7 +8,7 @@ import {
   RenderDataGrid,
   RenderStackPanel,
   type GridColumnDef,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 所有继承 `RenderBox` 的可布局组件都直接拥有尺寸、外边距和槽位对齐能力。业务代码不再需要为了 size、constraints、margin、alignment 或 center 额外包裹单子节点容器。

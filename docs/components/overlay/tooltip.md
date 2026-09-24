@@ -16,7 +16,7 @@ import {
   type AnchoredTooltipOptions,
   type PopupAnchorTarget,
   type TooltipContent,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 | API | 用途 |

@@ -12,7 +12,7 @@
 ## 基本使用
 
 ```ts
-import { RenderDateRangeEdit } from 'ds-ui'
+import { RenderDateRangeEdit } from 'directsurface'
 
 const range = new RenderDateRangeEdit({
   value: {

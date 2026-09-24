@@ -31,7 +31,7 @@ import {
   type FormFieldStatus,
   type MultiSelectDropdownDisplayMode,
   type RenderMultiSelectDropdownOptions,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 `RenderMultiSelectDropdownOptions` 是公开构造参数类型，并继承通用的 `RenderBoxOptions` 布局属性。`MultiSelectDropdownDisplayMode` 用于在标准 chip 模式和摘要模式之间切换。
@@ -53,7 +53,7 @@ import {
 ## 最小示例
 
 ```ts
-import { RenderMultiSelectDropdown, type DropdownOption } from 'ds-ui'
+import { RenderMultiSelectDropdown, type DropdownOption } from 'directsurface'
 
 const tagOptions: DropdownOption[] = [
   { value: 'critical', label: '危急' },

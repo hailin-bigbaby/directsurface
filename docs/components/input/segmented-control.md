@@ -13,7 +13,7 @@
 import {
   RenderSegmentedControl,
   type SegmentedControlOption,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 | API | 类型 | 用途 |
@@ -44,7 +44,7 @@ import {
 ## 最小示例
 
 ```ts
-import { RenderSegmentedControl, type SegmentedControlOption } from 'ds-ui'
+import { RenderSegmentedControl, type SegmentedControlOption } from 'directsurface'
 
 const densityOptions: SegmentedControlOption[] = [
   { value: 'compact', label: '紧凑' },

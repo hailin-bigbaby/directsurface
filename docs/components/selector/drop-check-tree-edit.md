@@ -43,7 +43,7 @@ import {
   type DropCheckTreeEditSummaryContext,
   type FormFieldStatus,
   type TreeNode,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 `RenderDropCheckTreeEdit` 的构造参数是公开 options 对象，但当前没有单独导出的 DropCheckTreeEdit options 类型。业务代码直接按本文参数表传入对象。
@@ -67,7 +67,7 @@ import {
 ## 最小示例
 
 ```ts
-import { RenderDropCheckTreeEdit, type TreeNode } from 'ds-ui'
+import { RenderDropCheckTreeEdit, type TreeNode } from 'directsurface'
 
 const departmentCheckRoots: TreeNode[] = [
   {

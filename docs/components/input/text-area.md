@@ -20,7 +20,7 @@ TextArea 适合备注、批注、说明、短文档片段等中等长度文本�
 导入：
 
 ```ts
-import { RenderTextArea, type FormFieldStatus } from 'ds-ui'
+import { RenderTextArea, type FormFieldStatus } from 'directsurface'
 ```
 
 `RenderTextArea` 的构造参数是公开 options 对象，但当前没有单独导出的 TextArea options 类型。业务代码直接按本文参数表传入对象。
@@ -43,7 +43,7 @@ import { RenderTextArea, type FormFieldStatus } from 'ds-ui'
 ## 最小示例
 
 ```ts
-import { RenderTextArea } from 'ds-ui'
+import { RenderTextArea } from 'directsurface'
 
 const noteState = {
   note: '',

@@ -21,7 +21,7 @@ import {
   type ChartSeries,
   type DonutChartSegment,
   type FramePerformanceTimelineSample,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 | API | 类型 | 用途 |

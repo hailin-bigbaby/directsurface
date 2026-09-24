@@ -1,13 +1,13 @@
 # Common controls
 
-These examples use only the public `ds-ui` package entry. All controls may be composed inside a layout panel such as `RenderStackPanel`.
+These examples use only the public `directsurface` package entry. All controls may be composed inside a layout panel such as `RenderStackPanel`.
 
 ## Text and buttons
 
 `RenderText` displays content. Updating its `text` property schedules layout when the text changes. `RenderButton` accepts a label, an action, and an optional visual variant:
 
 ```ts
-import { RenderButton, RenderText } from 'ds-ui'
+import { RenderButton, RenderText } from 'directsurface'
 
 const status = new RenderText('Ready', { role: 'secondary' })
 const button = new RenderButton({
@@ -24,7 +24,7 @@ Set a button's `disabled` state when an action is unavailable. Use `loading` whi
 `RenderTextBox` exposes a value and reports edits through `onChange`. The same input family also provides `RenderPasswordField` and `RenderSearchBox`:
 
 ```ts
-import { RenderText, RenderTextBox } from 'ds-ui'
+import { RenderText, RenderTextBox } from 'directsurface'
 
 const greeting = new RenderText('Hello!')
 const name = new RenderTextBox({
@@ -41,7 +41,7 @@ The [component showcase](../examples/basic-app/src/main.ts) uses this pattern an
 `RenderDataGrid` displays structured rows and columns. Give each column a stable key and use `rowKey` when replacing row objects should preserve row identity:
 
 ```ts
-import { RenderDataGrid, type GridColumnDef } from 'ds-ui'
+import { RenderDataGrid, type GridColumnDef } from 'directsurface'
 
 interface ProductRow {
   id: string

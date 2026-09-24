@@ -17,7 +17,7 @@ import {
   type PropertyGridField,
   type PropertyGridRow,
   type PropertyGridSchema,
-} from 'ds-ui'
+} from 'directsurface'
 ```
 
 | API | 类型 | 用途 |
