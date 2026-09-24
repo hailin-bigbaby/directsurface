@@ -30,4 +30,4 @@ These are the `Render*` values exported from the `ds-ui` package entry. The list
 
 `RenderDevToolsWindow`, `RenderLayoutInspectorPanel`, `RenderLayoutInspectorView`, `RenderRuntimeDiagnosticsView`, `RenderRuntimeDiagnosticsPanel`, `RenderRuntimeDiagnosticsSnapshotViewer`.
 
-See [getting started](getting-started.md) and the [basic app](../examples/basic-app/src/main.ts) for small working examples. Use your editor's TypeScript completion or the built declarations for full options, events, and related controller types.
+See [getting started](getting-started.md) and the [component showcase](../examples/basic-app/src/main.ts) for small working examples. Use your editor's TypeScript completion or the built declarations for full options, events, and related controller types.

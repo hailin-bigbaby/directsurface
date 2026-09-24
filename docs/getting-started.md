@@ -13,7 +13,7 @@ The command packs `ds-ui`, installs that tarball into the [basic app](../example
 
 ## Use a built package in another application
 
-Build a tarball with `npm pack`, then install the resulting `ds-ui-<version>.tgz` in a Vite + TypeScript application. The package exposes one import path: `ds-ui`.
+The package is not on the npm registry yet. Run `npm ci` and `npm pack` in this repository, then install the resulting tarball in a Vite + TypeScript application with `npm install /absolute/path/to/directsurface/ds-ui-0.1.0.tgz`. The package exposes one import path: `ds-ui`.
 
 Create a full-size Canvas before mounting:
 

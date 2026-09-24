@@ -34,7 +34,7 @@ const name = new RenderTextBox({
 })
 ```
 
-The [basic app](../examples/basic-app/src/main.ts) uses this pattern and shows how to dispose the host. Use `RenderTextArea` for multiline input.
+The [component showcase](../examples/basic-app/src/main.ts) uses this pattern and shows how to dispose the host. Use `RenderTextArea` for multiline input.
 
 ## Data grid
 
