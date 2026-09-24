@@ -12,6 +12,7 @@ import {
   RenderPage,
   RenderParagraph,
   RenderProgressBar,
+  RenderPopover,
   RenderScrollViewer,
   RenderSegmentedControl,
   RenderSlider,
@@ -26,9 +27,8 @@ import {
   type AppHost,
   type RenderBox,
 } from 'ds-ui'
-
-const repositoryUrl = 'https://github.com/hailin-bigbaby/directsurface'
-const guidesUrl = `${repositoryUrl}/tree/main/docs/components`
+import { createWorkbenchPage } from './workbench_page'
+import { WorkbenchStore } from './workbench_model'
 
 function column(children: RenderBox[], spacing = 12): RenderStackPanel {
   const panel = new RenderStackPanel({ orientation: 'vertical', spacing, crossAxisAlignment: 'stretch' })
@@ -47,89 +47,6 @@ function page(children: RenderBox[]): RenderStackPanel {
   return content
 }
 
-function featureCard(title: string, description: string, detail: string): RenderCard {
-  return new RenderCard({
-    title,
-    description,
-    child: new RenderText(detail, { role: 'accent', size: 'large', weight: 'semibold' }),
-  })
-}
-
-function overviewPage(): RenderStackPanel {
-  const links = new RenderWrapPanel({ spacing: 8, runSpacing: 8 })
-  links.addChild(new RenderButton({
-    label: 'View source on GitHub',
-    variant: 'primary',
-    onClick: () => window.open(repositoryUrl, '_blank', 'noopener,noreferrer'),
-  }))
-  links.addChild(new RenderButton({
-    label: 'Browse component guides',
-    onClick: () => window.open(guidesUrl, '_blank', 'noopener,noreferrer'),
-  }))
-
-  const highlights = new RenderAdaptiveGridPanel({
-    minColumnWidth: 190,
-    maxColumns: 3,
-    columnGap: 12,
-    rowGap: 12,
-  })
-  highlights.addChild(featureCard('Layout', 'Compose responsive surfaces', 'Flex, grid & scroll'))
-  highlights.addChild(featureCard('Controls', 'Build interactive workflows', 'Input, select & overlay'))
-  highlights.addChild(featureCard('Data', 'Explore dense information', 'Grid, tree & charts'))
-
-  const chart = new RenderLineChart({
-    series: [
-      { name: 'Visits', data: [
-        { x: 'Mon', y: 32 }, { x: 'Tue', y: 45 }, { x: 'Wed', y: 39 },
-        { x: 'Thu', y: 58 }, { x: 'Fri', y: 54 }, { x: 'Sat', y: 72 }, { x: 'Sun', y: 68 },
-      ] },
-      { name: 'Signups', data: [
-        { x: 'Mon', y: 18 }, { x: 'Tue', y: 25 }, { x: 'Wed', y: 22 },
-        { x: 'Thu', y: 35 }, { x: 'Fri', y: 31 }, { x: 'Sat', y: 43 }, { x: 'Sun', y: 40 },
-      ] },
-    ],
-    xAxisType: 'category',
-    area: true,
-    legendMode: 'toggle',
-    height: 250,
-  })
-  const sample = new RenderAdaptiveGridPanel({
-    minColumnWidth: 320,
-    maxColumns: 2,
-    columnGap: 12,
-    rowGap: 12,
-  })
-  sample.addChild(new RenderCard({
-    title: 'Interactive chart',
-    description: 'Hover points and toggle a series in the legend.',
-    child: chart,
-  }))
-  sample.addChild(new RenderCard({
-    title: 'Made for real applications',
-    description: 'A small sample of the public component library.',
-    child: column([
-      new RenderText('Canvas rendering with keyboard and pointer input'),
-      new RenderText('Theme-aware controls and reusable layout primitives'),
-      new RenderText('Data views, charts and developer-facing guides'),
-      new RenderBadge({ value: 'MIT licensed', status: 'success' }),
-    ], 14),
-  }))
-
-  return page([
-    new RenderCard({
-      title: 'Build interfaces directly on Canvas',
-      description: 'DirectSurface is a TypeScript GUI framework and component library.',
-      child: column([
-        new RenderParagraph('This live app uses the packed public ds-ui package. Open the tabs to try controls, switch themes, sort data and explore charts.'),
-        links,
-      ], 16),
-      style: { padding: 24 },
-    }),
-    highlights,
-    sample,
-  ])
-}
-
 interface ShowcaseState {
   darkTheme: boolean
   name: string
@@ -137,9 +54,10 @@ interface ShowcaseState {
   period: string
   progress: number
   actionCount: number
+  themeSwitch?: RenderSwitch
 }
 
-function controlsPage(state: ShowcaseState, getHost: () => AppHost | undefined): RenderStackPanel {
+function controlsPage(state: ShowcaseState, setTheme: (dark: boolean) => void): RenderStackPanel {
   const greeting = new RenderText(`Hello, ${state.name || 'visitor'}!`, { role: 'accent', size: 'large' })
   const progress = new RenderProgressBar({ value: state.progress / 100 })
   const selection = new RenderText(`Selected: ${state.area}`, { role: 'secondary' })
@@ -155,6 +73,9 @@ function controlsPage(state: ShowcaseState, getHost: () => AppHost | undefined):
     label: 'Reset count',
     onClick: () => { state.actionCount = 0; actionStatus.text = 'Actions run: 0' },
   }))
+
+  const themeSwitch = new RenderSwitch({ label: 'Dark theme', checked: state.darkTheme, onChange: setTheme })
+  state.themeSwitch = themeSwitch
 
   const cards = new RenderAdaptiveGridPanel({
     minColumnWidth: 320,
@@ -199,15 +120,7 @@ function controlsPage(state: ShowcaseState, getHost: () => AppHost | undefined):
     title: 'Feedback & appearance',
     description: 'Try theme, progress and button states.',
     child: column([
-      new RenderSwitch({
-        label: 'Dark theme',
-        checked: state.darkTheme,
-        onChange: checked => {
-          state.darkTheme = checked
-          getHost()?.setTheme(checked ? ImGuiDarkTheme : ImGuiLightTheme)
-          document.body.style.background = checked ? '#171a21' : '#f6f7fb'
-        },
-      }),
+      themeSwitch,
       new RenderSlider({
         label: 'Progress',
         value: state.progress,
@@ -244,7 +157,7 @@ function dataPage(): RenderStackPanel {
     { id: 'p2', name: 'Component library', owner: 'Morgan', status: 'Active', tasks: 42 },
     { id: 'p3', name: 'Documentation', owner: 'Sam', status: 'Review', tasks: 18 },
     { id: 'p4', name: 'Example apps', owner: 'Jamie', status: 'Planned', tasks: 12 },
-    { id: 'p5', name: 'Accessibility', owner: 'Taylor', status: 'Active', tasks: 31 },
+    { id: 'p5', name: 'Performance', owner: 'Taylor', status: 'Active', tasks: 31 },
   ]
   const grid = new RenderDataGrid<ProjectRow>({
     rowKey: 'id',
@@ -287,52 +200,86 @@ function dataPage(): RenderStackPanel {
 
 function createApp(): AppHost {
   let appHost: AppHost | undefined
+  let savedTheme = 'light'
+  try { savedTheme = localStorage.getItem('ds-showcase-theme') ?? 'light' } catch {}
   const state: ShowcaseState = {
-    darkTheme: false,
+    darkTheme: savedTheme === 'dark',
     name: 'visitor',
     area: 'Design',
     period: 'week',
     progress: 56,
     actionCount: 0,
   }
-  const pages = {
-    overview: overviewPage,
-    controls: () => controlsPage(state, () => appHost),
-    data: dataPage,
+  const store = new WorkbenchStore()
+  const themeSelector = new RenderSegmentedControl({
+    options: [{ value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }],
+    value: state.darkTheme ? 'dark' : 'light',
+    onChange: value => setTheme(value === 'dark'),
+  })
+  function setTheme(dark: boolean): void {
+    state.darkTheme = dark
+    try { localStorage.setItem('ds-showcase-theme', dark ? 'dark' : 'light') } catch {}
+    themeSelector.value = dark ? 'dark' : 'light'
+    if (state.themeSwitch) state.themeSwitch.checked = dark
+    appHost?.setTheme(dark ? ImGuiDarkTheme : ImGuiLightTheme)
+    document.body.style.background = dark ? '#171a21' : '#f6f7fb'
   }
-  const viewer = new RenderScrollViewer({ direction: 'vertical', child: pages.overview() })
+
+  const settingsContent = column([
+    new RenderText('Appearance', { role: 'title' }),
+    new RenderText('Theme', { role: 'secondary' }),
+    themeSelector,
+  ], 12)
+  settingsContent.padding = 14
+  const settings = new RenderPopover({ label: 'Settings', content: settingsContent, placement: 'bottom-end', popoverWidth: 260 })
+  const brand = column([
+    new RenderText('DirectSurface  /  ds-ui', { role: 'title', size: 'large', weight: 'bold' }),
+    new RenderText('Project delivery workbench', { role: 'secondary' }),
+  ], 4)
+  const identity = column([
+    new RenderText('Alex Morgan', { weight: 'semibold' }),
+    new RenderText('Demo user · Project lead', { role: 'secondary', size: 'small' }),
+  ], 2)
+  const accountRow = new RenderStackPanel({ orientation: 'horizontal', spacing: 12, mainAxisAlignment: 'end', crossAxisAlignment: 'center' })
+  accountRow.addChild(new RenderBadge({ value: 'AM', status: 'primary', appearance: 'filled' }))
+  accountRow.addChild(identity)
+  accountRow.addChild(settings)
+  const header = new RenderAdaptiveGridPanel({ minColumnWidth: 280, maxColumns: 2, columnGap: 12, rowGap: 10, padding: { left: 24, right: 24, top: 16, bottom: 14 } })
+  header.addChild(brand)
+  header.addChild(accountRow)
+
+  let activePage = createWorkbenchPage(store, () => appHost)
+  const viewer = new RenderScrollViewer({ direction: 'vertical', child: activePage.root })
   const tabs = new RenderTabs({
     tabs: [
-      { key: 'overview', label: 'Overview' },
+      { key: 'workbench', label: 'Workbench' },
       { key: 'controls', label: 'Controls' },
       { key: 'data', label: 'Data & charts' },
     ],
-    activeKey: 'overview',
+    activeKey: 'workbench',
     onTabChange: key => {
-      const create = pages[key as keyof typeof pages]
-      if (create) {
-        const previous = viewer.child
-        viewer.setChild(create())
-        previous?.dispose()
-      }
+      activePage.dispose()
+      state.themeSwitch = undefined
+      const previous = viewer.child
+      if (key === 'workbench') activePage = createWorkbenchPage(store, () => appHost)
+      else if (key === 'controls') activePage = { root: controlsPage(state, setTheme), dispose: () => {} }
+      else activePage = { root: dataPage(), dispose: () => {} }
+      viewer.setChild(activePage.root)
+      previous?.dispose()
     },
   })
   tabs.margin = { left: 24, right: 24 }
 
-  const brand = column([
-    new RenderText('DirectSurface  /  ds-ui', { role: 'title', size: 'large', weight: 'bold' }),
-    new RenderText('Interactive component showcase', { role: 'secondary' }),
-  ], 4)
-  brand.padding = { left: 24, right: 24, top: 18, bottom: 12 }
-
   const root = new RenderStackPanel({ orientation: 'vertical', spacing: 0, crossAxisAlignment: 'stretch' })
-  root.addChild(brand)
+  root.addChild(header)
   root.addChild(tabs)
   root.addChild(viewer, 1)
 
-  const mainWindow = new RenderWindow({ title: 'DirectSurface showcase', chrome: 'none' })
+  const mainWindow = new RenderWindow({ title: 'DirectSurface project delivery workbench', chrome: 'none' })
   mainWindow.setChildren([new RenderPage({ child: root })])
-  appHost = Application.mount('#app').run(mainWindow, { theme: ImGuiLightTheme })
+  appHost = Application.mount('#app').run(mainWindow, { theme: state.darkTheme ? ImGuiDarkTheme : ImGuiLightTheme })
+  setTheme(state.darkTheme)
+  window.addEventListener('pagehide', () => activePage.dispose(), { once: true })
   return appHost
 }
 

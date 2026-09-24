@@ -1,6 +1,6 @@
 # Component showcase
 
-This interactive showcase imports only the public `ds-ui` package entry and uses the package tarball produced from this repository. It demonstrates responsive layout, controls, theme switching, charts, and a sortable data grid with sample data.
+This interactive showcase imports only the public `ds-ui` package entry and uses the package tarball produced from this repository. The Workbench tab is a complete sample project delivery application with filters, metrics, charts, task editing, and theme settings. The Controls and Data & charts tabs remain independent component showcases.
 
 From the repository root:
 
@@ -9,7 +9,7 @@ npm ci
 npm run example:dev
 ```
 
-Open the Overview, Controls, and Data & charts tabs to try the Canvas UI. Run `npm run verify:consumer` to typecheck and build the example against the packed library.
+Open the Workbench tab to filter, edit, and create tasks. Changes to sample tasks reset on refresh; the light/dark preference stays on this device. The displayed user is fictional and there is no login or backend. Run `npm run verify:consumer` to typecheck and build the example against the packed library.
 
 ## GitHub Pages
 

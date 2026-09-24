@@ -9,7 +9,7 @@ npm ci
 npm run example:dev
 ```
 
-The command packs `ds-ui`, installs that tarball into the [basic app](../examples/basic-app/README.md), and starts Vite. Open the Controls tab to edit a field, click a button, and switch themes. The Data & charts tab demonstrates a sortable grid. Run `npm run verify:consumer` to typecheck and build the same external consumer.
+The command packs `ds-ui`, installs that tarball into the [basic app](../examples/basic-app/README.md), and starts Vite. The Workbench tab demonstrates filtering, task editing, charts, and theme settings. The Controls and Data & charts tabs remain available. Run `npm run verify:consumer` to typecheck and build the same external consumer.
 
 ## Use a built package in another application
 
@@ -49,3 +49,7 @@ const host = Application.mount('#app').run(window, { theme: ImGuiLightTheme })
 ```
 
 `Application.mount()` requires the matching Canvas to be in the DOM. Give it non-zero CSS dimensions before starting the app. See [runtime and lifecycle](lifecycle.md) for cleanup and remounting.
+
+## Current accessibility boundary
+
+This Canvas UI release does not provide accessibility support for assistive technologies. Canvas controls are not exposed as semantic DOM controls.

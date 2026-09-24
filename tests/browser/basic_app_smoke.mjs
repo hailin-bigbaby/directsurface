@@ -15,8 +15,22 @@ const server = spawn(npm, ['run', 'preview', '--', '--host', '127.0.0.1', '--por
   detached: process.platform !== 'win32',
 })
 let serverOutput = ''
-for (const stream of [server.stdout, server.stderr]) {
-  stream.on('data', chunk => { serverOutput += chunk.toString() })
+for (const stream of [server.stdout, server.stderr]) stream.on('data', chunk => { serverOutput += chunk.toString() })
+
+const geometry = {
+  projectAtlas: [94, 274],
+  newTask: [274, 247],
+  drawerTitle: [984, 138],
+  drawerCreate: [925, 451],
+  firstTask: [432, 639],
+  drawerStatus: [1100, 318],
+  statusDone: [919, 405],
+  drawerSave: [931, 451],
+  settings: [1210, 36],
+  darkTheme: [1181, 150],
+  controlsTab: [139, 91],
+  workbenchTab: [65, 91],
+  dataTab: [218, 91],
 }
 
 function canvasHash(area) {
@@ -29,70 +43,113 @@ function canvasHash(area) {
   return hash >>> 0
 }
 
-async function expectCanvasChange(page, area, action) {
-  const before = await page.evaluate(canvasHash, area)
-  await action()
-  await page.mouse.move(1090, 700)
+async function hash(page, area) { return page.evaluate(canvasHash, area) }
+
+async function expectCanvasChange(page, area, before) {
   await page.waitForFunction(({ area, before }) => {
     const canvas = document.querySelector('canvas#app')
     if (!(canvas instanceof HTMLCanvasElement)) return false
     const pixels = canvas.getContext('2d')?.getImageData(area.x, area.y, area.width, area.height).data
     if (!pixels) return false
-    let hash = 2166136261
-    for (const byte of pixels) hash = Math.imul(hash ^ byte, 16777619)
-    return (hash >>> 0) !== before
+    let next = 2166136261
+    for (const byte of pixels) next = Math.imul(next ^ byte, 16777619)
+    return (next >>> 0) !== before
   }, { area, before })
+}
+
+async function backgroundRed(page) {
+  return page.evaluate(() => document.querySelector('canvas#app')?.getContext('2d')?.getImageData(500, 20, 1, 1).data[0])
 }
 
 let browser
 try {
   let ready = false
   for (let attempt = 0; attempt < 100; attempt++) {
-    if (server.exitCode !== null) throw new Error(`Example server exited early: ${serverOutput}`)
-    try {
-      const response = await fetch(url)
-      if (response.ok) { ready = true; break }
-    } catch {}
+    if (server.exitCode !== null) throw new Error(`Showcase server exited early: ${serverOutput}`)
+    try { if ((await fetch(url)).ok) { ready = true; break } } catch {}
     await sleep(100)
   }
-  if (!ready) throw new Error(`Example server did not start: ${serverOutput}`)
+  if (!ready) throw new Error(`Showcase server did not start: ${serverOutput}`)
 
   browser = await chromium.launch({ headless: true })
-  const page = await browser.newPage({ viewport: { width: 1100, height: 720 }, deviceScaleFactor: 1 })
+  const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 })
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
   await page.goto(url, { waitUntil: 'networkidle' })
-  await page.waitForFunction(() => {
-    const canvas = document.querySelector('canvas#app')
-    if (!(canvas instanceof HTMLCanvasElement) || canvas.width < 100) return false
-    const pixels = canvas.getContext('2d')?.getImageData(20, 20, 200, 55).data
-    return pixels && Array.from(pixels).some((value, index) => index % 4 !== 3 && value < 150)
-  })
+  await page.waitForFunction(() => document.querySelector('canvas#app')?.width >= 1280)
 
-  await expectCanvasChange(page, { x: 25, y: 130, width: 430, height: 250 }, async () => {
-    await page.mouse.click(125, 91) // Controls tab
-  })
-  await expectCanvasChange(page, { x: 550, y: 430, width: 180, height: 35 }, async () => {
-    await page.mouse.click(585, 408) // Run action
-  })
-  await expectCanvasChange(page, { x: 32, y: 337, width: 240, height: 30 }, async () => {
-    await page.mouse.click(145, 315) // Name input
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A')
-    await page.keyboard.type('Ada')
-  })
+  const totalArea = { x: 215, y: 421, width: 72, height: 44 }
+  const initialTotal = await hash(page, totalArea)
+  await page.mouse.click(...geometry.projectAtlas)
+  await expectCanvasChange(page, totalArea, initialTotal)
 
+  const filteredTotal = await hash(page, totalArea)
+  await page.mouse.click(...geometry.newTask)
+  await page.waitForTimeout(350)
+  await page.mouse.click(...geometry.drawerTitle)
+  await page.keyboard.type('Launch readiness review')
+  await page.mouse.click(...geometry.drawerCreate)
+  await page.waitForTimeout(350)
+  await expectCanvasChange(page, totalArea, filteredTotal)
+  await page.waitForTimeout(350)
+
+  const doneArea = { x: 475, y: 421, width: 65, height: 46 }
+  const beforeDone = await hash(page, doneArea)
+  await page.mouse.move(1170, 620)
+  for (let index = 0; index < 10; index++) await page.mouse.wheel(0, 500)
+  await page.mouse.click(...geometry.firstTask)
+  await page.waitForTimeout(350)
+  await page.mouse.click(...geometry.drawerStatus)
+  await page.mouse.click(...geometry.statusDone)
+  await page.mouse.click(...geometry.drawerSave)
+  await page.waitForTimeout(350)
+  await page.mouse.move(1170, 620)
+  for (let index = 0; index < 10; index++) await page.mouse.wheel(0, -500)
+  await expectCanvasChange(page, doneArea, beforeDone)
+
+  assert.ok((await backgroundRed(page)) > 180, 'light theme expected before switch')
+  await page.waitForTimeout(5500) // Let success toasts clear the settings trigger.
+  await page.mouse.click(...geometry.settings)
+  await page.waitForTimeout(200)
+  await page.mouse.click(...geometry.darkTheme)
+  await page.waitForFunction(() => document.querySelector('canvas#app')?.getContext('2d')?.getImageData(500, 20, 1, 1).data[0] < 80)
+  await page.mouse.click(...geometry.controlsTab)
+  await page.mouse.click(...geometry.dataTab)
+  await page.mouse.click(...geometry.workbenchTab)
+  const beforeReload = await hash(page, totalArea)
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.waitForFunction(() => document.querySelector('canvas#app')?.width >= 1280)
+  await expectCanvasChange(page, totalArea, beforeReload)
+  assert.ok((await backgroundRed(page)) < 80, 'dark theme should persist after reload')
   assert.deepEqual(errors, [])
-  console.log('Showcase browser smoke passed: Canvas rendered, tabs, button and input updated')
+  await page.close()
+
+  for (const width of [768, 390]) {
+    const responsive = await browser.newPage({ viewport: { width, height: 760 }, deviceScaleFactor: 1 })
+    responsive.on('pageerror', error => errors.push(error.message))
+    await responsive.goto(url, { waitUntil: 'networkidle' })
+    await responsive.waitForFunction(() => document.querySelector('canvas#app')?.width >= 300)
+    const responsiveMetric = width === 390
+      ? { x: 82, y: 653, width: 50, height: 42 }
+      : { x: 79, y: 492, width: 50, height: 42 }
+    const beforeCreate = await hash(responsive, responsiveMetric)
+    await responsive.mouse.click(width === 390 ? 126 : 137, width === 390 ? 293 : 245)
+    await responsive.waitForTimeout(350)
+    await responsive.mouse.click(width === 390 ? 170 : 590, 138)
+    await responsive.keyboard.type(`Responsive task ${width}`)
+    await responsive.mouse.click(width === 390 ? 106 : 410, 451)
+    await responsive.waitForTimeout(500)
+    await expectCanvasChange(responsive, responsiveMetric, beforeCreate)
+    await responsive.close()
+  }
+  assert.deepEqual(errors, [])
+  console.log('Workbench browser smoke passed: filters, create, edit, metrics, theme, tabs and responsive drawer')
 } finally {
-  try {
-    await browser?.close()
-  } finally {
+  try { await browser?.close() } finally {
     try {
       if (server.pid && process.platform !== 'win32') process.kill(-server.pid, 'SIGTERM')
       else server.kill('SIGTERM')
-    } catch (error) {
-      if (error.code !== 'ESRCH') throw error
-    }
+    } catch (error) { if (error.code !== 'ESRCH') throw error }
     server.stdout.destroy()
     server.stderr.destroy()
   }

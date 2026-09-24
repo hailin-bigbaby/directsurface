@@ -26,10 +26,11 @@
     "verify:package": "node scripts/verify_package.mjs",
     "generate:icons": "node scripts/generate_icon_catalog.mjs",
     "check:icons": "node scripts/generate_icon_catalog.mjs --check",
-    "verify:consumer": "node scripts/setup_example.mjs && npm --prefix examples/basic-app run typecheck && npm --prefix examples/basic-app run build",
+    "verify:consumer": "node scripts/setup_example.mjs && npm run test:example:state && npm --prefix examples/basic-app run typecheck && npm --prefix examples/basic-app run build",
     "example:dev": "node scripts/setup_example.mjs && npm --prefix examples/basic-app run dev",
     "check:docs": "node scripts/check_docs.mjs",
-    "test:browser": "node tests/browser/basic_app_smoke.mjs"
+    "test:browser": "node tests/browser/basic_app_smoke.mjs",
+    "test:example:state": "vitest --run examples/basic-app/src/workbench_model.test.ts"
   },
   "devDependencies": {
     "typescript": "^5.4.0",

@@ -28,6 +28,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run verify:consumer
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
       - run: GITHUB_PAGES=true npm --prefix examples/basic-app run build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
