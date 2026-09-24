@@ -1,6 +1,6 @@
-# Basic app
+# Component showcase
 
-This example is adapted from the original DirectSurface consumer scaffold. It imports only the public `ds-ui` package entry and uses the package tarball produced from this repository.
+This interactive showcase imports only the public `ds-ui` package entry and uses the package tarball produced from this repository. It demonstrates responsive layout, controls, theme switching, charts, and a sortable data grid with sample data.
 
 From the repository root:
 
@@ -9,7 +9,7 @@ npm ci
 npm run example:dev
 ```
 
-Edit the name field or click the button to see the Canvas UI update. Run `npm run verify:consumer` to typecheck and build the example against the packed library.
+Open the Overview, Controls, and Data & charts tabs to try the Canvas UI. Run `npm run verify:consumer` to typecheck and build the example against the packed library.
 
 ## GitHub Pages
 
