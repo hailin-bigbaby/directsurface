@@ -29,7 +29,7 @@ const host = Application.mount('#app').run(window, { theme: ImGuiLightTheme })
 
 ## Run the example
 
-The [basic app](https://github.com/hailin-bigbaby/directsurface/blob/main/examples/basic-app/README.md) uses a locally packed `ds-ui` release, as an external consumer would:
+Try the [live basic app](https://hailin-bigbaby.github.io/directsurface/). Its [source and setup guide](https://github.com/hailin-bigbaby/directsurface/blob/main/examples/basic-app/README.md) use a locally packed `ds-ui` release, as an external consumer would:
 
 ```sh
 npm ci

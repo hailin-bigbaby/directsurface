@@ -13,4 +13,6 @@ Edit the name field or click the button to see the Canvas UI update. Run `npm ru
 
 ## GitHub Pages
 
+Live demo: https://hailin-bigbaby.github.io/directsurface/
+
 The repository's deployment workflow builds this example with the `/directsurface/` asset base and publishes only `dist/` to GitHub Pages. Local development keeps the `/` base.
