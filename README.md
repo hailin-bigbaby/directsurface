@@ -1,10 +1,53 @@
 # DirectSurface
 
-DirectSurface (`ds-ui`) is a TypeScript Canvas GUI framework and component library. This repository contains the reusable rendering runtime, layout system, input handling, themes, and general-purpose widgets.
+**Desktop-grade browser workspaces, drawn on Canvas.** DirectSurface (`ds-ui`) is an ESM TypeScript GUI framework for data-heavy applications with dockable windows, virtual data grids, charts, forms, overlays, and themes.
 
-**Start here:** [Try the live component showcase](https://hailin-bigbaby.github.io/directsurface/) · [Read the getting-started guide](docs/getting-started.md) · [Browse component guides](docs/components/README.md)
+[Live demo](https://hailin-bigbaby.github.io/directsurface/) · [Getting started](docs/getting-started.md) · [Component guides](docs/components/README.md) · [中文说明](https://github.com/hailin-bigbaby/directsurface/blob/main/README.zh-CN.md)
 
-## Run the showcase locally
+![A dockable DirectSurface workspace with a large data grid and trend chart](https://raw.githubusercontent.com/hailin-bigbaby/directsurface/main/docs/assets/canvas-workspace.png)
+
+## Why DirectSurface
+
+The [Canvas workspace demo](https://hailin-bigbaby.github.io/directsurface/) lets you filter 10,000 locally generated rows, rearrange docked document panels, float and dock an inspector, and switch themes. The Workbench tab shows a complete project-delivery flow with linked filters, metrics, charts, task editing, and date selection. Both demos use the public `ds-ui` package entry and fictional data.
+
+This release does not provide accessibility support for assistive technologies; Canvas controls are not exposed as semantic DOM controls. Task data in the demo resets on refresh, and the displayed user is fictional.
+
+## Install
+
+```sh
+npm install ds-ui
+```
+
+DirectSurface is ESM-only. Add a full-size Canvas to your Vite + TypeScript app:
+
+```html
+<canvas id="app"></canvas>
+<style>
+  html, body, #app { width: 100%; height: 100%; margin: 0; }
+  canvas { display: block; }
+</style>
+```
+
+Then mount a window and release its host when your page is removed:
+
+```ts
+import {
+  Application, ImGuiLightTheme, RenderPage,
+  RenderStackPanel, RenderText, RenderWindow, loadDirectSurfaceFonts,
+} from 'ds-ui'
+
+await loadDirectSurfaceFonts()
+const content = new RenderStackPanel({ padding: 24, spacing: 12 })
+content.addChild(new RenderText('Hello, DirectSurface!', { role: 'title' }))
+const mainWindow = new RenderWindow({ title: 'Hello', chrome: 'none' })
+mainWindow.setChildren([new RenderPage({ child: content })])
+const host = Application.mount('#app').run(mainWindow, { theme: ImGuiLightTheme })
+window.addEventListener('pagehide', () => host.dispose(), { once: true })
+```
+
+The [getting-started guide](docs/getting-started.md) covers mounting and cleanup. The [component catalog](docs/components.md) lists public exports; the [detailed guides](docs/components/README.md) describe their use.
+
+## Run the demos from source
 
 ```sh
 git clone https://github.com/hailin-bigbaby/directsurface.git
@@ -13,35 +56,9 @@ npm ci
 npm run example:dev
 ```
 
-The showcase uses a locally packed `ds-ui` package, as an external application would. Open the Overview, Controls, and Data & charts tabs to explore it. Its [source and setup guide](examples/basic-app/README.md) explains the example; `npm run verify:consumer` checks that it builds against the packed library.
+`example:dev` packs the library and installs the tarball into the standalone consumer app. The public [example source](examples/basic-app/) contains the Workbench, Controls, Data & charts, and Canvas workspace tabs.
 
-## Use ds-ui in your own application
-
-The first npm registry release has not been published yet. Build a tarball from this repository:
-
-```sh
-npm ci
-npm pack
-```
-
-Then, in your own Vite + TypeScript application, install the resulting `ds-ui-0.1.0.tgz` file:
-
-```sh
-npm install /absolute/path/to/directsurface/ds-ui-0.1.0.tgz
-```
-
-Create a Canvas element and import from the package entry. The [getting-started guide](docs/getting-started.md) has a complete mounting example and lifecycle notes.
-
-```ts
-import { Application, ImGuiLightTheme, RenderText, RenderWindow } from 'ds-ui'
-
-const window = new RenderWindow({ title: 'Hello DirectSurface' })
-window.setChildren([new RenderText('Hello, world!')])
-const host = Application.mount('#app').run(window, { theme: ImGuiLightTheme })
-// Call host.dispose() when the application unmounts.
-```
-
-## Develop the framework
+## Develop and contribute
 
 ```sh
 npm ci
@@ -51,10 +68,4 @@ npm run verify:consumer
 npm run test:browser
 ```
 
-See [contributing](CONTRIBUTING.md) for code and documentation changes. The [component catalog](docs/components.md) lists the public exports.
-
-## Regenerate icons
-
-Edit `scripts/icon_manifest.json`, run `npm run generate:icons`, and commit the generated `src/widgets/icon_catalog.generated.ts`. `npm run check:icons` verifies it is current.
-
-Security issues: see the [security policy](SECURITY.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md), the [changelog](CHANGELOG.md), and the [MIT license](LICENSE). Security reports belong in the [security policy](SECURITY.md).

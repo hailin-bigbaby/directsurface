@@ -28,6 +28,7 @@ import {
   type RenderBox,
 } from 'ds-ui'
 import { createWorkbenchPage } from './workbench_page'
+import { createCanvasWorkspacePage } from './canvas_workspace_page'
 import { WorkbenchStore } from './workbench_model'
 
 function column(children: RenderBox[], spacing = 12): RenderStackPanel {
@@ -248,6 +249,7 @@ function createApp(): AppHost {
   header.addChild(brand)
   header.addChild(accountRow)
 
+  const mainWindow = new RenderWindow({ title: 'DirectSurface project delivery workbench', chrome: 'none' })
   let activePage = createWorkbenchPage(store, () => appHost)
   const viewer = new RenderScrollViewer({ direction: 'vertical', child: activePage.root })
   const tabs = new RenderTabs({
@@ -255,6 +257,7 @@ function createApp(): AppHost {
       { key: 'workbench', label: 'Workbench' },
       { key: 'controls', label: 'Controls' },
       { key: 'data', label: 'Data & charts' },
+      { key: 'workspace', label: 'Canvas workspace' },
     ],
     activeKey: 'workbench',
     onTabChange: key => {
@@ -263,7 +266,8 @@ function createApp(): AppHost {
       const previous = viewer.child
       if (key === 'workbench') activePage = createWorkbenchPage(store, () => appHost)
       else if (key === 'controls') activePage = { root: controlsPage(state, setTheme), dispose: () => {} }
-      else activePage = { root: dataPage(), dispose: () => {} }
+      else if (key === 'data') activePage = { root: dataPage(), dispose: () => {} }
+      else activePage = { root: createCanvasWorkspacePage(mainWindow), dispose: () => {} }
       viewer.setChild(activePage.root)
       previous?.dispose()
     },
@@ -275,7 +279,6 @@ function createApp(): AppHost {
   root.addChild(tabs)
   root.addChild(viewer, 1)
 
-  const mainWindow = new RenderWindow({ title: 'DirectSurface project delivery workbench', chrome: 'none' })
   mainWindow.setChildren([new RenderPage({ child: root })])
   appHost = Application.mount('#app').run(mainWindow, { theme: state.darkTheme ? ImGuiDarkTheme : ImGuiLightTheme })
   setTheme(state.darkTheme)

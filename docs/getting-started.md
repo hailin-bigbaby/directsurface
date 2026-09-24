@@ -9,11 +9,11 @@ npm ci
 npm run example:dev
 ```
 
-The command packs `ds-ui`, installs that tarball into the [basic app](../examples/basic-app/README.md), and starts Vite. The Workbench tab demonstrates filtering, task editing, charts, and theme settings. The Controls and Data & charts tabs remain available. Run `npm run verify:consumer` to typecheck and build the same external consumer.
+The command packs `ds-ui`, installs that tarball into the [basic app](../examples/basic-app/README.md), and starts Vite. The Workbench tab demonstrates filtering, task editing, charts, and theme settings. The Controls, Data & charts, and Canvas workspace tabs remain available. Run `npm run verify:consumer` to typecheck and build the same external consumer.
 
 ## Use a built package in another application
 
-The package is not on the npm registry yet. Run `npm ci` and `npm pack` in this repository, then install the resulting tarball in a Vite + TypeScript application with `npm install /absolute/path/to/directsurface/ds-ui-0.1.0.tgz`. The package exposes one import path: `ds-ui`.
+Install the public ESM package in a Vite + TypeScript application with `npm install ds-ui`. The package exposes one import path: `ds-ui`. To test a local source build before publishing, run `npm ci` and `npm pack` in this repository, then install the resulting tarball in your application.
 
 Create a full-size Canvas before mounting:
 

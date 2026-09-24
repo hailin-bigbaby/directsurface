@@ -35,6 +35,7 @@ const geometry = {
   controlsTab: [139, 91],
   workbenchTab: [65, 91],
   dataTab: [218, 91],
+  canvasWorkspaceTab: [334, 91],
 }
 
 function canvasHash(area) {
@@ -139,6 +140,21 @@ try {
   await page.waitForFunction(() => document.querySelector('canvas#app')?.width >= 1280)
   await expectCanvasChange(page, totalArea, beforeReload)
   assert.ok((await backgroundRed(page)) < 80, 'dark theme should persist after reload')
+  const beforeWorkspace = await hash(page, { x: 30, y: 150, width: 420, height: 130 })
+  await page.mouse.click(...geometry.canvasWorkspaceTab)
+  await expectCanvasChange(page, { x: 30, y: 150, width: 420, height: 130 }, beforeWorkspace)
+  const gridArea = { x: 40, y: 411, width: 290, height: 56 }
+  const beforeFilter = await hash(page, gridArea)
+  await page.mouse.click(220, 356)
+  await page.keyboard.type('ITEM-09999')
+  await expectCanvasChange(page, gridArea, beforeFilter)
+  const floatArea = { x: 350, y: 160, width: 280, height: 180 }
+  const beforeFloat = await hash(page, floatArea)
+  await page.mouse.click(94, 237)
+  await expectCanvasChange(page, floatArea, beforeFloat)
+  const beforeDock = await hash(page, floatArea)
+  await page.mouse.click(192, 237)
+  await expectCanvasChange(page, floatArea, beforeDock)
   assert.deepEqual(errors, [])
   await page.close()
 
@@ -166,10 +182,18 @@ try {
     await responsive.mouse.click(width === 390 ? 106 : 410, 451)
     await responsive.waitForTimeout(500)
     await expectCanvasChange(responsive, responsiveMetric, beforeCreate)
+    const beforeWorkspace = await hash(responsive, { x: 30, y: 184, width: 250, height: 125 })
+    if (width === 390) {
+      await responsive.mouse.click(350, 141)
+      await responsive.mouse.click(240, 173)
+    } else {
+      await responsive.mouse.click(334, 91)
+    }
+    await expectCanvasChange(responsive, { x: 30, y: 184, width: 250, height: 125 }, beforeWorkspace)
     await responsive.close()
   }
   assert.deepEqual(errors, [])
-  console.log('Workbench browser smoke passed: DatePicker validation and calendar, filters, create, edit, metrics, theme, tabs and responsive drawer')
+  console.log('Showcase browser smoke passed: workbench flow, 10,000-row grid filter, float/dock panels, responsive pages')
 } finally {
   try { await browser?.close() } finally {
     try {

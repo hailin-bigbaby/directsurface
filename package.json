@@ -1,7 +1,7 @@
 {
   "name": "ds-ui",
   "version": "0.1.0",
-  "description": "DirectSurface Canvas GUI framework and component library",
+  "description": "Canvas GUI framework for desktop-grade browser workspaces",
   "type": "module",
   "module": "./dist-lib/index.mjs",
   "types": "./dist-lib/types/index.d.ts",
@@ -43,16 +43,18 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/hailin-bigbaby/directsurface.git"
+    "url": "git+https://github.com/hailin-bigbaby/directsurface.git"
   },
-  "homepage": "https://github.com/hailin-bigbaby/directsurface#readme",
+  "homepage": "https://hailin-bigbaby.github.io/directsurface/",
   "bugs": {
     "url": "https://github.com/hailin-bigbaby/directsurface/issues"
   },
   "keywords": [
     "directsurface",
     "canvas",
-    "ui",
+    "desktop-ui",
+    "data-grid",
+    "dockable",
     "typescript"
   ]
 }
