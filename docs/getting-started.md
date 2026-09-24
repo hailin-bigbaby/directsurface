@@ -9,7 +9,7 @@ npm ci
 npm run example:dev
 ```
 
-The command packs `ds-ui`, installs that tarball into the [basic app](../examples/basic-app/README.md), and starts Vite. Edit the name field or click the button to see the Canvas UI update. Run `npm run verify:consumer` to typecheck and build the same external consumer.
+The command packs `ds-ui`, installs that tarball into the [basic app](../examples/basic-app/README.md), and starts Vite. Open the Controls tab to edit a field, click a button, and switch themes. The Data & charts tab demonstrates a sortable grid. Run `npm run verify:consumer` to typecheck and build the same external consumer.
 
 ## Use a built package in another application
 

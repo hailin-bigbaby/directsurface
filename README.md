@@ -2,7 +2,7 @@
 
 DirectSurface (`ds-ui`) is a TypeScript Canvas GUI framework and component library.
 
-This repository contains the reusable rendering runtime, layout system, input handling, themes, and general-purpose widgets. Start with the [documentation](https://github.com/hailin-bigbaby/directsurface/blob/main/docs/README.md) or the [runnable basic app](https://github.com/hailin-bigbaby/directsurface/blob/main/examples/basic-app/README.md). See [contributing](https://github.com/hailin-bigbaby/directsurface/blob/main/CONTRIBUTING.md) for development checks.
+This repository contains the reusable rendering runtime, layout system, input handling, themes, and general-purpose widgets. Start with the [documentation](https://github.com/hailin-bigbaby/directsurface/blob/main/docs/README.md) or the [live component showcase](https://github.com/hailin-bigbaby/directsurface/blob/main/examples/basic-app/README.md). See [contributing](https://github.com/hailin-bigbaby/directsurface/blob/main/CONTRIBUTING.md) for development checks.
 
 ## Build
 

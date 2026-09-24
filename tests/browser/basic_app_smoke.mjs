@@ -29,6 +29,21 @@ function canvasHash(area) {
   return hash >>> 0
 }
 
+async function expectCanvasChange(page, area, action) {
+  const before = await page.evaluate(canvasHash, area)
+  await action()
+  await page.mouse.move(1090, 700)
+  await page.waitForFunction(({ area, before }) => {
+    const canvas = document.querySelector('canvas#app')
+    if (!(canvas instanceof HTMLCanvasElement)) return false
+    const pixels = canvas.getContext('2d')?.getImageData(area.x, area.y, area.width, area.height).data
+    if (!pixels) return false
+    let hash = 2166136261
+    for (const byte of pixels) hash = Math.imul(hash ^ byte, 16777619)
+    return (hash >>> 0) !== before
+  }, { area, before })
+}
+
 let browser
 try {
   let ready = false
@@ -54,38 +69,20 @@ try {
     return pixels && Array.from(pixels).some((value, index) => index % 4 !== 3 && value < 150)
   })
 
-  const counterArea = { x: 28, y: 219, width: 160, height: 40 }
-  const beforeClick = await page.evaluate(canvasHash, counterArea)
-  await page.mouse.click(68, 197)
-  await page.mouse.move(900, 600)
-  await page.waitForFunction(({ area, previous }) => {
-    const canvas = document.querySelector('canvas#app')
-    if (!(canvas instanceof HTMLCanvasElement)) return false
-    const pixels = canvas.getContext('2d')?.getImageData(area.x, area.y, area.width, area.height).data
-    if (!pixels) return false
-    let hash = 2166136261
-    for (const byte of pixels) hash = Math.imul(hash ^ byte, 16777619)
-    return (hash >>> 0) !== previous
-  }, { area: counterArea, previous: beforeClick })
-
-  const greetingArea = { x: 28, y: 140, width: 190, height: 40 }
-  const beforeInput = await page.evaluate(canvasHash, greetingArea)
-  await page.mouse.click(95, 118)
-  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A')
-  await page.keyboard.type('Ada')
-  await page.mouse.move(900, 600)
-  await page.waitForFunction(({ area, previous }) => {
-    const canvas = document.querySelector('canvas#app')
-    if (!(canvas instanceof HTMLCanvasElement)) return false
-    const pixels = canvas.getContext('2d')?.getImageData(area.x, area.y, area.width, area.height).data
-    if (!pixels) return false
-    let hash = 2166136261
-    for (const byte of pixels) hash = Math.imul(hash ^ byte, 16777619)
-    return (hash >>> 0) !== previous
-  }, { area: greetingArea, previous: beforeInput })
+  await expectCanvasChange(page, { x: 25, y: 130, width: 430, height: 250 }, async () => {
+    await page.mouse.click(125, 91) // Controls tab
+  })
+  await expectCanvasChange(page, { x: 550, y: 430, width: 180, height: 35 }, async () => {
+    await page.mouse.click(585, 408) // Run action
+  })
+  await expectCanvasChange(page, { x: 32, y: 337, width: 240, height: 30 }, async () => {
+    await page.mouse.click(145, 315) // Name input
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A')
+    await page.keyboard.type('Ada')
+  })
 
   assert.deepEqual(errors, [])
-  console.log('Basic app browser smoke passed: Canvas rendered, button and input updated')
+  console.log('Showcase browser smoke passed: Canvas rendered, tabs, button and input updated')
 } finally {
   try {
     await browser?.close()
