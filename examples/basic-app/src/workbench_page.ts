@@ -6,6 +6,7 @@ import {
   RenderCard,
   RenderComboBox,
   RenderDataGrid,
+  RenderDatePicker,
   RenderDrawer,
   RenderLineChart,
   RenderParagraph,
@@ -92,7 +93,7 @@ export function createWorkbenchPage(store: WorkbenchStore, getHost: () => AppHos
     const error = new RenderText('', { role: 'accent' })
     const fields = column([
       new RenderText('Task title', { role: 'secondary' }),
-      new RenderTextBox({ value: draft.title, placeholder: 'Describe the work', onChange: value => { draft.title = value } }),
+      new RenderTextBox({ value: draft.title, placeholder: 'Describe the work', onChange: value => { draft.title = value; error.text = '' } }),
       new RenderText('Project', { role: 'secondary' }),
       new RenderComboBox({
         options: projects.map(project => ({ value: project.id, label: project.name })),
@@ -111,8 +112,13 @@ export function createWorkbenchPage(store: WorkbenchStore, getHost: () => AppHos
         value: draft.status,
         onChange: value => { draft.status = value as TaskStatus },
       }),
-      new RenderText('Due date (YYYY-MM-DD)', { role: 'secondary' }),
-      new RenderTextBox({ value: draft.dueAt, onChange: value => { draft.dueAt = value } }),
+      new RenderText('Due date', { role: 'secondary' }),
+      new RenderDatePicker({
+        value: draft.dueAt,
+        placeholder: 'Choose a due date',
+        clearable: true,
+        onChange: value => { draft.dueAt = value; error.text = '' },
+      }),
       error,
     ], 8)
     const buttons = new RenderWrapPanel({ spacing: 8, runSpacing: 8 })
@@ -124,7 +130,7 @@ export function createWorkbenchPage(store: WorkbenchStore, getHost: () => AppHos
         const parsedDue = new Date(`${draft.dueAt}T12:00:00`)
         if (!title) { error.text = 'Enter a task title.'; return }
         if (!Number.isFinite(parsedDue.getTime()) || dateKey(parsedDue) !== draft.dueAt) {
-          error.text = 'Use a valid date in YYYY-MM-DD format.'
+          error.text = 'Choose a valid due date.'
           return
         }
         if (!projects.some(project => project.id === draft.projectId) || !owners.some(owner => owner.id === draft.ownerId)) {

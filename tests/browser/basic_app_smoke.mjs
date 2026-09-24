@@ -22,6 +22,10 @@ const geometry = {
   newTask: [274, 247],
   drawerTitle: [984, 138],
   drawerCreate: [925, 451],
+  drawerDateClear: [1216, 379],
+  drawerCalendar: [1235, 379],
+  calendarToday: [914, 634],
+  calendarConfirm: [978, 634],
   firstTask: [432, 639],
   drawerStatus: [1100, 318],
   statusDone: [919, 405],
@@ -86,8 +90,22 @@ try {
   const filteredTotal = await hash(page, totalArea)
   await page.mouse.click(...geometry.newTask)
   await page.waitForTimeout(350)
+  const dueArea = { x: 904, y: 366, width: 145, height: 27 }
+  const dueBeforeClear = await hash(page, dueArea)
+  await page.mouse.click(...geometry.drawerDateClear)
+  await expectCanvasChange(page, dueArea, dueBeforeClear)
+  const dueCleared = await hash(page, dueArea)
   await page.mouse.click(...geometry.drawerTitle)
   await page.keyboard.type('Launch readiness review')
+  const errorArea = { x: 882, y: 397, width: 185, height: 28 }
+  const beforeError = await hash(page, errorArea)
+  await page.mouse.click(...geometry.drawerCreate)
+  await expectCanvasChange(page, errorArea, beforeError)
+  await page.mouse.click(...geometry.drawerCalendar)
+  await page.waitForTimeout(180)
+  await page.mouse.click(...geometry.calendarToday)
+  await page.mouse.click(...geometry.calendarConfirm)
+  await expectCanvasChange(page, dueArea, dueCleared)
   await page.mouse.click(...geometry.drawerCreate)
   await page.waitForTimeout(350)
   await expectCanvasChange(page, totalArea, filteredTotal)
@@ -135,6 +153,14 @@ try {
     const beforeCreate = await hash(responsive, responsiveMetric)
     await responsive.mouse.click(width === 390 ? 126 : 137, width === 390 ? 293 : 245)
     await responsive.waitForTimeout(350)
+    const calendarArea = width === 390
+      ? { x: 66, y: 399, width: 188, height: 250 }
+      : { x: 372, y: 399, width: 188, height: 250 }
+    const beforeCalendar = await hash(responsive, calendarArea)
+    await responsive.mouse.click(width === 390 ? 345 : 724, 379)
+    await responsive.waitForTimeout(180)
+    await expectCanvasChange(responsive, calendarArea, beforeCalendar)
+    await responsive.mouse.click(width === 390 ? 220 : 528, 634) // Cancel calendar selection.
     await responsive.mouse.click(width === 390 ? 170 : 590, 138)
     await responsive.keyboard.type(`Responsive task ${width}`)
     await responsive.mouse.click(width === 390 ? 106 : 410, 451)
@@ -143,7 +169,7 @@ try {
     await responsive.close()
   }
   assert.deepEqual(errors, [])
-  console.log('Workbench browser smoke passed: filters, create, edit, metrics, theme, tabs and responsive drawer')
+  console.log('Workbench browser smoke passed: DatePicker validation and calendar, filters, create, edit, metrics, theme, tabs and responsive drawer')
 } finally {
   try { await browser?.close() } finally {
     try {
