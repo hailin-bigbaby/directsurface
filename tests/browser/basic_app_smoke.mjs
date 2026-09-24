@@ -12,6 +12,7 @@ const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 const server = spawn(npm, ['run', 'preview', '--', '--host', '127.0.0.1', '--port', '4174', '--strictPort'], {
   cwd: example,
   stdio: ['ignore', 'pipe', 'pipe'],
+  detached: process.platform !== 'win32',
 })
 let serverOutput = ''
 for (const stream of [server.stdout, server.stderr]) {
@@ -86,6 +87,16 @@ try {
   assert.deepEqual(errors, [])
   console.log('Basic app browser smoke passed: Canvas rendered, button and input updated')
 } finally {
-  await browser?.close()
-  server.kill('SIGTERM')
+  try {
+    await browser?.close()
+  } finally {
+    try {
+      if (server.pid && process.platform !== 'win32') process.kill(-server.pid, 'SIGTERM')
+      else server.kill('SIGTERM')
+    } catch (error) {
+      if (error.code !== 'ESRCH') throw error
+    }
+    server.stdout.destroy()
+    server.stderr.destroy()
+  }
 }
