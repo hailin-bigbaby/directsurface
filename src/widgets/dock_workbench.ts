@@ -4290,16 +4290,21 @@ export class RenderDockWorkbench extends RenderBox implements InteractiveRenderO
     const y = rail.y
     const tabGap = Math.max(2, Math.round(context.theme.itemSpacing / 2))
     let x = rail.x + tabGap + 1
+    const draw = new DrawList(context)
     for (const item of items) {
       const record = this.manager.getItem(item.itemId)
       if (!record) continue
       const label = this._shortLabel(record.title, style.autoHideSideTabTextMaxLength)
+      const iconWidth = record.icon ? style.autoHideBottomIconSize + style.autoHideBottomIconGap : 0
+      const labelWidth = draw.measureText(
+        label,
+        style.autoHideTabFontSize,
+        style.autoHideTabFontFamily,
+        style.autoHideTabFontWeight,
+      ).width
       const width = Math.min(
         style.autoHideSideTabMaxSize,
-        Math.max(
-          style.autoHideSideTabBaseSize,
-          label.length * style.autoHideSideTabTextUnit + style.autoHideSideTabExtra,
-        ),
+        Math.max(style.autoHideSideTabBaseSize, Math.ceil(labelWidth + iconWidth + style.autoHideBottomTextInset * 2)),
       )
       const rect = { x, y, width, height: tabHeight }
       this._autoHideTabRects.set(item.itemId, rect)
@@ -4355,8 +4360,17 @@ export class RenderDockWorkbench extends RenderBox implements InteractiveRenderO
       })
     }
     const labelX = record.icon ? iconX + style.autoHideBottomIconSize + style.autoHideBottomIconGap : rect.x + style.autoHideBottomTextInset
+    const label = this._shortLabel(record.title, style.autoHideSideTabTextMaxLength)
+    const availableWidth = Math.max(0, rect.x + rect.width - style.autoHideBottomTextInset - labelX)
+    const draw = new DrawList(context)
+    const fittedLabel = ellipsizeText(label, availableWidth, value => draw.measureText(
+      value,
+      style.autoHideTabFontSize,
+      style.autoHideTabFontFamily,
+      style.autoHideTabFontWeight,
+    ).width)
     dl.fillText(
-      this._shortLabel(record.title, style.autoHideSideTabTextMaxLength),
+      fittedLabel,
       labelX,
       rect.y + rect.height / 2,
       text,
