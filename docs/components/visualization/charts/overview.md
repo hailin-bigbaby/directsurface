@@ -58,8 +58,9 @@ import {
 
 ```text
 interface ChartSeries {
+  id?: string
   name: string
-  data: Array<{ x: number | string | Date; y: number }>
+  data: Array<{ x: number | string | Date; y: number | null }>
   color?: Color
 }
 ```
@@ -68,6 +69,7 @@ interface ChartSeries {
 
 ```text
 interface BarChartSeries {
+  id?: string
   name: string
   data: number[]
   color?: Color
@@ -78,6 +80,7 @@ interface BarChartSeries {
 
 ```text
 interface DonutChartSegment {
+  id?: string
   label: string
   value: number
   color?: Color
@@ -104,7 +107,7 @@ interface DonutChartSegment {
 | --- | --- |
 | `'auto'` | 根据数据自动判断。 |
 | `'linear'` | 数值轴。 |
-| `'time'` | 时间轴，`Date` 或可解析时间的 x 值会转换为时间戳。 |
+| `'time'` | 时间轴，`Date` 或可解析的日期时间字符串会转换为时间戳。自动识别字符串时要求所有字符串均为 `YYYY-MM-DD` 开头的有效日期；混合分类标签应显式指定轴类型。 |
 | `'category'` | 分类轴。 |
 
 ## 数据状态
@@ -140,6 +143,8 @@ const loadingChart = new RenderBarChart({
 - 环形图通过 `onSegmentClick` 响应片段点击。
 
 图例 toggle 适合少量序列。序列很多时，应使用外部筛选器或列表，不要依赖图例承担复杂筛选。
+
+折线数据可用 `y: null` 表示缺测。缺测位置保留在分类轴上，线和面积在该处断开；非有限的 y 值也会归一化为 `null`。无效数字或无效 `Date` 的 x 值不参与数据域和绘制。数值轴和时间轴按 x 从小到大绘制，同一 x 的重复观测会保留；堆叠时按各序列在该 x 的出现次序配对，缺测也占据一次序。更新序列或片段时，图例显隐优先按可选 `id` 保持；未提供 `id` 时按名称及其出现顺序匹配。稳定业务标识建议填写 `id`。
 
 ## 标注类型
 

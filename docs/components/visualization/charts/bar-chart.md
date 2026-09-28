@@ -52,7 +52,7 @@ const chart = new RenderBarChart({
 | 参数 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `categories` | `string[]` | 必填 | 分类标签。 |
-| `series` | `BarChartSeries[]` | 必填 | 每个序列的数值数组。 |
+| `series` | `BarChartSeries[]` | 必填 | 每个序列的数值数组；建议为序列设置稳定 `id`，以便刷新排序后保持图例显隐。 |
 | `annotations` | `ChartAnnotation[]` | `[]` | 目标线、阈值区间等。柱图常用 `axis: 'value'`。 |
 | `valueAxis` | `ChartAxisOptions` | `{}` | 数值轴配置。 |
 | `categoryAxis` | `ChartAxisOptions` | `{}` | 分类轴配置，常用 `maxLabelLength`。 |

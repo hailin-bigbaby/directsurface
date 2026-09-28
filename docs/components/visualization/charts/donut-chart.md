@@ -44,7 +44,7 @@ const chart = new RenderDonutChart({
 
 | 参数 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `segments` | `DonutChartSegment[]` | 必填 | 分类片段。 |
+| `segments` | `DonutChartSegment[]` | 必填 | 分类片段；建议设置稳定 `id`，以便刷新排序后保持图例显隐。 |
 | `showLegend` | `boolean` | `true` | 是否显示图例。 |
 | `legendMode` | `ChartLegendMode` | `'static'` | `'toggle'` 时图例可切换片段显示。 |
 | `visibleSegments` | `number[]` | `undefined` | 初始可见片段。 |

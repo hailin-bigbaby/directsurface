@@ -93,6 +93,7 @@ RangeSlider 和 LineChart 是独立控件。推荐双向同步：
 
 - RangeSlider 的 `onViewportChange` 调用 `line.setXViewport(event.viewport, event.reason)`。
 - LineChart 的 `onViewportChange` 调用 `slider.setViewport(event.viewport, event.reason)`。
+- 更新两者的 `series` 时，原视口若覆盖完整数据域，会随新数据域一起扩张或收缩；局部视口则保持并裁剪到新域内。
 
 同步时保留 `reason`，便于业务日志和调试区分 API、拖拽、缩放和轨道跳转。
 

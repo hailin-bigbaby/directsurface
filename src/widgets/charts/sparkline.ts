@@ -151,9 +151,10 @@ export class RenderSparkline extends RenderBox implements InteractiveRenderObjec
   onPointerDown(event: PointerEvent): void {
     if (!isPrimaryPointerButton(event)) return
     if (!isChartReady(this._chartState())) return
-    if (this._hoverIndex < 0) return
-    const value = this.values[this._hoverIndex]
-    if (value !== undefined) this.onPointClick?.(this._hoverIndex, value)
+    const index = this._nearestPointIndex(event.position)
+    if (index < 0) return
+    const value = this.values[index]
+    if (value !== undefined) this.onPointClick?.(index, value)
   }
 
   debugState(): SparklineDebugState {

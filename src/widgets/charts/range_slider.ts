@@ -12,6 +12,7 @@ import { chartColor, withAlpha } from './chart_palette'
 import { isChartReady, paintChartState, resolveChartState } from './chart_state'
 import {
   clampChartDomain,
+  chartXValue,
   collectYValues,
   createLinearScale,
   normalizeLinearDomain,
@@ -20,7 +21,7 @@ import {
 import {
   cloneChartSeries,
   createChartSeriesDatums,
-  decimateMinMaxDatums,
+  decimateBreakAwareDatums,
   resolveChartAxisType,
   resolveFullChartXDomain,
 } from './chart_data'
@@ -63,7 +64,7 @@ export interface ChartRangeSliderDebugState {
   track: ChartPlotRect
   leftHandleX: number
   rightHandleX: number
-  previewPoints: Array<{ x: number; y: number; value: number }>
+  previewPoints: Array<{ x: number; y: number; value: number; breakBefore: boolean }>
   interaction: RangeSliderInteraction
   state: ChartStateDebugState
 }
@@ -72,6 +73,7 @@ interface PreviewLayoutPoint {
   x: number
   y: number
   value: number
+  breakBefore: boolean
 }
 
 interface PreviewSeriesLayout {
@@ -98,6 +100,7 @@ export class RenderChartRangeSlider extends FocusableControl implements Interact
   private _viewport: ChartDomain = { min: 0, max: 1 }
   private _track: ChartPlotRect = { x: 0, y: 0, width: 0, height: 0 }
   private _previewSeries: PreviewSeriesLayout[] = []
+  private _hasData = false
   private _resolvedAxisType: ChartAxisType = 'linear'
   private readonly _pendingGesture = new PendingPointerGesture()
   private _dragging = false
@@ -125,12 +128,17 @@ export class RenderChartRangeSlider extends FocusableControl implements Interact
     this._viewport = options.viewport
       ? this._clampViewport(options.viewport)
       : { ...this._fullDomain }
+    this._hasData = this._resolveHasData()
   }
 
   setSeries(series: ChartSeries[]): void {
+    const previousViewport = { ...this._viewport }
+    const followFullDomain = sameDomain(previousViewport, this._fullDomain)
     this.series = cloneChartSeries(series)
     this._fullDomain = this._resolveFullDomain()
-    this._viewport = this._clampViewport(this._viewport)
+    this._viewport = followFullDomain ? { ...this._fullDomain } : this._clampViewport(previousViewport)
+    this._hasData = this._resolveHasData()
+    if (!sameDomain(previousViewport, this._viewport)) this._notifyViewportChange('api')
     this.markNeedsLayout()
   }
 
@@ -141,8 +149,9 @@ export class RenderChartRangeSlider extends FocusableControl implements Interact
   setFullDomain(domain?: ChartDomain): void {
     this._explicitFullDomain = domain ? { ...domain } : undefined
     const previousViewport = { ...this._viewport }
+    const followFullDomain = sameDomain(previousViewport, this._fullDomain)
     this._fullDomain = this._resolveFullDomain()
-    this._viewport = this._clampViewport(this._viewport)
+    this._viewport = followFullDomain ? { ...this._fullDomain } : this._clampViewport(previousViewport)
     if (!sameDomain(previousViewport, this._viewport)) this._notifyViewportChange('api')
     this.markNeedsLayout()
   }
@@ -364,8 +373,10 @@ export class RenderChartRangeSlider extends FocusableControl implements Interact
 
   private _computeLayout(): void {
     this._resolvedAxisType = resolveChartAxisType(this.series, this.xAxisType)
+    const followFullDomain = sameDomain(this._viewport, this._fullDomain)
     this._fullDomain = this._resolveFullDomain()
-    this._viewport = this._clampViewport(this._viewport)
+    this._viewport = followFullDomain ? { ...this._fullDomain } : this._clampViewport(this._viewport)
+    this._hasData = this._resolveHasData()
     this._previewSeries = this.showPreview ? this._createPreviewSeries() : []
   }
 
@@ -377,9 +388,9 @@ export class RenderChartRangeSlider extends FocusableControl implements Interact
     const bucketCount = Math.max(1, Math.floor(this._track.width))
 
     return this.series.map((series, seriesIndex) => {
-      const datums = createChartSeriesDatums(series, seriesIndex)
+      const datums = createChartSeriesDatums(series, seriesIndex, this._resolvedAxisType)
       const previewDatums = datums.length > limit
-        ? decimateMinMaxDatums(datums, this._fullDomain, bucketCount)
+        ? decimateBreakAwareDatums(datums, this._fullDomain, bucketCount)
         : datums
       return {
         seriesIndex,
@@ -387,16 +398,21 @@ export class RenderChartRangeSlider extends FocusableControl implements Interact
           x: xScale.map(datum.xValue),
           y: yScale.map(datum.yValue),
           value: datum.yValue,
+          breakBefore: datum.breakBefore,
         })),
       }
     })
   }
 
   private _chartState(): ChartStateDebugState {
-    return resolveChartState(
-      this,
-      this.series.some((series, seriesIndex) => createChartSeriesDatums(series, seriesIndex).length > 0),
-    )
+    return resolveChartState(this, this._hasData)
+  }
+
+  private _resolveHasData(): boolean {
+    const axisType = resolveChartAxisType(this.series, this.xAxisType)
+    return this.series.some(series => series.data.some((point, index) =>
+      point.y !== null && Number.isFinite(point.y) && Number.isFinite(chartXValue(point.x, index, axisType)),
+    ))
   }
 
   private _paintPreview(context: PaintContext, offset: Offset): void {
@@ -409,18 +425,28 @@ export class RenderChartRangeSlider extends FocusableControl implements Interact
     for (const series of this._previewSeries) {
       if (series.points.length === 0) continue
       const color = chartColor(context.theme, series.seriesIndex, this.series[series.seriesIndex]?.color)
+      const strokeColor = colorToCSS(withAlpha(color, 0.82))
       ctx.beginPath()
       series.points.forEach((point, index) => {
         const x = offset.x + point.x
         const y = offset.y + point.y
-        if (index === 0) ctx.moveTo(x, y)
+        if (index === 0 || point.breakBefore) ctx.moveTo(x, y)
         else ctx.lineTo(x, y)
       })
-      ctx.strokeStyle = colorToCSS(withAlpha(color, 0.82))
+      ctx.strokeStyle = strokeColor
       ctx.lineWidth = 1.4
       ctx.lineJoin = 'round'
       ctx.lineCap = 'round'
       ctx.stroke()
+      series.points.forEach((point, index) => {
+        const isolated = (index === 0 || point.breakBefore) &&
+          (index === series.points.length - 1 || series.points[index + 1]!.breakBefore)
+        if (!isolated) return
+        ctx.beginPath()
+        ctx.arc(offset.x + point.x, offset.y + point.y, 1.5, 0, Math.PI * 2)
+        ctx.fillStyle = strokeColor
+        ctx.fill()
+      })
     }
     ctx.restore()
   }
@@ -531,7 +557,7 @@ export class RenderChartRangeSlider extends FocusableControl implements Interact
   }
 
   private _resolveFullDomain(): ChartDomain {
-    const autoDomain = resolveFullChartXDomain(this.series)
+    const autoDomain = resolveFullChartXDomain(this.series, this.xAxisType)
     return this._explicitFullDomain
       ? sanitizeChartDomain(this._explicitFullDomain, autoDomain)
       : autoDomain

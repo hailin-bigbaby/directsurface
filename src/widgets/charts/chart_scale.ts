@@ -1,4 +1,4 @@
-import type { ChartDomain, ChartPoint, ChartX } from './chart_types'
+import type { ChartAxisType, ChartDomain, ChartPoint, ChartX } from './chart_types'
 
 export interface LinearScale {
   domainMin: number
@@ -18,12 +18,12 @@ export interface TimeTick {
   label: string
 }
 
-export function chartXValue(value: ChartX, index: number): number {
-  if (typeof value === 'number') return Number.isFinite(value) ? value : index
+export function chartXValue(value: ChartX, index: number, axisType: ChartAxisType = 'auto'): number {
+  if (typeof value === 'number') return value
   if (value instanceof Date) {
-    const time = value.getTime()
-    return Number.isFinite(time) ? time : index
+    return value.getTime()
   }
+  if (axisType === 'time') return Date.parse(value)
   return index
 }
 
@@ -89,9 +89,17 @@ export function normalizeLinearDomain(
   values: readonly number[],
   options: LinearDomainOptions = {},
 ): { min: number; max: number } {
-  const finiteValues = values.filter(Number.isFinite)
-  let min = finiteValues.length > 0 ? Math.min(...finiteValues) : 0
-  let max = finiteValues.length > 0 ? Math.max(...finiteValues) : 1
+  let min = Infinity
+  let max = -Infinity
+  for (const value of values) {
+    if (!Number.isFinite(value)) continue
+    if (value < min) min = value
+    if (value > max) max = value
+  }
+  if (min === Infinity) {
+    min = 0
+    max = 1
+  }
   if (options.includeZero) {
     min = Math.min(0, min)
     max = Math.max(0, max)
@@ -126,7 +134,9 @@ export function createLinearScale(
 }
 
 export function collectYValues(series: readonly { data: readonly ChartPoint[] }[]): number[] {
-  return series.flatMap(entry => entry.data.map(point => point.y).filter(Number.isFinite))
+  return series.flatMap(entry => entry.data.flatMap(point =>
+    point.y !== null && Number.isFinite(point.y) ? [point.y] : [],
+  ))
 }
 
 export function niceTicks(min: number, max: number, count = 4): number[] {

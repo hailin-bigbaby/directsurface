@@ -4,22 +4,25 @@ export type ChartX = number | string | Date
 
 export interface ChartPoint {
   x: ChartX
-  y: number
+  y: number | null
 }
 
 export interface ChartSeries {
+  id?: string
   name: string
   data: ChartPoint[]
   color?: Color
 }
 
 export interface BarChartSeries {
+  id?: string
   name: string
   data: number[]
   color?: Color
 }
 
 export interface DonutChartSegment {
+  id?: string
   label: string
   value: number
   color?: Color
@@ -174,6 +177,7 @@ export interface ChartPadding {
 export interface ChartPointLayout {
   seriesIndex: number
   pointIndex: number
+  breakBefore?: boolean
   x: number
   y: number
   value: number

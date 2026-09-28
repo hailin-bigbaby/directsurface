@@ -15,6 +15,7 @@ import {
   hitLegendItem,
   isVisibleIndex,
   normalizeVisibleIndexes,
+  remapVisibleIndexes,
   sameVisibleIndexes,
   toggleVisibleIndex,
   visibleIndexesOverride,
@@ -110,10 +111,10 @@ export class RenderDonutChart extends RenderBox implements InteractiveRenderObje
   }
 
   setSegments(segments: DonutChartSegment[]): void {
+    const previousSegments = this.segments
+    const previousVisible = this.getVisibleSegments()
     this.segments = cloneSegments(segments)
-    if (this._visibleSegments !== undefined) {
-      this._visibleSegments = normalizeVisibleIndexes(this.segments.length, this._visibleSegments)
-    }
+    this._visibleSegments = remapVisibleIndexes(previousSegments, this.segments, previousVisible, entry => entry.id ? `id:${entry.id}` : `label:${entry.label}`)
     this.markNeedsLayout()
   }
 
@@ -219,7 +220,8 @@ export class RenderDonutChart extends RenderBox implements InteractiveRenderObje
       return
     }
     if (!isChartReady(this._chartState())) return
-    const segment = this._layouts.find(item => item.index === this._hoverIndex)
+    const hitIndex = this._hitSegment(event.position)
+    const segment = this._layouts.find(item => item.index === hitIndex)
     if (segment) this.onSegmentClick?.({ ...segment })
   }
 

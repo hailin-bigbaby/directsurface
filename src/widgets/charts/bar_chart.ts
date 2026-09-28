@@ -30,6 +30,7 @@ import {
   hitLegendItem,
   isVisibleIndex,
   normalizeVisibleIndexes,
+  remapVisibleIndexes,
   sameVisibleIndexes,
   toggleVisibleIndex,
   visibleIndexesOverride,
@@ -169,11 +170,11 @@ export class RenderBarChart extends RenderBox implements InteractiveRenderObject
   }
 
   setData(categories: string[], series: BarChartSeries[]): void {
+    const previousSeries = this.series
+    const previousVisible = this.getVisibleSeries()
     this.categories = [...categories]
     this.series = cloneBarSeries(series)
-    if (this._visibleSeries !== undefined) {
-      this._visibleSeries = normalizeVisibleIndexes(this.series.length, this._visibleSeries)
-    }
+    this._visibleSeries = remapVisibleIndexes(previousSeries, this.series, previousVisible, entry => entry.id ? `id:${entry.id}` : `name:${entry.name}`)
     this.markNeedsLayout()
   }
 
@@ -290,7 +291,8 @@ export class RenderBarChart extends RenderBox implements InteractiveRenderObject
       return
     }
     if (!isChartReady(this._chartState())) return
-    if (this._hover) this.onBarClick?.({ ...this._hover })
+    const bar = this._hitBar(event.position)
+    if (bar) this.onBarClick?.({ ...bar })
   }
 
   debugState(): BarChartDebugState {

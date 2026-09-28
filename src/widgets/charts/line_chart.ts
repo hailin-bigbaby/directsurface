@@ -30,7 +30,8 @@ import {
 } from './chart_axis_options'
 import {
   cloneChartSeries,
-  decimateMinMaxDatums,
+  createChartSeriesDatums,
+  decimateBreakAwareDatums,
   resolveChartAxisType,
   resolveFullChartXDomain,
 } from './chart_data'
@@ -49,6 +50,7 @@ import {
   hitLegendItem,
   isVisibleIndex,
   normalizeVisibleIndexes,
+  remapVisibleIndexes,
   sameVisibleIndexes,
   toggleVisibleIndex,
   visibleIndexesOverride,
@@ -137,7 +139,9 @@ export interface RenderLineChartOptions extends RenderBoxOptions {
 interface LineChartDatum {
   seriesIndex: number
   pointIndex: number
+  occurrenceIndex: number
   order: number
+  breakBefore: boolean
   xValue: number
   yValue: number
   stackBase?: number
@@ -248,10 +252,16 @@ export class RenderLineChart extends RenderBox implements InteractiveRenderObjec
   }
 
   setSeries(series: ChartSeries[]): void {
+    const previousSeries = this.series
+    const previousVisible = this.getVisibleSeries()
+    const previousViewport = { ...this._activeXViewport }
+    const followFullDomain = this.xViewport === undefined || sameDomain(previousViewport, this._fullXDomain)
     this.series = cloneChartSeries(series)
-    if (this._visibleSeries !== undefined) {
-      this._visibleSeries = normalizeVisibleIndexes(this.series.length, this._visibleSeries)
-    }
+    this._visibleSeries = remapVisibleIndexes(previousSeries, this.series, previousVisible, entry => entry.id ? `id:${entry.id}` : `name:${entry.name}`)
+    this._fullXDomain = this._resolveFullXDomain()
+    this._activeXViewport = followFullDomain ? { ...this._fullXDomain } : this._clampViewport(this.xViewport!)
+    this.xViewport = followFullDomain ? undefined : { ...this._activeXViewport }
+    if (!sameDomain(previousViewport, this._activeXViewport)) this._notifyViewportChange('api')
     this.markNeedsLayout()
   }
 
@@ -566,6 +576,7 @@ export class RenderLineChart extends RenderBox implements InteractiveRenderObjec
           pointIndex: datum.pointIndex,
           x: xScale.map(datum.xValue),
           y: yScale.map(datum.stackValue ?? datum.yValue),
+          breakBefore: datum.breakBefore,
           value: datum.yValue,
           stackBase: datum.stackBase,
           stackValue: datum.stackValue,
@@ -611,24 +622,33 @@ export class RenderLineChart extends RenderBox implements InteractiveRenderObjec
     ctx.rect(absolutePlot.x, absolutePlot.y, absolutePlot.width, absolutePlot.height)
     ctx.clip()
     for (const [seriesIndex, points] of pointsBySeries) {
-      if (points.length === 0) continue
       const color = chartColor(context.theme, seriesIndex, this.series[seriesIndex]?.color)
-      if (this.area) {
-        if (this._isStacked()) this._paintStackedArea(ctx, offset, points, color)
-        else this._paintArea(ctx, offset, points, color)
+      for (const run of splitLineRuns(points)) {
+        if (run.length === 1) {
+          const point = run[0]!
+          ctx.beginPath()
+          ctx.arc(offset.x + point.x, offset.y + point.y, 2.5, 0, Math.PI * 2)
+          ctx.fillStyle = `rgba(${color.r},${color.g},${color.b},${color.a})`
+          ctx.fill()
+          continue
+        }
+        if (this.area) {
+          if (this._isStacked()) this._paintStackedArea(ctx, offset, run, color)
+          else this._paintArea(ctx, offset, run, color)
+        }
+        ctx.beginPath()
+        run.forEach((point, index) => {
+          const x = offset.x + point.x
+          const y = offset.y + point.y
+          if (index === 0) ctx.moveTo(x, y)
+          else ctx.lineTo(x, y)
+        })
+        ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${color.a})`
+        ctx.lineWidth = 2
+        ctx.lineJoin = 'round'
+        ctx.lineCap = 'round'
+        ctx.stroke()
       }
-      ctx.beginPath()
-      points.forEach((point, index) => {
-        const x = offset.x + point.x
-        const y = offset.y + point.y
-        if (index === 0) ctx.moveTo(x, y)
-        else ctx.lineTo(x, y)
-      })
-      ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${color.a})`
-      ctx.lineWidth = 2
-      ctx.lineJoin = 'round'
-      ctx.lineCap = 'round'
-      ctx.stroke()
     }
     ctx.restore()
   }
@@ -763,12 +783,13 @@ export class RenderLineChart extends RenderBox implements InteractiveRenderObjec
         }))
     }
 
-    const seriesIndex = this.series.findIndex(series => series.data.length > 0)
+    const visibleSeries = this.getVisibleSeries()
+    const seriesIndex = this.series.findIndex((series, index) => visibleSeries.includes(index) && series.data.length > 0)
     if (seriesIndex < 0) return []
     const items = this.series[seriesIndex]!.data
       .map((point, index) => ({
         label: formatChartX(point.x),
-        xValue: chartXValue(point.x, index),
+        xValue: chartXValue(point.x, index, this._resolvedAxisType),
         index,
       }))
       .filter(item => item.xValue >= this._activeXViewport.min && item.xValue <= this._activeXViewport.max)
@@ -860,9 +881,9 @@ export class RenderLineChart extends RenderBox implements InteractiveRenderObjec
 
   private _hoverPointForPosition(position: Offset): ChartPointLayout | null {
     if (this.tooltipMode === 'axis') {
-      return this._axisHover?.primary ?? this._nearestAxisHover(position)?.primary ?? null
+      return this._nearestAxisHover(position)?.primary ?? null
     }
-    return this._hover ?? this._nearestPoint(position)
+    return this._nearestPoint(position)
   }
 
   private _axisTooltipItems(hover: LineChartAxisHover): ChartTooltipItem[] {
@@ -977,12 +998,14 @@ export class RenderLineChart extends RenderBox implements InteractiveRenderObjec
     visibleSeries: readonly number[],
   ): Map<number, LineChartDatum[]> {
     const result = new Map<number, LineChartDatum[]>()
-    const byX = new Map<number, Map<number, LineChartDatum>>()
+    const byX = new Map<number, Map<number, LineChartDatum[]>>()
     for (const seriesIndex of visibleSeries) {
       result.set(seriesIndex, [])
       for (const datum of datumsBySeries.get(seriesIndex) ?? []) {
-        const group = byX.get(datum.xValue) ?? new Map<number, LineChartDatum>()
-        group.set(seriesIndex, datum)
+        const group = byX.get(datum.xValue) ?? new Map<number, LineChartDatum[]>()
+        const occurrences = group.get(seriesIndex) ?? []
+        occurrences[datum.occurrenceIndex] = datum
+        group.set(seriesIndex, occurrences)
         byX.set(datum.xValue, group)
       }
     }
@@ -991,24 +1014,32 @@ export class RenderLineChart extends RenderBox implements InteractiveRenderObjec
     for (const xValue of xValues) {
       const group = byX.get(xValue)
       if (!group) continue
-      const totals = this._lineStackTotals(group, visibleSeries)
-      let positiveBase = 0
-      let negativeBase = 0
-      for (const seriesIndex of visibleSeries) {
-        const datum = group.get(seriesIndex)
-        if (!datum) continue
-        const delta = this._lineStackDelta(datum.yValue, totals)
-        const base = datum.yValue >= 0 ? positiveBase : negativeBase
-        const stackValue = base + delta
-        if (datum.yValue >= 0) positiveBase = stackValue
-        else negativeBase = stackValue
-        result.get(seriesIndex)?.push({
-          ...datum,
-          stackBase: base,
-          stackValue,
-          stackTotal: totals.total,
-          stackRatio: this.stackMode === 'percent' ? this._lineStackRatio(datum.yValue, totals) : undefined,
-        })
+      const count = Math.max(...[...group.values()].map(datums => datums.length))
+      for (let occurrence = 0; occurrence < count; occurrence += 1) {
+        const current = new Map<number, LineChartDatum>()
+        for (const seriesIndex of visibleSeries) {
+          const datum = group.get(seriesIndex)?.[occurrence]
+          if (datum) current.set(seriesIndex, datum)
+        }
+        const totals = this._lineStackTotals(current, visibleSeries)
+        let positiveBase = 0
+        let negativeBase = 0
+        for (const seriesIndex of visibleSeries) {
+          const datum = current.get(seriesIndex)
+          if (!datum) continue
+          const delta = this._lineStackDelta(datum.yValue, totals)
+          const base = datum.yValue >= 0 ? positiveBase : negativeBase
+          const stackValue = base + delta
+          if (datum.yValue >= 0) positiveBase = stackValue
+          else negativeBase = stackValue
+          result.get(seriesIndex)?.push({
+            ...datum,
+            stackBase: base,
+            stackValue,
+            stackTotal: totals.total,
+            stackRatio: this.stackMode === 'percent' ? this._lineStackRatio(datum.yValue, totals) : undefined,
+          })
+        }
       }
     }
 
@@ -1097,8 +1128,12 @@ export class RenderLineChart extends RenderBox implements InteractiveRenderObjec
       for (const series of this.series) {
         for (let index = 0; index < series.data.length; index += 1) {
           const point = series.data[index]!
-          if (formatChartX(point.x) === value) return chartXValue(point.x, index)
+          if (formatChartX(point.x) === value) return chartXValue(point.x, index, this._resolvedAxisType)
         }
+      }
+      if (this._resolvedAxisType === 'time') {
+        const time = Date.parse(value)
+        return Number.isFinite(time) ? time : null
       }
       return null
     }
@@ -1192,27 +1227,19 @@ export class RenderLineChart extends RenderBox implements InteractiveRenderObjec
   }
 
   private _createDatums(series: ChartSeries, seriesIndex: number): LineChartDatum[] {
-    return series.data
-      .map((point, pointIndex) => ({
-        seriesIndex,
-        pointIndex,
-        order: pointIndex,
-        xValue: chartXValue(point.x, pointIndex),
-        yValue: point.y,
-        label: formatChartX(point.x),
-        seriesName: series.name,
-      }))
-      .filter(datum => Number.isFinite(datum.xValue) && Number.isFinite(datum.yValue))
+    return createChartSeriesDatums(series, seriesIndex, this._resolvedAxisType).map(datum => ({
+      ...datum,
+      label: formatChartX(series.data[datum.pointIndex]!.x),
+      seriesName: series.name,
+    }))
   }
 
   private _decimateDatums(datums: LineChartDatum[]): LineChartDatum[] {
     if (this.decimation === 'none') return datums
-    const inside = datums.filter(datum => datum.xValue >= this._activeXViewport.min && datum.xValue <= this._activeXViewport.max)
     const limit = Math.max(8, Math.floor(this._plot.width * 2))
-    if (inside.length <= limit) return datums
-
+    if (datums.length <= limit) return datums
     const bucketCount = Math.max(1, Math.floor(this._plot.width))
-    return decimateMinMaxDatums(datums, this._activeXViewport, bucketCount, { includeEdgeNeighbors: true })
+    return decimateBreakAwareDatums(datums, this._activeXViewport, bucketCount, { includeEdgeNeighbors: true })
   }
 
   private _resolveAxisType(): ChartAxisType {
@@ -1220,7 +1247,7 @@ export class RenderLineChart extends RenderBox implements InteractiveRenderObjec
   }
 
   private _resolveFullXDomain(): ChartDomain {
-    return resolveFullChartXDomain(this.series)
+    return resolveFullChartXDomain(this.series, this._resolveAxisType())
   }
 
   private _setViewport(viewport: ChartDomain, reason: ChartViewportChangeReason): boolean {
@@ -1328,8 +1355,27 @@ function includeViewportNeighbors(datums: LineChartDatum[], viewport: ChartDomai
     if (first < 0) first = index
     last = index
   }
-  if (first < 0 || last < 0) return []
+  if (first < 0 || last < 0) {
+    let before = -1
+    for (let index = datums.length - 1; index >= 0; index -= 1) {
+      if (datums[index]!.xValue < viewport.min) {
+        before = index
+        break
+      }
+    }
+    const after = datums.findIndex(datum => datum.xValue > viewport.max)
+    return before >= 0 && after >= 0 ? [datums[before]!, datums[after]!] : []
+  }
   return datums.slice(Math.max(0, first - 1), Math.min(datums.length, last + 2))
+}
+
+function splitLineRuns(points: ChartPointLayout[]): ChartPointLayout[][] {
+  const runs: ChartPointLayout[][] = []
+  for (const point of points) {
+    if (point.breakBefore || runs.length === 0) runs.push([])
+    runs[runs.length - 1]!.push(point)
+  }
+  return runs
 }
 
 function categoryLabelIndexes(length: number, maxCount: number): number[] {

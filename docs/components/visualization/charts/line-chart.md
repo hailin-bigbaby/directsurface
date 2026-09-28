@@ -65,7 +65,7 @@ const chart = new RenderLineChart({
 
 | 参数 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `series` | `ChartSeries[]` | 必填 | 数据序列。构造和 `setSeries()` 都会克隆输入。 |
+| `series` | `ChartSeries[]` | 必填 | 数据序列。构造和 `setSeries()` 都会克隆输入；`y: null` 表示缺测并使折线断开。建议为序列设置稳定 `id`。 |
 | `xAxis` | `ChartAxisOptions` | `{}` | x 轴配置。 |
 | `yAxis` | `ChartAxisOptions` | `{}` | y 轴配置。 |
 | `area` | `boolean` | `false` | 是否绘制面积填充。 |
@@ -147,6 +147,8 @@ const chart = new RenderLineChart({
 ## 性能建议
 
 - 大点位默认使用 `decimation: 'minMax'`，保留峰谷特征。
+- 缺测密集时仍按可视像素桶限制点数；选中的峰谷会尽量与同一连续段的邻点形成可绘制线段，孤立点绘制为标记。
+- 时间序列可传 `Date` 或有效的 ISO 日期时间字符串；分类字符串仍按原始下标定位。数值和时间序列按 x 排序后绘制。
 - 大时间序列配合 `xViewport` 和 `RenderChartRangeSlider`。
 - 多序列图例 toggle 适合少量序列；序列很多时使用外部筛选器。
 - hover、tooltip、crosshair 会触发重绘，超高频页面要控制可见图表数量。

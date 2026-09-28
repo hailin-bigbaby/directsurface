@@ -24,6 +24,28 @@ export function visibleIndexesOverride(count: number, indexes?: readonly number[
   return normalized.length === count ? undefined : normalized
 }
 
+export function remapVisibleIndexes<T>(
+  previousItems: readonly T[],
+  nextItems: readonly T[],
+  visibleIndexes: readonly number[],
+  keyOf: (item: T) => string,
+): number[] | undefined {
+  const previousKeys = occurrenceKeys(previousItems, keyOf)
+  const hidden = new Set(previousKeys.filter((_key, index) => !visibleIndexes.includes(index)))
+  const nextKeys = occurrenceKeys(nextItems, keyOf)
+  return visibleIndexesOverride(nextItems.length, nextKeys.flatMap((key, index) => hidden.has(key) ? [] : [index]))
+}
+
+function occurrenceKeys<T>(items: readonly T[], keyOf: (item: T) => string): string[] {
+  const counts = new Map<string, number>()
+  return items.map(item => {
+    const key = keyOf(item)
+    const occurrence = counts.get(key) ?? 0
+    counts.set(key, occurrence + 1)
+    return `${key}\u0000${occurrence}`
+  })
+}
+
 export function hiddenIndexes(count: number, visibleIndexes: readonly number[]): number[] {
   const visible = new Set(visibleIndexes)
   const result: number[] = []
