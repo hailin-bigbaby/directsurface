@@ -294,6 +294,10 @@ export class DropTreeGridPopup<T extends Record<string, any> = any> extends Resi
     return this._handleNavigationKey(event)
   }
 
+  focusRoots(): readonly RenderObject[] {
+    return this.visible && this._grid ? [this._grid] : []
+  }
+
   paint(context: PaintContext): void {
     if (!this.visible) return
     const popupContext = PopupManager.instance.context
@@ -307,16 +311,20 @@ export class DropTreeGridPopup<T extends Record<string, any> = any> extends Resi
     if (this._grid) {
       this._grid.paint(context, this._grid.offset)
       if (this.filteredRoots.length === 0) {
+        const bodyY = layout.gridRect.y + layout.headerH
+        const bodyH = Math.max(0, layout.gridRect.h - layout.headerH)
+        dl.pushClip(layout.gridRect.x, bodyY, layout.gridRect.w, bodyH)
         dl.fillText(
           '无匹配节点',
-          layout.gridRect.x + 8,
-          layout.gridRect.y + layout.gridRect.h / 2,
+          layout.gridRect.x + layout.gridRect.w / 2,
+          bodyY + bodyH / 2,
           layout.popupStyle.textDisabled,
           layout.popupStyle.fontSize,
           layout.popupStyle.fontFamily,
-          'left',
+          'center',
           'middle',
         )
+        dl.popClip()
       }
     }
     this._paintResizeGrip(dl, layout)

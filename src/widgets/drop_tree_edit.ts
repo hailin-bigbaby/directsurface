@@ -294,6 +294,10 @@ export class DropTreePopup<T = any> extends PopupPanelShell {
     return this._handleNavigationKey(event)
   }
 
+  focusRoots(): readonly RenderObject[] {
+    return this.visible && this._tree ? [this._tree] : []
+  }
+
   paint(context: PaintContext): void {
     if (!this.visible) return
     const popupContext = PopupManager.instance.context
@@ -308,16 +312,18 @@ export class DropTreePopup<T = any> extends PopupPanelShell {
     if (this._tree) {
       this._tree.paint(context, { x: this._tree.offset.x, y: this._tree.offset.y })
       if (this.filteredRoots.length === 0) {
+        dl.pushClip(layout.treeRect.x, layout.treeRect.y, layout.treeRect.w, layout.treeRect.h)
         dl.fillText(
           '无匹配节点',
-          layout.treeRect.x + 8,
+          layout.treeRect.x + layout.treeRect.w / 2,
           layout.treeRect.y + layout.treeRect.h / 2,
           popup.textDisabled,
           popup.fontSize,
           popup.fontFamily,
-          'left',
+          'center',
           'middle',
         )
+        dl.popClip()
       }
     }
   }
