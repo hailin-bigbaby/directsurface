@@ -63,6 +63,7 @@ export interface GridControllerBundleOptions<T extends Record<string, any>> {
   getValidateRow?: () => ((args: GridRowValidationArgs<T>) => GridRowValidationResult<T>) | undefined
   getEditorValidationMessages?: () => Readonly<GridEditorValidationMessages>
   getCellEditPolicy?: (rowIndex: number, colIndex: number) => GridResolvedCellEditPolicy
+  onValidationChange?: () => void
   setCursor: (cursor: string) => void
   onRowClick?: (row: T, event: GridInternalRowEvent) => void
   onRowActivate?: (row: T, event: GridInternalRowEvent) => void
@@ -96,6 +97,7 @@ export function createGridControllerBundle<T extends Record<string, any>>(
     getValidateRow: options.getValidateRow,
     getEditorValidationMessages: options.getEditorValidationMessages,
     getCellEditPolicy: options.getCellEditPolicy,
+    onValidationChange: options.onValidationChange,
   })
 
   let editing!: GridEditingController<T>

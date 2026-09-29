@@ -57,6 +57,7 @@ export interface GridStructureEditControllerOptions<T extends Record<string, any
   getValidateRow?: () => ((args: GridRowValidationArgs<T>) => GridRowValidationResult<T>) | undefined
   getEditorValidationMessages?: () => Readonly<GridEditorValidationMessages>
   getCellEditPolicy?: (rowIndex: number, colIndex: number) => GridResolvedCellEditPolicy
+  onValidationChange?: () => void
 }
 
 interface StoredGridCellError {
@@ -75,6 +76,7 @@ export class GridStructureEditController<T extends Record<string, any> = any> im
   private readonly _getValidateRow: NonNullable<GridStructureEditControllerOptions<T>['getValidateRow']>
   private readonly _getEditorValidationMessages?: GridStructureEditControllerOptions<T>['getEditorValidationMessages']
   private readonly _getCellEditPolicy?: GridStructureEditControllerOptions<T>['getCellEditPolicy']
+  private readonly _onValidationChange?: () => void
   private readonly _cellErrors = new Map<string, StoredGridCellError>()
   private _validationRevision = 0
 
@@ -86,6 +88,7 @@ export class GridStructureEditController<T extends Record<string, any> = any> im
     this._getValidateRow = options.getValidateRow ?? (() => undefined)
     this._getEditorValidationMessages = options.getEditorValidationMessages
     this._getCellEditPolicy = options.getCellEditPolicy
+    this._onValidationChange = options.onValidationChange
   }
 
   get validationRevision(): number {
@@ -268,7 +271,7 @@ export class GridStructureEditController<T extends Record<string, any> = any> im
   clearCellErrors(): boolean {
     if (this._cellErrors.size === 0) return false
     this._cellErrors.clear()
-    this._validationRevision++
+    this.bumpValidationRevision()
     return true
   }
 
@@ -318,7 +321,7 @@ export class GridStructureEditController<T extends Record<string, any> = any> im
       this._cellErrors.delete(mapKey)
       changed = true
     }
-    if (changed) this._validationRevision++
+    if (changed) this.bumpValidationRevision()
     return changed
   }
 
@@ -460,13 +463,18 @@ export class GridStructureEditController<T extends Record<string, any> = any> im
       return
     }
     this._cellErrors.set(mapKey, { sourceRowIndex, rowId, key, message, value })
-    this._validationRevision++
+    this.bumpValidationRevision()
   }
 
   private clearCellError(sourceRowIndex: number, rowId: GridRowId | null, key: string): boolean {
     const deleted = this._cellErrors.delete(this.errorKey(sourceRowIndex, rowId, key))
-    if (deleted) this._validationRevision++
+    if (deleted) this.bumpValidationRevision()
     return deleted
+  }
+
+  private bumpValidationRevision(): void {
+    this._validationRevision++
+    this._onValidationChange?.()
   }
 
   private errorKey(sourceRowIndex: number, rowId: GridRowId | null, key: string): string {

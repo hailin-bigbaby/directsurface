@@ -235,6 +235,7 @@ export class GridStateController<T extends Record<string, any> = any> {
       reason === 'sort' ||
       reason === 'filter' ||
       reason === 'group' ||
+      reason === 'cell' ||
       reason === 'addRows' ||
       reason === 'removeRows'
   }

@@ -50,6 +50,7 @@ import {
   type GridResolvedCellPresentation,
 } from './grid_display_resolver'
 import type { GridLookupValueResolver } from './lookup_value_index'
+import type { GridRowMergeModel, GridRowMergeRun } from './grid_row_merge_model'
 
 export interface GridPainterSnapshot<T extends Record<string, any>> {
   theme: ResolvedTheme
@@ -57,6 +58,8 @@ export interface GridPainterSnapshot<T extends Record<string, any>> {
   visibleItems: Array<GridVisibleItem<T>>
   viewport: GridViewport<T>
   selectedRows: Set<number>
+  rowMerges?: GridRowMergeModel<T>
+  isMergeFullySelected?: (run: GridRowMergeRun) => boolean
   focused: boolean
   focusedItemIndex: number
   focusedColIndex: number
@@ -419,6 +422,7 @@ export class GridPainter<T extends Record<string, any> = any> {
 
       for (let colIndex = 0; colIndex < snapshot.columns.length; colIndex++) {
         const column = snapshot.columns[colIndex]!
+        if (snapshot.rowMerges?.runAt(itemIndex, column.key)) continue
         const columnWidth = viewport.colWidths[colIndex]!
         const columnX = viewport.cellX(snapshot.columns, x, colIndex)
         const isEditing = snapshot.editableState?.row === item.dataRowIndex && snapshot.editableState?.col === colIndex
@@ -509,6 +513,99 @@ export class GridPainter<T extends Record<string, any> = any> {
 
       dl.line(x, rowY + viewport.rowHeight, x + viewWidth, rowY + viewport.rowHeight, tokens.rowSeparator, 0.5)
     }
+    this.paintMergedCells(dl, x, bodyY, virtualRange.startIndex, virtualRange.endIndex, snapshot)
+  }
+
+  private paintMergedCells(
+    dl: DrawList,
+    x: number,
+    bodyY: number,
+    first: number,
+    last: number,
+    snapshot: GridPainterSnapshot<T>,
+  ): void {
+    if (!snapshot.rowMerges) return
+    const viewport = snapshot.viewport
+    const tokens = snapshot.gridTokens
+    const bodyBottom = bodyY + viewport.viewHeight
+    for (let colIndex = 0; colIndex < snapshot.columns.length; colIndex++) {
+      const column = snapshot.columns[colIndex]!
+      if (!column.mergeRows) continue
+      const visibleCell = viewport.visibleCellRect(snapshot.columns, x, colIndex)
+      if (visibleCell.w <= 0) continue
+      const columnX = viewport.cellX(snapshot.columns, x, colIndex)
+      const columnWidth = viewport.colWidths[colIndex]!
+      for (const run of snapshot.rowMerges.intersecting(first, last, column.key)) {
+        const item = snapshot.visibleItems[run.startItemIndex]
+        if (!item || item.kind !== 'data') continue
+        const startY = bodyY + run.startItemIndex * viewport.rowHeight - viewport.scrollY
+        const endY = bodyY + (run.endItemIndex + 1) * viewport.rowHeight - viewport.scrollY
+        const top = Math.max(bodyY, startY)
+        const bottom = Math.min(bodyBottom, endY)
+        if (bottom <= top) continue
+        const fullySelected = snapshot.isMergeFullySelected?.(run) ?? false
+        const focused = snapshot.focused && snapshot.focusedColIndex === colIndex &&
+          snapshot.focusedItemIndex >= run.startItemIndex && snapshot.focusedItemIndex <= run.endItemIndex
+        const rowPresentation = resolveGridRowPresentation({
+          item, theme: snapshot.theme, tokens,
+          state: { itemIndex: run.startItemIndex, selected: fullySelected, hovered: false,
+            focused, editing: false },
+          resolveRowStyle: snapshot.resolveRowStyle,
+        })
+        const cellPresentation = resolveGridCellPresentation({
+          item, theme: snapshot.theme, column, colIndex, tokens, rowPresentation, cellError: null,
+          state: { itemIndex: run.startItemIndex, selected: fullySelected, hovered: false,
+            focused, editing: false },
+          getCellDisplayText: snapshot.getCellDisplayText,
+          resolveCellStyle: snapshot.resolveCellStyle,
+          lookupValues: snapshot.lookupValues,
+        })
+        dl.pushClip(visibleCell.x, top, visibleCell.w, bottom - top)
+        dl.fillRect(columnX, top, columnWidth, bottom - top,
+          cellPresentation.backgroundColor ?? rowPresentation.backgroundColor ?? tokens.windowBg, 0)
+        const selected = this.isCellSelected(run.anchorDataRowIndex, colIndex, snapshot.selectedRanges)
+        if (selected) dl.fillRect(columnX + 1, top, columnWidth - 2, bottom - top, tokens.selectionBg, 0)
+        const centerY = (top + bottom) / 2
+        if (column.type === 'checkbox') {
+          const boxSize = tokens.fontSize
+          const boxX = columnX + (columnWidth - boxSize) / 2
+          const boxY = centerY - boxSize / 2
+          dl.fillRect(boxX, boxY, boxSize, boxSize, tokens.checkboxBg, tokens.frameRounding)
+          dl.strokeRect(boxX, boxY, boxSize, boxSize, tokens.checkboxBorder, 1, tokens.frameRounding)
+          if (cellPresentation.args.value) dl.drawCheckmark(boxX, boxY, boxSize, tokens.checkMark, 2)
+        } else {
+          const align = cellPresentation.align
+          const textX = align === 'center' ? columnX + columnWidth / 2
+            : align === 'right' ? columnX + columnWidth - tokens.paddingH : columnX + tokens.paddingH
+          const paintText = this.resolvePaintText(cellPresentation.displayText,
+            this.resolveCellTextOverflow(column, snapshot), Math.max(0, columnWidth - tokens.paddingH * 2),
+            cellPresentation.fontSize, cellPresentation.fontFamily, snapshot)
+          dl.fillText(paintText, textX, centerY, cellPresentation.textColor,
+            cellPresentation.fontSize, cellPresentation.fontFamily, align, 'middle')
+        }
+        if (snapshot.getCellEditPolicy?.(run.anchorDataRowIndex, colIndex).state === 'disabled') {
+          dl.fillRect(columnX + 1, top, columnWidth - 2, bottom - top, tokens.disabledOverlay, 0)
+        }
+        this.paintMergeOutline(dl, visibleCell.x, visibleCell.w, top, bottom,
+          startY >= bodyY, endY <= bodyBottom, tokens.separator, 0.5)
+        if (cellPresentation.borderColor) this.paintMergeOutline(dl,
+          visibleCell.x + 1, Math.max(0, visibleCell.w - 2), top + 1, bottom - 1,
+          startY >= bodyY, endY <= bodyBottom, cellPresentation.borderColor, 1)
+        if (focused) this.paintMergeOutline(dl,
+          visibleCell.x + 1, Math.max(0, visibleCell.w - 2), top + 1, bottom - 1,
+          startY >= bodyY, endY <= bodyBottom, tokens.focusedRowBorder, 1.5)
+        dl.popClip()
+      }
+    }
+  }
+
+  private paintMergeOutline(dl: DrawList, x: number, width: number, top: number, bottom: number,
+    showTop: boolean, showBottom: boolean, color: Color, strokeWidth: number): void {
+    if (width <= 0 || bottom <= top) return
+    dl.line(x, top, x, bottom, color, strokeWidth)
+    dl.line(x + width, top, x + width, bottom, color, strokeWidth)
+    if (showTop) dl.line(x, top, x + width, top, color, strokeWidth)
+    if (showBottom) dl.line(x, bottom, x + width, bottom, color, strokeWidth)
   }
 
   private paintFrozenColumnBoundaries(

@@ -21,6 +21,7 @@ import { GridStateController } from './grid/grid_state_controller'
 import { GridStructureEditController } from './grid/grid_structure_edit_controller'
 import { createGridControllerBundle } from './grid/grid_controller_bundle'
 import { GridPainter } from './grid/grid_painter'
+import { GridRowMergeModel } from './grid/grid_row_merge_model'
 import { GridViewShellController } from './grid/grid_view_shell_controller'
 import { resolveGridHeaderActionLayout } from './grid/grid_header_actions'
 import {
@@ -232,6 +233,8 @@ export class RenderDataGrid<T extends Record<string, any> = any>
   /** @internal */
   readonly structureEditing: GridStructureEditController<T>
   /** @internal */
+  readonly rowMerges: GridRowMergeModel<T>
+  /** @internal */
   readonly editing: GridEditingController<T>
   /** @internal */
   readonly interaction: GridInteractionController<T>
@@ -287,6 +290,9 @@ export class RenderDataGrid<T extends Record<string, any> = any>
   private _selectionSnapshot = ''
   private _currentCellSnapshot = ''
   private _focusedCellSnapshot = ''
+  private _unsubscribeMergeSelection?: () => void
+  private _mergeValidationSyncQueued = false
+  private _gridDisposed = false
 
   constructor(options: DataGridOptions<T>) {
     super(options)
@@ -368,6 +374,7 @@ export class RenderDataGrid<T extends Record<string, any> = any>
       getValidateRow: () => this.validateRow,
       getEditorValidationMessages: () => this._editorValidationMessages,
       getCellEditPolicy: (rowIndex, colIndex) => this.resolveCellEditPolicyAt(rowIndex, colIndex),
+      onValidationChange: () => this.scheduleMergeValidationSync(),
       setCursor: cursor => this.owner?.setCursor(cursor),
       onRowClick: (row, event) => this.onRowClick?.(row, this.toPublicRowEvent(row, event)),
       onRowActivate: (row, event) => this.onRowActivate?.(row, this.toPublicRowEvent(row, event)),
@@ -386,6 +393,13 @@ export class RenderDataGrid<T extends Record<string, any> = any>
       }),
     })
     this.structureEditing = controllers.structureEditing
+    this.rowMerges = new GridRowMergeModel(
+      this.dataModel,
+      () => this.visibleColumns,
+      (row, col) => this.resolveBaseCellEditPolicyAt(row, col),
+      (row, key) => this.structureEditing.cellError(row, key) !== null,
+      () => this.structureEditing.validationRevision,
+    )
     this._cellPopupEditors = controllers.cellPopupEditors
     this._filterPopupController = controllers.filterPopupController
     this._columnMenuController = new GridColumnMenuController<T>({
@@ -411,6 +425,10 @@ export class RenderDataGrid<T extends Record<string, any> = any>
     })
     this.editing = controllers.editing
     this.interaction = controllers.interaction
+    this.interaction.rowMerges = this.rowMerges
+    this._unsubscribeMergeSelection = this.dataModel.subscribeDataChange(() => {
+      this.syncMergeSelection()
+    })
     this.editingGeometry = controllers.editingGeometry
     this.stateController = controllers.stateController
     this.pointer = controllers.pointer
@@ -610,9 +628,10 @@ export class RenderDataGrid<T extends Record<string, any> = any>
     const next = value === true
     if (next === this._disabled) return
     this._disabled = next
+    this.rowMerges?.invalidate()
     if (next) this.cancelUserInteraction()
     this.syncFocusRegistration()
-    this.markNeedsPaint()
+    this.syncMergeSelection()
   }
 
   get readonly(): boolean { return this._readonly }
@@ -620,8 +639,9 @@ export class RenderDataGrid<T extends Record<string, any> = any>
     const next = value === true
     if (next === this._readonly) return
     this._readonly = next
+    this.rowMerges?.invalidate()
     if (next) this.editing.endEdit({ restoreFocus: false })
-    this.markNeedsPaint()
+    this.syncMergeSelection()
   }
 
   get editable(): boolean { return this._editable }
@@ -629,8 +649,9 @@ export class RenderDataGrid<T extends Record<string, any> = any>
     const next = value === true
     if (next === this._editable) return
     this._editable = next
+    this.rowMerges?.invalidate()
     if (!next) this.editing.endEdit({ restoreFocus: false })
-    this.markNeedsPaint()
+    this.syncMergeSelection()
   }
 
   get resizableColumns(): boolean { return this._resizableColumns }
@@ -675,7 +696,7 @@ export class RenderDataGrid<T extends Record<string, any> = any>
     return this._editable && !this._readonly && !this._disabled
   }
 
-  private resolveCellEditPolicyAt(rowIndex: number, colIndex: number): GridResolvedCellEditPolicy {
+  private resolveBaseCellEditPolicyAt(rowIndex: number, colIndex: number): GridResolvedCellEditPolicy {
     const column = this.visibleColumns[colIndex]
     const row = this.dataModel.visibleRows()[rowIndex]
     if (!column || !row) return { state: 'disabled', tabStop: false }
@@ -715,6 +736,16 @@ export class RenderDataGrid<T extends Record<string, any> = any>
     else if (state === 'disabled') tabStop = false
     else if (policy?.state === 'readonly') tabStop = true
     return { state, tabStop, reason }
+  }
+
+  private resolveCellEditPolicyAt(rowIndex: number, colIndex: number): GridResolvedCellEditPolicy {
+    const base = this.resolveBaseCellEditPolicyAt(rowIndex, colIndex)
+    const column = this.visibleColumns[colIndex]
+    const itemIndex = this.dataModel.visibleItemIndexForVisibleRow(rowIndex)
+    if (!column || itemIndex < 0 || !this.rowMerges?.runAt(itemIndex, column.key)) return base
+    return { state: base.state === 'editable' ? 'readonly' : base.state,
+      tabStop: false,
+      reason: base.state === 'editable' ? '合并区域不可直接编辑' : base.reason }
   }
 
   get columns(): GridColumnDef<T>[] { return this.dataModel.columns }
@@ -963,8 +994,9 @@ export class RenderDataGrid<T extends Record<string, any> = any>
     if (this._resolveCellEditPolicy === value) return
     this._resolveCellEditPolicy = value
     this._cellEditPolicyErrorLogged = false
+    this.rowMerges.invalidate()
     this.reconcileActiveCellEditPolicy()
-    this.markNeedsPaint()
+    this.syncMergeSelection()
   }
 
   get validateCell():
@@ -1024,6 +1056,8 @@ export class RenderDataGrid<T extends Record<string, any> = any>
       visibleItems: this.dataModel.visibleItems(),
       viewport: this.viewport,
       selectedRows: this.selectedRows,
+      rowMerges: this.rowMerges,
+      isMergeFullySelected: run => this.interaction.isMergeFullySelected(run),
       focused: !this.disabled && this.interaction.isFocused,
       focusedItemIndex: this.interaction.focusedItemIndex,
       focusedColIndex: this.interaction.focusedColIndex,
@@ -1334,7 +1368,7 @@ export class RenderDataGrid<T extends Record<string, any> = any>
         ? preserveCell
         : undefined,
     })
-    this.markNeedsPaint()
+    this.syncMergeSelection()
     return result
   }
 
@@ -1347,15 +1381,30 @@ export class RenderDataGrid<T extends Record<string, any> = any>
   }
 
   clearCellErrors(): void {
-    if (this.structureEditing.clearCellErrors()) this.markNeedsPaint()
+    if (this.structureEditing.clearCellErrors()) this.syncMergeSelection()
   }
 
   clearCellError(row: T | number, key: keyof T & string): boolean {
     const sourceRowIndex = typeof row === 'number' ? row : this.sourceRowIndexForRow(row)
     if (sourceRowIndex < 0) return false
     const changed = this.structureEditing.clearCellErrorForSource(sourceRowIndex, key)
-    if (changed) this.markNeedsPaint()
+    if (changed) this.syncMergeSelection()
     return changed
+  }
+
+  private scheduleMergeValidationSync(): void {
+    if (this._mergeValidationSyncQueued) return
+    this._mergeValidationSyncQueued = true
+    queueMicrotask(() => {
+      this._mergeValidationSyncQueued = false
+      if (!this._gridDisposed) this.syncMergeSelection()
+    })
+  }
+
+  private syncMergeSelection(): void {
+    this.interaction.normalizeMergeSelection()
+    this.emitInteractionStateChanges()
+    this.markNeedsPaint()
   }
 
   removeRows(
@@ -1880,23 +1929,33 @@ export class RenderDataGrid<T extends Record<string, any> = any>
     }
 
     const editPolicy = this.resolveCellEditPolicyAt(item.dataRowIndex, colIndex)
-    if (editPolicy.state !== 'editable' && editPolicy.reason) {
-      this.tooltip = editPolicy.reason
+    const editReason = editPolicy.state !== 'editable' ? editPolicy.reason : undefined
+    const merge = this.rowMerges.runAt(itemIndex, column.key)
+    if (!merge && editReason) {
+      this.tooltip = editReason
       return
     }
-    if (column.type === 'checkbox') return
+    if (column.type === 'checkbox') {
+      this.tooltip = editReason
+      return
+    }
+
+    const presentationItem = merge
+      ? this.dataModel.visibleItemAt(merge.startItemIndex) as GridDataItem<T>
+      : item
+    const presentationIndex = merge?.startItemIndex ?? itemIndex
 
     const tokens = this._shell.gridTokens(this.currentTheme)
-    const isSelected = this.selectedRows.has(item.dataRowIndex)
-    const isHovered = itemIndex === this.interaction.hoveredItemIndex
-    const isFocused = this.interaction.isFocused && itemIndex === this.interaction.focusedItemIndex
-    const isEditingRow = this.editing.state?.row === item.dataRowIndex
+    const isSelected = merge ? this.interaction.isMergeFullySelected(merge) : this.selectedRows.has(item.dataRowIndex)
+    const isHovered = !merge && itemIndex === this.interaction.hoveredItemIndex
+    const isFocused = this.interaction.isFocused && presentationIndex === this.interaction.focusedItemIndex
+    const isEditingRow = this.editing.state?.row === presentationItem.dataRowIndex
     const rowPresentation = resolveGridRowPresentation({
-      item,
+      item: presentationItem,
       theme: this.currentTheme,
       tokens,
       state: {
-        itemIndex,
+        itemIndex: presentationIndex,
         selected: isSelected,
         hovered: isHovered,
         focused: isFocused,
@@ -1905,15 +1964,15 @@ export class RenderDataGrid<T extends Record<string, any> = any>
       resolveRowStyle: this.resolveRowStyle,
     })
     const cellPresentation = resolveGridCellPresentation({
-      item,
+      item: presentationItem,
       theme: this.currentTheme,
       column,
       colIndex,
       tokens,
       rowPresentation,
-      cellError: this.structureEditing.cellErrorForSource(item.sourceIndex, column.key) ?? null,
+      cellError: this.structureEditing.cellErrorForSource(presentationItem.sourceIndex, column.key) ?? null,
       state: {
-        itemIndex,
+        itemIndex: presentationIndex,
         selected: isSelected,
         hovered: isHovered,
         focused: isFocused && this.interaction.focusedColIndex === colIndex,
@@ -1924,12 +1983,17 @@ export class RenderDataGrid<T extends Record<string, any> = any>
       lookupValues: this.dataModel.lookupValues,
     })
     const text = cellPresentation.displayText
-    if (!text) return
+    if (!text) {
+      this.tooltip = editReason
+      return
+    }
 
     const columnWidth = this.viewport.colWidths[colIndex] ?? column.width ?? 0
     const availableWidth = Math.max(0, columnWidth - tokens.paddingH * 2)
     if (TextMeasurer.measureWidth(text, cellPresentation.fontSize, cellPresentation.fontFamily) > availableWidth) {
-      this.tooltip = text
+      this.tooltip = editReason ? `${text}\n${editReason}` : text
+    } else {
+      this.tooltip = editReason
     }
   }
 
@@ -2220,6 +2284,7 @@ export class RenderDataGrid<T extends Record<string, any> = any>
   }
 
   dispose(): void {
+    this._gridDisposed = true
     if (this._focusRegistered) FocusManager.instance.unregister(this)
     this._focusRegistered = false
     this.editing.dispose()
@@ -2227,6 +2292,8 @@ export class RenderDataGrid<T extends Record<string, any> = any>
     this._filterPopupController.dispose()
     this._columnMenuController.dispose()
     this.pointer.dispose()
+    this._unsubscribeMergeSelection?.()
+    this.rowMerges.dispose()
     this._interactionTargets.clear()
     this.viewport.vScrollbar.dragging = false
     this.viewport.vScrollbar.hovered = false

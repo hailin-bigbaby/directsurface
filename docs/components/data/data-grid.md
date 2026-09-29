@@ -885,10 +885,26 @@ if (saved) {
 - 固定列会增加绘制分区，但仍只绘制可视行。
 
 
+## 纵向合并
+
+在列上设置 `mergeRows: true`，DataGrid 会按排序、过滤和分组展开后的**完整显示行顺序**合并相邻、原始值相同的单元格；空值默认不合并。也可以传入比较函数，以相邻两行和它们的原始值决定是否连接：
+
+```ts
+const columns: GridColumnDef<OrderRow>[] = [
+  { key: 'batch', title: '批次', type: 'text', pinned: 'left', mergeRows: true },
+  { key: 'department', title: '科室', type: 'text', mergeRows: ({ previousRow, currentRow }) =>
+    previousRow.department === currentRow.department && previousRow.batch === currentRow.batch },
+]
+```
+
+合并只改变画面，不修改任何源行。分组标题、不同分组路径和带有单元格校验错误的行会断开合并；基础编辑状态、Tab 停靠状态或不可编辑原因不同也会断开。合并区不能直接编辑，但 `setCellValue()` 仍可修改其中任一源行并触发重算。数据在组件外被原地修改时，调用 `refreshRow()` 或 `refreshData()`；比较函数或编辑策略依赖外部状态时也应这样刷新。
+
+点击合并区时，行选择及行回调仍对应指针下的真实源行；单元格焦点落在合并区锚点，范围选择包含整个合并区。复制保持逐行输出，覆盖格的值不会被清空；即使自定义规则合并了不同原始值，各行仍按原值格式化。按行粘贴会跳过开始粘贴时已合并或不可编辑的格。长合并区可跨越虚拟滚动视口，文字会在当前可见部分出现。锚点文字溢出且单元格有不可编辑原因时，悬浮提示会同时显示完整文字和原因；未溢出时只显示原因。
+
 ## 当前限制
 
 - 排序、过滤、分组和汇总均在客户端数据模型中执行。几十万行或远程数据源应由业务层提供分页、服务端查询和防抖，不应一次传入全部数据。
-- 虚拟化使用统一 `rowHeight`，当前不支持按行动态高度、合并单元格或跨行布局。
+- 虚拟化使用统一 `rowHeight`，当前不支持按行动态高度、横向合并或任意矩形手工合并。
 - `GridColumnCustom` 主要用于自定义显示；需要完整自定义交互或层级行时，应分别使用显式 editor 或 [TreeGrid](./tree-grid.md)。
 - 只读状态面向交互约束；业务代码仍可通过 `setCellValue()`、替换 `rows` 等公开 API 主动更新数据。
 

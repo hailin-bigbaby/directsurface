@@ -15,6 +15,7 @@ import type {
 import type { GridDataModel } from './grid_data_model'
 import type { GridStructureEditController } from './grid_structure_edit_controller'
 import { defaultGridCellDisplayText } from './grid_display_resolver'
+import type { GridRowMergeModel, GridRowMergeRun } from './grid_row_merge_model'
 
 export interface GridInteractionControllerOptions<T extends Record<string, any>> {
   dataModel: GridDataModel<T>
@@ -32,6 +33,11 @@ export interface GridInteractionControllerOptions<T extends Record<string, any>>
 }
 
 export class GridInteractionController<T extends Record<string, any> = any> {
+  rowMerges?: GridRowMergeModel<T>
+  private _rowSelectionRevision = 0
+  private _selectionPrefixRevision = -1
+  private _selectionPrefixItems: ReturnType<GridDataModel<T>['visibleItems']> | null = null
+  private _selectionPrefix: number[] = []
   private readonly _dataModel: GridDataModel<T>
   private readonly _structureEditing: GridStructureEditController<T>
   private readonly _editable: GridInteractionControllerOptions<T>['editable']
@@ -83,6 +89,22 @@ export class GridInteractionController<T extends Record<string, any> = any> {
     return this._rowSelection.selectedItems
   }
 
+  isMergeFullySelected(run: GridRowMergeRun): boolean {
+    const items = this._dataModel.visibleItems()
+    if (items !== this._selectionPrefixItems || this._selectionPrefixRevision !== this._rowSelectionRevision) {
+      this._selectionPrefixItems = items
+      this._selectionPrefixRevision = this._rowSelectionRevision
+      this._selectionPrefix = new Array(this._dataModel.visibleRowCount() + 1)
+      this._selectionPrefix[0] = 0
+      for (let i = 0; i < this._selectionPrefix.length - 1; i++) {
+        this._selectionPrefix[i + 1] = this._selectionPrefix[i]! + (this.selectedRows.has(i) ? 1 : 0)
+      }
+    }
+    return this._selectionPrefix[run.endDataRowIndex + 1]! -
+      this._selectionPrefix[run.anchorDataRowIndex]! ===
+      run.endDataRowIndex - run.anchorDataRowIndex + 1
+  }
+
   get selectedSourceRows(): Set<number> {
     return this._selectedSourceRows
   }
@@ -115,6 +137,13 @@ export class GridInteractionController<T extends Record<string, any> = any> {
 
   get selectedRanges(): GridCellRange[] {
     return this._selectedRanges.map(range => ({ ...range }))
+  }
+
+  normalizeMergeSelection(): void {
+    if (this._selectionMode === 'row') return
+    if (this._currentCell) this._currentCell = this.mergeAnchorCell(this._currentCell.row, this._currentCell.col)
+    if (this._rangeAnchor) this._rangeAnchor = this.mergeAnchorCell(this._rangeAnchor.row, this._rangeAnchor.col)
+    this._selectedRanges = this._selectedRanges.map(range => this.expandMergeRange(range))
   }
 
   get isPointerRangeSelecting(): boolean {
@@ -232,6 +261,7 @@ export class GridInteractionController<T extends Record<string, any> = any> {
       this._focusedRowId = null
       this._focusedGroupPathKey = null
       if (options.select) {
+        this._rowSelectionRevision++
         this._rowSelection.clearSelected()
         this._selectedSourceRows.clear()
         this._selectedRowRefs.clear()
@@ -311,6 +341,7 @@ export class GridInteractionController<T extends Record<string, any> = any> {
     this._selectedRowRefs.clear()
     for (const rowId of nextIds) this._selectedRowIds.add(rowId)
     if (this._selectedRowIds.size === 0) {
+      this._rowSelectionRevision++
       this._rowSelection.replaceSelected(new Set())
       this._selectedSourceRows.clear()
       this._selectedRowRefs.clear()
@@ -391,13 +422,16 @@ export class GridInteractionController<T extends Record<string, any> = any> {
       endRow: clampIndex(range.endRow, rowCount - 1),
       endCol: clampIndex(range.endCol, colCount - 1),
     }
-    const focusItemIndex = this._dataModel.visibleItemIndexForVisibleRow(clamped.endRow)
+    const expanded = this.expandMergeRange(clamped)
+    const endpoint = this.mergeAnchorCell(clamped.endRow, clamped.endCol)
+    const start = this.mergeAnchorCell(clamped.startRow, clamped.startCol)
+    const focusItemIndex = this._dataModel.visibleItemIndexForVisibleRow(endpoint.row)
     if (focusItemIndex < 0) return false
     this._selectionMode = 'range'
     this.clearSelectionState()
-    this._rangeAnchor = { row: clamped.startRow, col: clamped.startCol }
-    this._currentCell = { row: clamped.endRow, col: clamped.endCol }
-    this._selectedRanges = [clamped]
+    this._rangeAnchor = start
+    this._currentCell = endpoint
+    this._selectedRanges = [expanded]
     this._pointerRangeSelecting = false
     this.focusedItemIndex = focusItemIndex
     this.focusedColIndex = clamped.endCol
@@ -408,6 +442,7 @@ export class GridInteractionController<T extends Record<string, any> = any> {
   }
 
   clearSelectionState(): void {
+    this._rowSelectionRevision++
     this._rowSelection.clearSelected()
     this._rowSelection.clearRange(null)
     this._selectedSourceRows.clear()
@@ -616,9 +651,15 @@ export class GridInteractionController<T extends Record<string, any> = any> {
       event.preventDefault()
       if (visibleItems.length === 0) return true
       const direction = event.key === 'ArrowUp' ? -1 : 1
-      const nextItemIndex = this.focusedItemIndex < 0
+      let nextItemIndex = this.focusedItemIndex < 0
         ? direction > 0 ? 0 : visibleItems.length - 1
         : Math.max(0, Math.min(visibleItems.length - 1, this.focusedItemIndex + direction))
+      if (this._selectionMode !== 'row' && this.focusedItemIndex >= 0) {
+        const column = this._getColumns()[this.focusedColIndex]
+        const run = column && this.rowMerges?.runAt(this.focusedItemIndex, column.key)
+        if (run) nextItemIndex = Math.max(0, Math.min(visibleItems.length - 1,
+          direction > 0 ? run.endItemIndex + 1 : run.startItemIndex - 1))
+      }
       this._moveFocusToItemIndex(nextItemIndex, {
         shiftKey: event.shiftKey,
         ctrlKey: event.ctrlKey,
@@ -857,25 +898,47 @@ export class GridInteractionController<T extends Record<string, any> = any> {
       const visibleRows = this._dataModel.visibleRows()
       const selectedIndices = [...this.selectedRows].sort((a, b) => a - b)
       if (selectedIndices.length === 0) return
+      const referenceCounts = new Map<T, number>()
+      for (const sourceRow of this._dataModel.rows) {
+        referenceCounts.set(sourceRow, (referenceCounts.get(sourceRow) ?? 0) + 1)
+      }
+
+      const targets = selectedIndices.slice(0, dataLines.length).map((visibleIndex, rowOffset) => {
+        const row = visibleRows[visibleIndex]
+        if (!row) return null
+        const values = dataLines[rowOffset]!.split('\t')
+        return {
+          row,
+          rowId: this._dataModel.rowIdForRow(row),
+          sourceIndex: this._dataModel.visibleRowIndex(visibleIndex),
+          uniqueReference: referenceCounts.get(row) === 1,
+          cells: headerKeys.slice(0, values.length).map((header, columnOffset) => {
+            const target = keyToColumn.get(header)
+            return target && this._structureEditing.canEditCell(visibleIndex, target.columnIndex)
+              ? { key: target.column.key, rawValue: values[columnOffset]! }
+              : null
+          }).filter((cell): cell is { key: string; rawValue: string } => cell !== null),
+        }
+      })
 
       let changed = false
       const validationRevision = this._structureEditing.validationRevision
-      for (let rowOffset = 0; rowOffset < Math.min(selectedIndices.length, dataLines.length); rowOffset++) {
-        const visibleIndex = selectedIndices[rowOffset]!
-        const row = visibleRows[visibleIndex]
-        if (!row) continue
-        const values = dataLines[rowOffset]!.split('\t')
-        for (let columnOffset = 0; columnOffset < Math.min(headerKeys.length, values.length); columnOffset++) {
-          const target = keyToColumn.get(headerKeys[columnOffset]!)
-          if (!target || !this._structureEditing.canEditCell(visibleIndex, target.columnIndex)) continue
-          const { column } = target
-          const rawValue = values[columnOffset]!
+      for (const target of targets) {
+        if (!target) continue
+        for (const cell of target.cells) {
+          const sourceIndex = this.sourceIndexForPasteTarget(target.row, target.rowId,
+            target.sourceIndex, target.uniqueReference)
+          if (sourceIndex < 0) break
+          const columnIndex = this._getColumns().findIndex(column => column.key === cell.key)
+          const column = this._getColumns()[columnIndex]
+          if (!column) continue
+          const rawValue = cell.rawValue
           const nextValue = column.type === 'checkbox' ? rawValue === 'true' : rawValue
-          if (!this._structureEditing.commitVisibleCell(
-            visibleIndex,
-            target.columnIndex,
+          if (!this._structureEditing.commitSourceCell(
+            sourceIndex,
+            columnIndex,
             nextValue,
-            row[column.key],
+            this._dataModel.rows[sourceIndex]?.[column.key],
           )) continue
           changed = true
         }
@@ -884,6 +947,19 @@ export class GridInteractionController<T extends Record<string, any> = any> {
       if (changed) this.syncVisibleState(this._dataModel.visibleItemCount(), this._dataModel.visibleRowCount())
       this._onMarkNeedsPaint()
     }).catch(() => {})
+  }
+
+  private sourceIndexForPasteTarget(row: T, rowId: GridRowId | null,
+    originalIndex: number, uniqueReference: boolean): number {
+    const rows = this._dataModel.rows
+    if (uniqueReference && rows[originalIndex] === row) return originalIndex
+    const byReference = rows.indexOf(row)
+    if (byReference >= 0 && uniqueReference) return byReference
+    if (rowId !== null) {
+      const byId = this._dataModel.sourceRowIndexForRowId(rowId)
+      if (byId >= 0 && rows[byId]) return byId
+    }
+    return -1
   }
 
   deleteSelectedRows(): void {
@@ -896,6 +972,7 @@ export class GridInteractionController<T extends Record<string, any> = any> {
       .filter(index => index >= 0)
     if (!this._dataModel.removeRows(rawIndices)) return
     this.selectedRows.clear()
+    this._rowSelectionRevision++
     this._selectedSourceRows.clear()
     this._selectedRowRefs.clear()
     this._selectedRowIds.clear()
@@ -991,16 +1068,56 @@ export class GridInteractionController<T extends Record<string, any> = any> {
     const colCount = this._getColumns().length
     const rowCount = this._dataModel.visibleRowCount()
     if (row >= rowCount || col >= colCount) return
-    const cell = { row, col }
+    const cell = this.mergeAnchorCell(row, col)
+    const itemIndex = this._dataModel.visibleItemIndexForVisibleRow(row)
+    const column = this._getColumns()[col]
+    const run = column && itemIndex >= 0 ? this.rowMerges?.runAt(itemIndex, column.key) : null
     this._currentCell = cell
     if (!extend || !this._rangeAnchor) this._rangeAnchor = cell
     const anchor = this._rangeAnchor
-    this._selectedRanges = [{
+    this._selectedRanges = [this.expandMergeRange({
       startRow: anchor.row,
       startCol: anchor.col,
       endRow: row,
       endCol: col,
-    }]
+    })]
+    if (run && this._selectionMode !== 'row') {
+      this.focusedItemIndex = run.startItemIndex
+      this._syncFocusedRowIdFromCurrentItem()
+    }
+  }
+
+  private mergeAnchorCell(row: number, col: number): GridCellCoord {
+    const column = this._getColumns()[col]
+    const itemIndex = this._dataModel.visibleItemIndexForVisibleRow(row)
+    const run = column && itemIndex >= 0 ? this.rowMerges?.runAt(itemIndex, column.key) : null
+    return { row: run?.anchorDataRowIndex ?? row, col }
+  }
+
+  private expandMergeRange(range: GridCellRange): GridCellRange {
+    if (!this.rowMerges) return range
+    const expanded = this.normalizeRange(range)
+    let changed = true
+    while (changed) {
+      changed = false
+      const first = this._dataModel.visibleItemIndexForVisibleRow(expanded.startRow)
+      const last = this._dataModel.visibleItemIndexForVisibleRow(expanded.endRow)
+      for (let col = expanded.startCol; col <= expanded.endCol; col++) {
+        const column = this._getColumns()[col]
+        if (!column?.mergeRows) continue
+        for (const run of this.rowMerges.intersecting(first, last, column.key)) {
+          if (run.anchorDataRowIndex < expanded.startRow) {
+            expanded.startRow = run.anchorDataRowIndex
+            changed = true
+          }
+          if (run.endDataRowIndex > expanded.endRow) {
+            expanded.endRow = run.endDataRowIndex
+            changed = true
+          }
+        }
+      }
+    }
+    return expanded
   }
 
   private _selectAllCells(rowCount: number): void {
@@ -1031,12 +1148,13 @@ export class GridInteractionController<T extends Record<string, any> = any> {
         col: Math.max(0, Math.min(colCount - 1, this._currentCell.col)),
       }
     }
-    this._selectedRanges = this._selectedRanges.map(range => ({
+    this._selectedRanges = this._selectedRanges.map(range => this.expandMergeRange({
       startRow: Math.max(0, Math.min(rowCount - 1, range.startRow)),
       startCol: Math.max(0, Math.min(colCount - 1, range.startCol)),
       endRow: Math.max(0, Math.min(rowCount - 1, range.endRow)),
       endCol: Math.max(0, Math.min(colCount - 1, range.endCol)),
     }))
+    this.normalizeMergeSelection()
   }
 
   private normalizeRange(range: GridCellRange): GridCellRange {
@@ -1152,6 +1270,7 @@ export class GridInteractionController<T extends Record<string, any> = any> {
   }
 
   private _syncSelectedIdentitiesFromVisible(): void {
+    this._rowSelectionRevision++
     this._selectedSourceRows.clear()
     this._selectedRowRefs.clear()
     this._selectedRowIds.clear()
@@ -1169,6 +1288,7 @@ export class GridInteractionController<T extends Record<string, any> = any> {
   }
 
   private _refreshVisibleSelectionFromSources(visibleRowCount: number): void {
+    this._rowSelectionRevision++
     const hadRowIds = this._selectedRowIds.size > 0
     this._pruneMissingSelectedRowIds()
     if (hadRowIds && this._selectedRowIds.size === 0 && this._dataModel.hasRowKey()) {

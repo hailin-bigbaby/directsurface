@@ -18,6 +18,14 @@ export interface GridColumnBase<T extends Record<string, any> = any> {
   align?: 'left' | 'center' | 'right'
   cellTextOverflow?: GridCellTextOverflow
   editable?: boolean
+  /** Merge adjacent display rows in this column without changing source values. */
+  mergeRows?: boolean | ((context: {
+    column: GridColumnDef
+    previousRow: T
+    currentRow: T
+    previousValue: unknown
+    currentValue: unknown
+  }) => boolean)
   sortable?: boolean
   filterable?: boolean
   filterValueFormatter?: (
