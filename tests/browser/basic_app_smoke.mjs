@@ -26,7 +26,7 @@ const geometry = {
   drawerCalendar: [1235, 379],
   calendarToday: [914, 634],
   calendarConfirm: [978, 634],
-  firstTask: [432, 639],
+  firstTask: [432, 518],
   drawerStatus: [1100, 318],
   statusDone: [919, 405],
   drawerSave: [931, 451],
@@ -116,7 +116,10 @@ try {
   const beforeDone = await hash(page, doneArea)
   await page.mouse.move(1170, 620)
   for (let index = 0; index < 10; index++) await page.mouse.wheel(0, 500)
+  const drawerArea = { x: 880, y: 110, width: 190, height: 130 }
+  const beforeDrawer = await hash(page, drawerArea)
   await page.mouse.click(...geometry.firstTask)
+  await expectCanvasChange(page, drawerArea, beforeDrawer)
   await page.waitForTimeout(350)
   await page.mouse.click(...geometry.drawerStatus)
   await page.mouse.click(...geometry.statusDone)
