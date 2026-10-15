@@ -37,3 +37,13 @@ clock.dispose()
 ```
 
 The standalone clock does not create browser frame callbacks itself. `RuntimeHost.renderFrame(timestamp)` advances the clock; omitting the timestamp paints current state only. Decorative animation time excludes hidden time and must not be used as a business deadline clock. Failed callbacks or activity predicates are removed and surfaced while other subscriptions can continue.
+
+## Focus visibility
+
+Actual focus and its navigation outline are separate. Pointer presses hide navigation focus rings without clearing focus or selection. Keyboard navigation reveals them again, including when focus remains on the same control. Pointer movement and scrolling do not hide a keyboard focus ring.
+
+`FocusManager` records input before pointer routing and popup interception. Tab, arrows, Home/End, PageUp/PageDown, Enter, Space and Escape select keyboard visibility. Modifier-only keys, ordinary Ctrl/Meta/Alt shortcuts and input composition do not change the policy; navigation combinations such as Ctrl+Tab still count as keyboard navigation.
+
+Programmatic focus and popup focus restoration inherit the latest input modality; the initial default is keyboard visibility. Text fields and editors retain their editing border, caret and selection after pointer focus. Selected items and active editing cells keep their own state indicators.
+
+`FocusManager.instance.inputModality` returns `keyboard` or `pointer`. `FocusManager.keyboardFocusVisible` is a read-only drawing policy and does not instantiate a manager. Custom navigation outlines should follow that policy while preserving actual focus. Built-in focusable controls also expose `isFocusVisible`. Standard pointer dispatch already calls `notifyPointerInput()`; custom adapters can call it before dispatching pointer-down events. Keyboard events continue through `handleKeyDownEvent()`.

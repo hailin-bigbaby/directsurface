@@ -445,3 +445,5 @@ group 只是分组控制。展开模式点击 group 切换组折叠；折叠模�
 - [Tabs 标签](./tabs.md)
 - [TabbedWorkspace 标签工作区](./tabbed-workspace.md)
 - [DockWorkspace 停靠工作区](./dock-workspace.md)
+
+键盘导航显示额外焦点框；鼠标点击保留选中状态和实际焦点，不额外显示导航焦点框。详见[焦点可见性](../../lifecycle.md#focus-visibility)。

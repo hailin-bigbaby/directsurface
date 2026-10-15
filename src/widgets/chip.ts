@@ -15,6 +15,7 @@ import {
 import type { ResolvedTheme } from '../theme/theme'
 import { paintIconGlyph } from './icon'
 import { FocusableControl, paintFocusRing } from './focusable_control'
+import { FocusManager } from '../core/focus_manager'
 
 export interface ChipLayoutMetrics {
   width: number
@@ -75,7 +76,7 @@ export function paintChip(
     selected: options.selected,
     pressed,
     hovered,
-    focused: options.focused,
+    focused: options.focused && FocusManager.keyboardFocusVisible,
   }
   const bgSet = options.selected ? style.selectedBg : style.defaultBg
   const bg = resolveBgColor(bgSet, state)

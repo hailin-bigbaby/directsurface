@@ -353,7 +353,7 @@ export class RenderTable<T extends Record<string, any> = any> extends RenderBox 
         if (rowBg === null && ri % 2 === 1) rowBg = s.stripeBg
 
         if (rowBg) dl.fillRect(x, rowY, viewW, this.rowHeight, rowBg, 0)
-        if (this._focusedRow === ri) {
+        if (this._focusedRow === ri && FocusManager.keyboardFocusVisible) {
           dl.strokeRect(x + 1, rowY + 1, viewW - 2, this.rowHeight - 2, resolveBgColor(s.rowBorderState, 'focused'), 1, 0)
         }
 

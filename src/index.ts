@@ -184,6 +184,7 @@ export {
   FocusScope,
   FocusScopeType,
   type AuxiliaryFocusRootRegistration,
+  type FocusInputModality,
   type Focusable,
 } from './core/focus_manager'
 export { InputComposer, type InputSession, type InputSessionToken } from './core/input_composer'

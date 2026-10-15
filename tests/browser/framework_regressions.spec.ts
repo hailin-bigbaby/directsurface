@@ -213,3 +213,95 @@ test('runtime clock drives loading animations in the same frame at 60, 120 and 1
     }
   }
 })
+
+test('native pointer and keyboard routing controls focus rings while retaining input editing chrome', async ({ page }) => {
+  const result = await page.evaluate(() => {
+    const { RuntimeHost, FocusManager, RenderButton, RenderRadioGroup, RenderItemsControl,
+      RenderTextBox, RenderTextArea, RenderText, RenderStackPanel, DrawList } = renderingUnderTest
+    const canvas = document.createElement('canvas')
+    document.body.append(canvas)
+    const host = new RuntimeHost({ canvas, dpr: 2, getViewportSize: () => ({ width: 400, height: 360 }) })
+    const originalRing = DrawList.prototype.strokeRectDashed
+    const originalBorder = DrawList.prototype.strokeRect
+    let rings = 0
+    let editingBorders = 0
+    DrawList.prototype.strokeRectDashed = function(...args) { rings++; originalRing.apply(this, args) }
+    DrawList.prototype.strokeRect = function(...args) {
+      if (args[5] === 1.5) editingBorders++
+      originalBorder.apply(this, args)
+    }
+    try {
+      const root = new RenderStackPanel({ orientation: 'vertical', spacing: 8 })
+      let activations = 0
+      const button = new RenderButton({ label: 'Save', onClick: () => activations++ })
+      const radio = new RenderRadioGroup({ value: 'a', options: [{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }] })
+      const item = { key: 'home' }
+      const navigation = new RenderItemsControl({ items: [item], getKey: item => item.key, selectedItem: item,
+        itemAppearance: 'navigation', itemTemplate: () => new RenderText('Home') })
+      navigation.height = 40
+      const input = new RenderTextBox({ value: 'Hello' })
+      const area = new RenderTextArea({ value: 'Multiline' })
+      area.height = 80
+      for (const control of [button, radio, navigation, input, area]) root.addChild(control)
+      host.addRoot(root)
+      host.registerLayer({ layer: 'main', paint: ({ context }) => root.paint(context, root.globalOffset) })
+      const snapshot = () => {
+        rings = editingBorders = 0
+        host.markAllLayersDirty()
+        host.renderFrame()
+        return { rings, editingBorders, modality: FocusManager.instance.inputModality }
+      }
+      snapshot()
+      const click = (control: typeof button | typeof radio | typeof navigation | typeof input | typeof area) => {
+        const rect = canvas.getBoundingClientRect()
+        const point = control.globalOffset
+        const init = { bubbles: true, cancelable: true, button: 0, clientX: rect.left + point.x + 10,
+          clientY: rect.top + point.y + Math.min(10, control.size.height / 2) }
+        canvas.dispatchEvent(new MouseEvent('mousedown', { ...init, buttons: 1 }))
+        canvas.dispatchEvent(new MouseEvent('mouseup', { ...init, buttons: 0 }))
+      }
+      const key = (key: string, options: KeyboardEventInit = {}) =>
+        window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...options }))
+      click(button)
+      const pointerButton = { ...snapshot(), focused: button.isFocused, activations }
+      key('Tab')
+      const keyboardRadio = { ...snapshot(), focused: radio.isFocused }
+      key('ArrowRight')
+      const arrowRadio = { ...snapshot(), value: radio.value }
+      canvas.dispatchEvent(new MouseEvent('mousemove', { clientX: 5, clientY: 5, bubbles: true }))
+      const afterMove = snapshot()
+      click(radio)
+      const pointerRadio = { ...snapshot(), focused: radio.isFocused }
+      key('Shift')
+      const modifierOnly = snapshot()
+      click(navigation)
+      const pointerNavigation = { ...snapshot(), selected: navigation.selectedItem?.key }
+      key('ArrowDown')
+      const keyboardNavigation = { ...snapshot(), selected: navigation.selectedItem?.key }
+      click(input)
+      const pointerInput = { ...snapshot(), focused: input.isFocused, inputElement: document.activeElement?.tagName }
+      key('Enter', { isComposing: true })
+      const composition = snapshot()
+      click(area)
+      const pointerArea = { ...snapshot(), focused: area.isFocused }
+      return { pointerButton, keyboardRadio, arrowRadio, afterMove, pointerRadio, modifierOnly,
+        pointerNavigation, keyboardNavigation, pointerInput, composition, pointerArea }
+    } finally {
+      DrawList.prototype.strokeRectDashed = originalRing
+      DrawList.prototype.strokeRect = originalBorder
+      host.dispose()
+      canvas.remove()
+    }
+  })
+  expect(result.pointerButton).toMatchObject({ rings: 0, focused: true, activations: 1, modality: 'pointer' })
+  expect(result.keyboardRadio).toMatchObject({ rings: 1, focused: true, modality: 'keyboard' })
+  expect(result.arrowRadio).toMatchObject({ rings: 1, value: 'b' })
+  expect(result.afterMove).toMatchObject({ rings: 1, modality: 'keyboard' })
+  expect(result.pointerRadio).toMatchObject({ rings: 0, focused: true, modality: 'pointer' })
+  expect(result.modifierOnly).toMatchObject({ rings: 0, modality: 'pointer' })
+  expect(result.pointerNavigation).toMatchObject({ rings: 0, selected: 'home' })
+  expect(result.keyboardNavigation).toMatchObject({ rings: 1, selected: 'home' })
+  expect(result.pointerInput).toMatchObject({ rings: 0, editingBorders: 1, focused: true, inputElement: 'TEXTAREA' })
+  expect(result.composition).toMatchObject({ rings: 0, editingBorders: 1, modality: 'pointer' })
+  expect(result.pointerArea).toMatchObject({ rings: 0, editingBorders: 1, focused: true })
+})

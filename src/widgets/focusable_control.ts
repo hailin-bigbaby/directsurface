@@ -27,6 +27,10 @@ export abstract class FocusableControl extends RenderBox implements Focusable {
     return this._interaction.isFocused
   }
 
+  get isFocusVisible(): boolean {
+    return this.isFocused && FocusManager.keyboardFocusVisible
+  }
+
   protected get isDisabled(): boolean {
     return this._interaction.isDisabled
   }
@@ -140,7 +144,7 @@ export function paintFocusRing(
   height: number,
   borderRadius: number,
 ): void {
-  if (width <= 2 || height <= 2) return
+  if (!FocusManager.keyboardFocusVisible || width <= 2 || height <= 2) return
   const ringColor: Color = { ...color, a: Math.min(0.84, Math.max(0.4, color.a * 0.76)) }
   dl.strokeRectDashed(
     x + 1.5,

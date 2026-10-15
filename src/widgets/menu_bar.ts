@@ -83,7 +83,7 @@ export class RenderMenuBar extends FocusableControl implements InteractiveRender
       const itemDisabled = this.isDisabled || !!menuItem.disabled
       const isOpen = r.key === this._openKey
       const isHovered = !itemDisabled && r.key === this._hoveredKey
-      const isKeyboardKey = !itemDisabled && this.isFocused && r.key === this._keyboardKey
+      const isKeyboardKey = !itemDisabled && this.isFocusVisible && r.key === this._keyboardKey
       const localX = r.x - this.globalOffset.x + x
       const state = {
         disabled: itemDisabled,

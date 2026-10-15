@@ -158,7 +158,7 @@ export class RenderRadioGroup extends FocusableControl implements
       const isSelected = opt.value === this.value
       const isHovered = opt.value === this._hoveredValue
       const isDisabled = this.isDisabled || !!opt.disabled
-      const isFocusedOption = this.isFocused && opt.value === focusValue && !isDisabled
+      const isFocusedOption = this.isFocusVisible && opt.value === focusValue && !isDisabled
       const animT = this._anims.get(opt.value)?.value ?? (isSelected ? 1 : 0)
       const state = {
         disabled: isDisabled,

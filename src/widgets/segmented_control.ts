@@ -159,7 +159,7 @@ export class RenderSegmentedControl extends FocusableControl implements
         selected: isSelected,
         pressed: isPressed,
         hovered: isHovered,
-        focused: this.isFocused && segment.option.value === this._focusValue(),
+        focused: this.isFocusVisible && segment.option.value === this._focusValue(),
       }
       const bg = resolveBgColor(style.segmentBg, state)
       if (bg.a > 0) {

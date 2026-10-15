@@ -353,7 +353,7 @@ export class RenderListView<T = unknown> extends RenderBox implements Interactiv
           disabled: this.disabled || item.disabled,
           selected: item.key === this._selectedKey,
           hovered: item.key === this._hoveredKey,
-          focused: this._focused && index === this._focusedIndex,
+          focused: this._focused && FocusManager.keyboardFocusVisible && index === this._focusedIndex,
         }
         if (rowState.disabled || rowState.selected || rowState.hovered) {
           dl.fillRect(x, rowY, contentW, this._rowHeight, resolveBgColor(s.rowBg, rowState), 0)

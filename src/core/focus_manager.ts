@@ -3,7 +3,7 @@
 // 通过 FocusScope 支持普通焦点、模态陷阱、弹出层临时焦点
 // keydown 事件通过 FocusScope 栈分发，替代全局优先级注册
 
-import { DisposableBag } from './disposable'
+import { DisposableBag, runCleanupSteps } from './disposable'
 import { RenderObject } from './render_object'
 import { ClipboardController, isCopyShortcut, isCopyableSelection } from './clipboard'
 
@@ -14,6 +14,14 @@ export interface Focusable {
   shouldIgnoreKeyDown?(event: KeyboardEvent): boolean
   onKeyDown?(event: KeyboardEvent): boolean | void
 }
+
+export type FocusInputModality = 'keyboard' | 'pointer'
+
+const focusNavigationKeys = new Set([
+  'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+  'Home', 'End', 'PageUp', 'PageDown', 'Enter', ' ', 'Escape',
+])
+const modifierKeys = new Set(['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'])
 
 export interface AuxiliaryFocusRootRegistration {
   updateOrder(order: number): void
@@ -191,6 +199,11 @@ export class FocusManager {
     FocusManager._instance?.dispose()
   }
 
+  /** Read-only paint policy; does not create a manager while rendering detached controls. */
+  static get keyboardFocusVisible(): boolean {
+    return FocusManager._instance?._inputModality !== 'pointer'
+  }
+
   private _defaultScope = new FocusScope(FocusScopeType.Normal)
   private _scopeStack: FocusScope[] = [this._defaultScope]
   private _disposables = new DisposableBag()
@@ -199,12 +212,36 @@ export class FocusManager {
   private _activeRoot?: RenderObject
   private readonly _auxiliaryRoots = new Map<RenderObject, number>()
   private _previousNonAuxiliaryFocus: Focusable | null = null
+  private _inputModality: FocusInputModality = 'keyboard'
 
   private constructor() {
     this._keyHandler = (e: KeyboardEvent) => {
       this.handleKeyDownEvent(e)
     }
     this._disposables.listen(window, 'keydown', this._keyHandler, true)
+    const pointerInput = () => this.notifyPointerInput()
+    this._disposables.listen(window, 'pointerdown', pointerInput, true)
+    this._disposables.listen(window, 'mousedown', pointerInput, true)
+    this._disposables.listen(window, 'touchstart', pointerInput, true)
+  }
+
+  get inputModality(): FocusInputModality { return this._inputModality }
+
+  /** Called before pointer routing, including interceptors and popup handlers. */
+  notifyPointerInput(): void { this._setInputModality('pointer') }
+
+  private _setInputModality(modality: FocusInputModality): void {
+    if (this._inputModality === modality) return
+    this._inputModality = modality
+    const focused = new Set<RenderObject>()
+    for (const scope of this._scopeStack) {
+      for (const widget of scope.focusables) {
+        if (widget instanceof RenderObject && widget.isFocused) focused.add(widget)
+      }
+    }
+    // Repaint even when focus stays on the same control. Popup scopes can retain
+    // the underlying focused control, so invalidate all focused scope members.
+    runCleanupSteps([...focused].map(widget => () => widget.markNeedsPaint()))
   }
 
   private get _activeScope(): FocusScope {
@@ -404,6 +441,10 @@ export class FocusManager {
   handleKeyDownEvent(e: KeyboardEvent): boolean {
     this._clearInactiveFocus()
     if (this.current?.shouldIgnoreKeyDown?.(e) === true) return false
+    if (!e.isComposing && e.keyCode !== 229 && e.key && e.key !== 'Process' && !modifierKeys.has(e.key) &&
+      (focusNavigationKeys.has(e.key) || (!e.ctrlKey && !e.metaKey && !e.altKey))) {
+      this._setInputModality('keyboard')
+    }
 
     if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       const dir = e.shiftKey ? -1 : 1

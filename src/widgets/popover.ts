@@ -376,7 +376,7 @@ export class RenderPopover extends FocusableControl implements InteractiveRender
       selected: this._popup.visible,
       pressed: this._pressed,
       hovered: this._hovered,
-      focused: this.isFocused,
+      focused: this.isFocusVisible,
     }
     const bg = resolveBgColor(style.background, state)
     const border = resolveBgColor(style.border, state)

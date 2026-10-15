@@ -87,6 +87,88 @@ afterEach(() => {
 })
 
 describe('FocusManager lifecycle', () => {
+  it('switches focus visibility without blurring the current control or repeating invalidation', () => {
+    const manager = FocusManager.instance
+    const node = new FocusNode()
+    manager.register(node)
+    manager.setFocus(node)
+    const paint = vi.spyOn(node, 'markNeedsPaint')
+    expect(FocusManager.keyboardFocusVisible).toBe(true)
+
+    manager.notifyPointerInput()
+    expect(manager.inputModality).toBe('pointer')
+    expect(FocusManager.keyboardFocusVisible).toBe(false)
+    expect(node.isFocused).toBe(true)
+    expect(manager.current).toBe(node)
+    expect(paint).toHaveBeenCalledTimes(1)
+    manager.notifyPointerInput()
+    expect(paint).toHaveBeenCalledTimes(1)
+
+    manager.handleKeyDownEvent(keyEvent('ArrowRight'))
+    expect(manager.inputModality).toBe('keyboard')
+    expect(FocusManager.keyboardFocusVisible).toBe(true)
+    expect(node.isFocused).toBe(true)
+    expect(paint).toHaveBeenCalledTimes(2)
+  })
+
+  it('ignores pointer movement, modifier-only keys, shortcuts and IME composition', () => {
+    const manager = FocusManager.instance
+    manager.notifyPointerInput()
+    for (const key of ['Shift', 'Control', 'Meta', 'Alt', 'CapsLock']) manager.handleKeyDownEvent(keyEvent(key))
+    manager.handleKeyDownEvent(keyEvent('s', { ctrlKey: true }))
+    manager.handleKeyDownEvent(keyEvent('Enter', { isComposing: true }))
+    expect(FocusManager.keyboardFocusVisible).toBe(false)
+    manager.handleKeyDownEvent(keyEvent('Tab', { ctrlKey: true }))
+    expect(FocusManager.keyboardFocusVisible).toBe(true)
+    window.dispatchEvent(new MouseEvent('mousemove'))
+    window.dispatchEvent(new WheelEvent('wheel'))
+    expect(FocusManager.keyboardFocusVisible).toBe(true)
+  })
+
+  it.each(['pointerdown', 'mousedown', 'touchstart'])('records %s before routing focus', eventType => {
+    const manager = FocusManager.instance
+    window.dispatchEvent(new Event(eventType))
+    expect(manager.inputModality).toBe('pointer')
+  })
+
+  it('updates retained popup focus and restores focus using the current input modality', () => {
+    const manager = FocusManager.instance
+    const anchor = new FocusNode()
+    const popupButton = new FocusNode()
+    manager.register(anchor)
+    manager.setFocus(anchor)
+    manager.notifyPointerInput()
+    const scope = new FocusScope(FocusScopeType.Popup)
+    scope.add(popupButton)
+    const restore = manager.pushScope(scope)
+    manager.setFocus(popupButton)
+    const anchorPaint = vi.spyOn(anchor, 'markNeedsPaint')
+    const popupPaint = vi.spyOn(popupButton, 'markNeedsPaint')
+
+    manager.handleKeyDownEvent(keyEvent('Escape'))
+    expect(anchorPaint).toHaveBeenCalledTimes(1)
+    expect(popupPaint).toHaveBeenCalledTimes(1)
+    manager.popScope(restore, scope)
+    expect(manager.current).toBe(anchor)
+    expect(FocusManager.keyboardFocusVisible).toBe(true)
+    manager.notifyPointerInput()
+    manager.setFocus(anchor)
+    expect(FocusManager.keyboardFocusVisible).toBe(false)
+    expect(anchor.isFocused).toBe(true)
+  })
+
+  it('removes modality listeners on disposal and resets the next manager to keyboard visibility', () => {
+    const manager = FocusManager.instance
+    const remove = vi.spyOn(window, 'removeEventListener')
+    manager.notifyPointerInput()
+    manager.dispose()
+    for (const eventType of ['pointerdown', 'mousedown', 'touchstart']) {
+      expect(remove).toHaveBeenCalledWith(eventType, expect.any(Function), true)
+    }
+    expect(FocusManager.keyboardFocusVisible).toBe(true)
+    expect(FocusManager.instance.inputModality).toBe('keyboard')
+  })
+
   it('removes the global key listener on dispose', () => {
     const addSpy = vi.spyOn(window, 'addEventListener')
     const removeSpy = vi.spyOn(window, 'removeEventListener')

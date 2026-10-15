@@ -13,6 +13,7 @@ import {
   type InteractionStateInput,
 } from '../theme/component_styles'
 import { paintFocusRing } from './focusable_control'
+import { FocusManager } from '../core/focus_manager'
 
 export interface ItemContainerState {
   selected: boolean
@@ -273,7 +274,7 @@ export class RenderItemContainer<T> extends RenderBox {
       disabled: this._disabled,
       selected: this._selected,
       hovered: this._hovered,
-      focused: this._focused,
+      focused: this._focused && FocusManager.keyboardFocusVisible,
     }
   }
 

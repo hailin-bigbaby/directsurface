@@ -481,7 +481,7 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
         // 行背景
         const isSelected = flat.node.key === this._selectedKey
         const isHovered = !this.disabled && flat.node.key === this._hoveredKey
-        const isFocused = !this.disabled && this._focused && i === this._focusedIndex
+        const isFocused = !this.disabled && this._focused && FocusManager.keyboardFocusVisible && i === this._focusedIndex
         const isSelectable = !this.disabled && flat.node.selectable !== false
         const rowState: InteractionStateFlags = {
           disabled: this.disabled,

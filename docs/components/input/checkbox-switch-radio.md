@@ -409,3 +409,5 @@ Checkbox 表示“是否选择这个条件或选项”；Switch 表示“这个�
 - [ListView 列表](../data/list-view.md)
 - [主题与状态](../../themes.md)
 - [焦点与输入](../../lifecycle.md)
+
+键盘导航显示焦点框，鼠标点击隐藏额外焦点框；勾选、开关及单选值不受影响。文本输入的编辑边框与光标继续保留。详见[焦点可见性](../../lifecycle.md#focus-visibility)。

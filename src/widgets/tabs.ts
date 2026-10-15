@@ -332,7 +332,7 @@ export class RenderTabs extends FocusableControl implements InteractiveRenderObj
         selected: isActive,
         hovered: isHovered,
         pressed: !this.isDisabled && tab.key === this._pressedTab,
-        focused: !this.isDisabled && this.isFocused && isActive,
+        focused: !this.isDisabled && this.isFocusVisible && isActive,
       }
       const tabBg = resolveBgColor(s.tabBg, state)
       const paintHeight = isActive ? tabH : inactiveTabH

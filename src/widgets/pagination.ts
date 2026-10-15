@@ -104,7 +104,7 @@ export class RenderPagination extends FocusableControl implements InteractiveRen
           selected: segment.kind === 'page' && segment.selected,
           hovered: this._hoveredIndex === index,
           pressed: this._pressedIndex === index && this._hoveredIndex === index,
-          focused: this.isFocused && this._hoveredIndex === index,
+          focused: this.isFocusVisible && this._hoveredIndex === index,
         }
         dl.fillRect(segX, y + 2, rect.width, this.size.height - 4, resolveBgColor(style.itemBg, state), style.borderRadius)
         if (this.isFocused && this._hoveredIndex === index && !this.isDisabled && !interactive.disabled) {

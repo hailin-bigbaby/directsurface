@@ -729,6 +729,7 @@ export class EventDispatcher {
 
   private _handlePointerDown(pe: import('./hit_test').PointerEvent): void {
     if (this.disposed) return
+    FocusManager.instance.notifyPointerInput()
     if (this.sessions.isTerminating(pe)) return
     if (this.sessions.hasActiveSequence(pe)) {
       const stalePosition = this.sessions.get(pe)?.lastPosition ?? pe.position
