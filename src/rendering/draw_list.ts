@@ -2,6 +2,7 @@
 
 import { colorToCSS, type Color } from '../theme/theme'
 import type { PaintContext } from './paint_context'
+import { snapRectToPixels, snapStrokeRectToPixels } from './pixel_geometry'
 
 export interface DrawListStats {
   fillRect: number
@@ -520,37 +521,12 @@ export class DrawList {
     return font
   }
 
-  private _snapRect(x: number, y: number, w: number, h: number): { x: number; y: number; w: number; h: number } {
-    const left = this._snapCoord(x)
-    const top = this._snapCoord(y)
-    const right = this._snapCoord(x + w)
-    const bottom = this._snapCoord(y + h)
-    return {
-      x: left,
-      y: top,
-      w: Math.max(0, right - left),
-      h: Math.max(0, bottom - top),
-    }
+  private _snapRect(x: number, y: number, w: number, h: number) {
+    return snapRectToPixels(this.ctx, x, y, w, h)
   }
 
-  private _snapStrokeRect(
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-    lineWidth: number,
-  ): { x: number; y: number; w: number; h: number } {
-    const offset = this._strokeOffset(lineWidth)
-    const left = this._snapCoord(x) + offset
-    const top = this._snapCoord(y) + offset
-    const right = this._snapCoord(x + w) - offset
-    const bottom = this._snapCoord(y + h) - offset
-    return {
-      x: left,
-      y: top,
-      w: Math.max(0, right - left),
-      h: Math.max(0, bottom - top),
-    }
+  private _snapStrokeRect(x: number, y: number, w: number, h: number, lineWidth: number) {
+    return snapStrokeRectToPixels(this.ctx, x, y, w, h, lineWidth)
   }
 
   private _snapLine(

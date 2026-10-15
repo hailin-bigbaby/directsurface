@@ -358,3 +358,7 @@ Tabs 只处理自身获得焦点后的 Delete/Backspace。全局快捷键由业�
 - [MenuBar 菜单栏](./menu-bar.md)
 - [ContextMenu 右键菜单](../overlay/context-menu.md)
 - [Toolbar 工具栏](../command/toolbar.md)
+
+## 边框绘制
+
+标签条的边框按外边界绘制并向内保留完整线宽，在高分屏和缩放下与背景边缘保持一致。

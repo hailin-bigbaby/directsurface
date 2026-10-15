@@ -2,6 +2,8 @@ import { RenderObject, constrainSize, type BoxConstraints, type LayoutContext, t
 import { RenderBox, resolveChildLayout, type RenderBoxOptions } from '../layout/render_box'
 import { DrawList } from '../rendering/draw_list'
 import type { PaintContext } from '../rendering/paint_context'
+import { snapRectToPixels } from '../rendering/pixel_geometry'
+import { colorToCSS } from '../theme/theme'
 import {
   deriveItemContainerStyle,
   mergeItemContainerStyle,
@@ -224,14 +226,15 @@ export class RenderItemContainer<T> extends RenderBox {
     if (style.borderWidth > 0) {
       const borderColor = resolveBgColor(style.border, state)
       if (style.borderPlacement === 'bottom') {
-        dl.line(
-          offset.x,
-          offset.y + this.size.height,
-          offset.x + this.size.width,
-          offset.y + this.size.height,
-          borderColor,
-          style.borderWidth,
-        )
+        const ctx = context.ctx
+        const bounds = snapRectToPixels(ctx, offset.x, offset.y, this.size.width, this.size.height)
+        const borderHeight = Math.min(style.borderWidth, bounds.h)
+        // Align the outer edge to the viewport, but preserve fractional line width.
+        // DrawList.fillRect would independently round both edges of this thin strip.
+        ctx.save()
+        ctx.fillStyle = colorToCSS(borderColor)
+        ctx.fillRect(bounds.x, bounds.y + bounds.h - borderHeight, bounds.w, borderHeight)
+        ctx.restore()
       } else {
         dl.strokeRect(
           offset.x,

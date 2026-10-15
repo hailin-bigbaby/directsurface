@@ -461,7 +461,7 @@ export class RenderTabs extends FocusableControl implements InteractiveRenderObj
       })
     }
 
-    dl.strokeRect(x + 0.5, y + 0.5, Math.max(0, w - 1), Math.max(0, h - 1), s.separator, 1, 0)
+    dl.strokeRect(x, y, w, h, s.separator, 1, 0)
   }
 
   private _activateTab(key: string): void {
