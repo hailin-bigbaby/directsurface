@@ -1,4 +1,5 @@
-import { DisposableBag, type DisposeFn } from '../core/disposable'
+import type { DisposeFn } from '../core/disposable'
+import type { AnimationRegistrar } from '../animation/animation_clock'
 import type { Offset, Size } from '../core/render_object'
 import { DrawList } from '../rendering/draw_list'
 import type { PaintContext } from '../rendering/paint_context'
@@ -10,21 +11,30 @@ export class LoadingOverlayController {
   private _text?: string
   private _spinAngle = 0
   private _spinDisposer?: DisposeFn
-  private readonly _disposables = new DisposableBag()
+  private _registerAnimation?: AnimationRegistrar
 
   constructor(
     private readonly _requestPaint: () => void,
     options: {
       loading?: boolean
       text?: string
+      registerAnimation?: AnimationRegistrar
     } = {},
   ) {
     this._text = options.text
+    this._registerAnimation = options.registerAnimation
     if (options.loading) this.setLoading(true)
   }
 
   get loading(): boolean {
     return this._loading
+  }
+
+  bindAnimation(registerAnimation?: AnimationRegistrar): void {
+    if (this._registerAnimation === registerAnimation) return
+    this._stopSpin()
+    this._registerAnimation = registerAnimation
+    if (this._loading) this._startSpin()
   }
 
   get text(): string | undefined {
@@ -117,15 +127,16 @@ export class LoadingOverlayController {
 
   dispose(): void {
     this._stopSpin()
-    this._disposables.dispose()
+    this._registerAnimation = undefined
   }
 
   private _startSpin(): void {
     if (this._spinDisposer) return
-    this._spinDisposer = this._disposables.setInterval(() => {
-      this._spinAngle = (this._spinAngle + 0.12) % (Math.PI * 2)
+    this._spinAngle = 0
+    this._spinDisposer = this._registerAnimation?.(elapsed => {
+      this._spinAngle = (elapsed * 0.12 / 16) % (Math.PI * 2)
       this._requestPaint()
-    }, 16)
+    })
   }
 
   private _stopSpin(): void {

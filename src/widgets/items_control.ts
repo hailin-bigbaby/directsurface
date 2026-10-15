@@ -448,6 +448,10 @@ export class RenderItemsControl<T> extends RenderBox implements InteractiveRende
     this._syncContainerOffsets()
   }
 
+  override get animationContentClip() {
+    return { ...this.globalOffset, width: this._viewW, height: this._viewH }
+  }
+
   performPaint(context: PaintContext, offset: Offset): void {
     const dl = new DrawList(context)
     dl.pushClip(offset.x, offset.y, this._viewW, this._viewH)

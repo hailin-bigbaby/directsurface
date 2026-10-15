@@ -1,12 +1,70 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AnimationController, type AnimationStatus } from './animation_controller'
 import { Curves } from './curves'
+import { AnimationClock } from './animation_clock'
 
 afterEach(() => {
   vi.restoreAllMocks()
 })
 
 describe('AnimationController', () => {
+  it('clears its running state when a clock listener fails', () => {
+    const clock = new AnimationClock()
+    const animation = new AnimationController({ clock, duration: 100 })
+    animation.addListener(() => { throw new Error('listener failed') })
+    animation.forward()
+    expect(() => clock.tick(0)).toThrow('listener failed')
+    expect(animation.isAnimating).toBe(false)
+    expect(animation.status).toBe('idle')
+    expect(clock.subscriberCount).toBe(0)
+  })
+  it('reaches the exact target on the runtime clock even with a custom curve endpoint', () => {
+    const clock = new AnimationClock()
+    const animation = new AnimationController({ clock, duration: 100, curve: () => 0.9 })
+    animation.forward()
+    clock.tick(0)
+    clock.tick(100)
+    expect(animation.value).toBe(1)
+    expect(animation.status).toBe('completed')
+    expect(clock.subscriberCount).toBe(0)
+  })
+  it('samples an injected clock without allocating its own rAF and finishes once', () => {
+    const raf = vi.fn()
+    vi.stubGlobal('requestAnimationFrame', raf)
+    const clock = new AnimationClock()
+    const animation = new AnimationController({ clock, duration: 100, curve: Curves.linear })
+    const values: number[] = []
+    animation.addListener(value => values.push(value))
+    animation.forward()
+    clock.tick(50)
+    clock.tick(100)
+    clock.tick(150)
+    expect(values).toEqual([0, 0.5, 1])
+    expect(animation.status).toBe('completed')
+    expect(animation.isAnimating).toBe(false)
+    expect(clock.subscriberCount).toBe(0)
+    expect(raf).not.toHaveBeenCalled()
+    vi.unstubAllGlobals()
+  })
+
+  it('preserves a replacement animation started from a clock listener', () => {
+    const clock = new AnimationClock()
+    const animation = new AnimationController({ clock, duration: 100, curve: Curves.linear })
+    let reversed = false
+    animation.addListener(value => {
+      if (value === 1 && !reversed) { reversed = true; animation.reverse() }
+    })
+    animation.forward()
+    clock.tick(0)
+    clock.tick(100)
+    expect(animation.status).toBe('reverse')
+    expect(clock.subscriberCount).toBe(1)
+    clock.tick(120)
+    clock.tick(170)
+    expect(animation.value).toBe(0.5)
+    animation.dispose()
+    expect(clock.subscriberCount).toBe(0)
+  })
   it('clamps initial and target values to the 0..1 range', () => {
     const fromAbove = new AnimationController({ initialValue: 2, duration: 0 })
     const fromBelow = new AnimationController({ initialValue: -1, duration: 0 })

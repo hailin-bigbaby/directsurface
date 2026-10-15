@@ -16,6 +16,7 @@ export class RenderLoadingHost extends RenderBox {
   private _child: RenderBox
   private readonly _overlay = new LoadingOverlayController(
     () => this.markNeedsPaint(),
+    { registerAnimation: tick => this.registerAnimation(tick) },
   )
   blockInput: boolean
 

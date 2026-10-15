@@ -83,7 +83,7 @@ progress.stopIndeterminate(1)
 | `setValue(value)` | `void` | 设置进度，等同于给 `value` 赋值。 |
 | `startIndeterminate()` | `void` | 启动不确定动画。 |
 | `stopIndeterminate(finalValue?)` | `void` | 停止不确定动画，并设置最终进度。 |
-| `dispose()` | `void` | 停止动画 timer 并释放资源。 |
+| `dispose()` | `void` | 取消动画订阅并释放资源。 |
 
 ## 布局和绘制
 
@@ -92,10 +92,12 @@ progress.stopIndeterminate(1)
 - 高度来自构造参数或主题。
 - 确定进度会把 `value` 限制到 `0..1`。
 - 没有 `label` 时显示四舍五入百分比。
-- 不确定进度会启动约 16ms 间隔动画，请在不再使用时调用 `dispose()`。
+- 不确定进度由所属运行时的统一动画时钟驱动，按经过时间计算位置，周期为 800ms；移动位置保留子像素精度。隐藏和滚出视口时暂停，卸载时取消订阅。请在不再使用时调用 `dispose()`。
 
 ## 相关组件
 
 - [Loading 加载](../overlay/loading.md)
 - [StatusBar 状态栏](../navigation/status-bar.md)
 - [Notification 通知](../overlay/notification.md)
+
+构造时传入负数即可声明循环动画；挂载到运行时后自动开始，无需再次调用 `startIndeterminate()`。独立低层宿主需要向 `PipelineOwner` 注入动画时钟，详见[运行时与生命周期](../../lifecycle.md)。

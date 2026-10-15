@@ -4,6 +4,7 @@
 
 import type { CurveFunction } from './curves'
 import { Curves } from './curves'
+import type { AnimationClock } from './animation_clock'
 
 export type AnimationStatus = 'idle' | 'forward' | 'reverse' | 'completed' | 'dismissed'
 
@@ -29,6 +30,9 @@ export class AnimationController {
   private _startValue?: number
   private _targetValue?: number
   private _rafId?: number
+  private readonly _clock?: AnimationClock
+  private _clockDisposer?: () => void
+  private _generation = 0
   private _listeners: AnimationListener[] = []
   private _statusListeners: StatusListener[] = []
   // 动画开始/进行时通知外部请求刷新帧
@@ -39,16 +43,18 @@ export class AnimationController {
     duration?: number
     curve?: CurveFunction
     onTick?: () => void
+    clock?: AnimationClock
   } = {}) {
     this._value = clamp01(opts.initialValue ?? 0)
     this._duration = opts.duration ?? 300
     this._curve = opts.curve ?? Curves.easeInOut
     this._onTick = opts.onTick
+    this._clock = opts.clock
   }
 
   get value(): number { return this._value }
   get status(): AnimationStatus { return this._status }
-  get isAnimating(): boolean { return this._rafId !== undefined }
+  get isAnimating(): boolean { return this._rafId !== undefined || this._clockDisposer !== undefined }
   get duration(): number { return this._duration }
 
   set duration(value: number) {
@@ -116,6 +122,30 @@ export class AnimationController {
   }
 
   private _tick(): void {
+    if (this._clock) {
+      const generation = this._generation
+      this._clockDisposer = this._clock.subscribe(elapsed => {
+        if (generation !== this._generation) return
+        try {
+          const rawT = this._duration <= 0 ? 1 : Math.min(elapsed / this._duration, 1)
+          this._value = rawT >= 1 ? this._targetValue!
+            : this._startValue! + (this._targetValue! - this._startValue!) * this._curve(rawT)
+          this._onTick?.()
+          if (generation !== this._generation) return
+          this._notifyListeners()
+          if (generation !== this._generation) return
+          if (rawT >= 1) {
+            this._clockDisposer?.()
+            this._clockDisposer = undefined
+            this._setStatus(statusForValue(this._value))
+          }
+        } catch (error) {
+          if (generation === this._generation) this.stop()
+          throw error
+        }
+      })
+      return
+    }
     this._onTick?.()
     const rafId = requestAnimationFrame((now) => {
       if (this._rafId !== rafId) return
@@ -145,6 +175,9 @@ export class AnimationController {
   }
 
   private _cancelTick(): void {
+    this._generation++
+    this._clockDisposer?.()
+    this._clockDisposer = undefined
     if (this._rafId === undefined) return
     cancelAnimationFrame(this._rafId)
     this._rafId = undefined

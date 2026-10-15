@@ -28,7 +28,7 @@ export class RenderButton extends FocusableControl implements InteractiveRenderO
   static override debugTypeName = 'RenderButton'
   label: string
   onClick?: () => void
-  loading: boolean
+  private _loading: boolean
   tooltip: string
 
   private _variant: ButtonVariant
@@ -53,7 +53,7 @@ export class RenderButton extends FocusableControl implements InteractiveRenderO
     this.onClick = opts.onClick
     this._variant = opts.variant ?? 'default'
     this._disabled = opts.disabled ?? false
-    this.loading = opts.loading ?? false
+    this._loading = opts.loading ?? false
     this.tooltip = opts.tooltip ?? ''
 
     this._hoverAnim = new AnimationController({ duration: DefaultThemeMotion.fastDuration, curve: Curves.easeOut })
@@ -69,10 +69,11 @@ export class RenderButton extends FocusableControl implements InteractiveRenderO
 
   private _startSpin(): void {
     if (this._spinDisposer) return
-    this._spinDisposer = this._disposables.setInterval(() => {
-      this._spinAngle = (this._spinAngle + 0.15) % (Math.PI * 2)
+    this._spinAngle = 0
+    this._spinDisposer = this.registerAnimation(elapsed => {
+      this._spinAngle = (elapsed * 0.15 / 16) % (Math.PI * 2)
       this.markNeedsPaint()
-    }, 16)
+    })
   }
 
   private _stopSpin(): void {
@@ -130,7 +131,7 @@ export class RenderButton extends FocusableControl implements InteractiveRenderO
 
   setLoading(v: boolean): void {
     if (this.loading === v) return
-    this.loading = v
+    this._loading = v
     if (v) {
       this._startSpin()
     } else {
@@ -143,6 +144,9 @@ export class RenderButton extends FocusableControl implements InteractiveRenderO
   }
 
   visitChildren(_visitor: (child: RenderObject) => void): void {}
+
+  get loading(): boolean { return this._loading }
+  set loading(value: boolean) { this.setLoading(value) }
 
   performLayout(constraints: BoxConstraints, context: LayoutContext): void {
     const s = deriveButtonStyle(context.theme, this._variant)

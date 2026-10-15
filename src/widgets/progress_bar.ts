@@ -3,12 +3,12 @@
 
 import { RenderBox, type RenderBoxOptions } from '../layout/render_box'
 import { DrawList } from '../rendering/draw_list'
-import { lerpColor, rgba, type Color } from '../theme/theme'
+import { colorToCSS, lerpColor, rgba, type Color } from '../theme/theme'
 import type { PaintContext } from '../rendering/paint_context'
 import type { BoxConstraints, LayoutContext, Offset } from '../core/render_object'
 import { ImGuiDarkTheme } from '../theme/default_theme'
 import { RenderObject } from '../core/render_object'
-import { DisposableBag, type DisposeFn } from '../core/disposable'
+import type { DisposeFn } from '../core/disposable'
 import { deriveProgressBarStyle } from '../theme/component_styles'
 
 export interface RenderProgressBarOptions extends RenderBoxOptions {
@@ -29,7 +29,6 @@ export class RenderProgressBar extends RenderBox {
 
   private _animOffset = 0
   private _animDisposer?: DisposeFn
-  private _disposables = new DisposableBag()
 
   constructor(opts: RenderProgressBarOptions) {
     super({ ...opts, height: opts.height ?? deriveProgressBarStyle(ImGuiDarkTheme).height })
@@ -37,6 +36,7 @@ export class RenderProgressBar extends RenderBox {
     this.label = opts.label ?? ''
     this.color = opts.color
     this._usesThemeHeight = opts.height === undefined
+    if (this._value < 0) this.startIndeterminate()
   }
 
   get value(): number { return this._value }
@@ -58,10 +58,11 @@ export class RenderProgressBar extends RenderBox {
     this._value = -1
     this.markNeedsPaint()
     if (this._animDisposer) return
-    this._animDisposer = this._disposables.setInterval(() => {
-      this._animOffset = (this._animOffset + 0.02) % 1
+    this._animOffset = 0
+    this._animDisposer = this.registerAnimation(elapsed => {
+      this._animOffset = (elapsed % 800) / 800
       this.markNeedsPaint()
-    }, 16)
+    })
   }
 
   stopIndeterminate(finalValue = 0): void {
@@ -103,10 +104,19 @@ export class RenderProgressBar extends RenderBox {
       const barW = w * 0.35
       const travel = w + barW
       const pos = x - barW + this._animOffset * travel
-      dl.pushClip(x, y, w, h)
-      dl.fillRect(pos, y, barW, h, fillColor, r)
-      // 高光
-      dl.fillRect(pos, y, barW * 0.4, h, lerpColor(fillColor, rgba(255, 255, 255), 0.3), r)
+      dl.pushRoundedClip(x, y, w, h, r)
+      // Keep moving geometry subpixel-precise; only the stationary track is pixel aligned.
+      const ctx = context.ctx
+      ctx.save()
+      ctx.fillStyle = colorToCSS(fillColor)
+      ctx.beginPath()
+      ctx.roundRect(pos, y, barW, h, r)
+      ctx.fill()
+      ctx.fillStyle = colorToCSS(lerpColor(fillColor, rgba(255, 255, 255), 0.3))
+      ctx.beginPath()
+      ctx.roundRect(pos, y, barW * 0.4, h, r)
+      ctx.fill()
+      ctx.restore()
       dl.popClip()
     } else {
       // 确定模式
@@ -143,7 +153,7 @@ export class RenderProgressBar extends RenderBox {
   }
 
   dispose(): void {
-    this._disposables.dispose()
+    this._animDisposer?.()
     this._animDisposer = undefined
     super.dispose()
   }

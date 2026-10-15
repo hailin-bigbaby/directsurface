@@ -1,4 +1,5 @@
 import type { Offset, Rect, RenderObject } from '../core/render_object'
+import type { AnimationClock } from '../animation/animation_clock'
 import { isPrimaryPointerButton, type PointerEvent, type WheelPointerEvent } from '../gestures/hit_test'
 import {
   pointerKey,
@@ -18,6 +19,7 @@ export interface PopupViewport {
 }
 
 export interface PopupContext {
+  animationClock?: AnimationClock
   theme: ResolvedTheme
   viewport: PopupViewport
   setCursor?: (cursor: string) => void

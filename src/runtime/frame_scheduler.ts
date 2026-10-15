@@ -5,9 +5,11 @@ export class FrameScheduler {
   private _frameScheduled = false
   private _layoutNeeded = true
   private _frameHandle: number | null = null
+  private _disposed = false
+  private _generation = 0
 
   constructor(
-    private readonly _onFrame: () => void,
+    private readonly _onFrame: (timestamp: number) => void,
     private readonly _requestFrame: RequestFrame = callback => requestAnimationFrame(callback),
     private readonly _cancelFrame: CancelFrame = handle => cancelAnimationFrame(handle),
   ) {}
@@ -21,12 +23,14 @@ export class FrameScheduler {
   }
 
   scheduleFrame(): void {
-    if (this._frameScheduled) return
+    if (this._disposed || this._frameScheduled) return
     this._frameScheduled = true
-    this._frameHandle = this._requestFrame(() => {
+    const generation = ++this._generation
+    this._frameHandle = this._requestFrame(timestamp => {
+      if (this._disposed || generation !== this._generation) return
       this._frameScheduled = false
       this._frameHandle = null
-      this._onFrame()
+      this._onFrame(timestamp)
     })
   }
 
@@ -40,6 +44,7 @@ export class FrameScheduler {
   }
 
   cancelFrame(): void {
+    this._generation++
     if (this._frameHandle !== null) {
       this._cancelFrame(this._frameHandle)
       this._frameHandle = null
@@ -54,6 +59,7 @@ export class FrameScheduler {
   }
 
   dispose(): void {
+    this._disposed = true
     this.cancelFrame()
   }
 }

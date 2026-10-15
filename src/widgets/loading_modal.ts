@@ -42,6 +42,8 @@ export class RenderLoadingModal implements Popup {
   show(): void {
     if (!this._visible) {
       this._visible = true
+      const clock = PopupManager.instance.context.animationClock
+      this._overlay.bindAnimation(clock ? tick => clock.subscribe(tick, () => this._visible) : undefined)
       this._overlay.setLoading(true)
       PopupManager.instance.open(this, { persistent: true })
     }

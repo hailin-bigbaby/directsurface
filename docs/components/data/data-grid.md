@@ -892,7 +892,7 @@ if (saved) {
 ```ts
 const columns: GridColumnDef<OrderRow>[] = [
   { key: 'batch', title: '批次', type: 'text', pinned: 'left', mergeRows: true },
-  { key: 'department', title: '科室', type: 'text', mergeRows: ({ previousRow, currentRow }) =>
+  { key: 'department', title: '部门', type: 'text', mergeRows: ({ previousRow, currentRow }) =>
     previousRow.department === currentRow.department && previousRow.batch === currentRow.batch },
 ]
 ```

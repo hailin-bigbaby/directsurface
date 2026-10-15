@@ -23,6 +23,7 @@ import {
   type AppContextRegistry,
 } from '../core/app_context'
 import { FrameScheduler } from './frame_scheduler'
+import { AnimationClock } from '../animation/animation_clock'
 import { LayerManager, type LayerPainterRegistration, type LayerPaintTimings, type LayerRegistration } from './layer_manager'
 import { LayoutInspectorService } from './layout_inspector_service'
 import { RuntimePerformanceMonitor } from './performance_monitor'
@@ -303,6 +304,7 @@ export class RuntimeHost {
   readonly compositor: Compositor
   readonly dispatcher: EventDispatcher
   readonly frameScheduler: FrameScheduler
+  readonly animationClock: AnimationClock
   readonly pipelineOwner: PipelineOwner
   readonly layerManager: LayerManager
   readonly layoutInspector: LayoutInspectorService
@@ -383,11 +385,14 @@ export class RuntimeHost {
     this._disposables.add(this.dispatcher.addDebugPointerMoveListener(position => {
       this.layoutInspector.hoverAt(position)
     }))
-    this.frameScheduler = new FrameScheduler(() => {
-      this.renderFrame()
+    this.frameScheduler = new FrameScheduler(timestamp => {
+      this.renderFrame(timestamp)
       this._onFrame?.()
     })
+    this.animationClock = new AnimationClock(() => this.scheduleFrame('animation'))
     this.pipelineOwner = new PipelineOwner({
+      animationClock: this.animationClock,
+      getAnimationViewport: () => ({ x: 0, y: 0, width: this.canvasWidth, height: this.canvasHeight }),
       appContext: opts.appContext,
       onNeedFrameCommit: info => {
         if (!this._suppressPipelineScheduling) this.scheduleFrame(`pipeline:${info.type}`, info)
@@ -469,6 +474,11 @@ export class RuntimeHost {
     if (this.performanceMonitor.visible) this._ensurePerformanceOverlayLayer()
 
     this._disposables.addDisposable(this.frameScheduler)
+    this._disposables.addDisposable(this.animationClock)
+    const syncAnimationVisibility = () => this.animationClock.setSuspended(document.hidden)
+    document.addEventListener('visibilitychange', syncAnimationVisibility)
+    this._disposables.add(() => document.removeEventListener('visibilitychange', syncAnimationVisibility))
+    syncAnimationVisibility()
     this._disposables.addDisposable(this.dispatcher)
     this._disposables.listen(window, 'resize', () => {
       this.resize()
@@ -680,12 +690,14 @@ export class RuntimeHost {
   }
 
   scheduleFrame(reason = 'manual', detail?: unknown): void {
+    if (this._disposed) return
     const record = this._recordPaintRequest('frame', reason, detail)
     this._logPaintRequest(record)
     this.frameScheduler.scheduleFrame()
   }
 
   scheduleLayout(reason = 'manual', detail?: unknown): void {
+    if (this._disposed) return
     const record = this._recordPaintRequest('layout', reason, detail)
     this._logPaintRequest(record)
     this.frameScheduler.scheduleLayout()
@@ -1014,7 +1026,7 @@ export class RuntimeHost {
     return this.layerManager.paintAll()
   }
 
-  renderFrame(): void {
+  renderFrame(timestamp?: number): void {
     if (this._disposed) return
     if (this._renderingFrame) return
     this._renderingFrame = true
@@ -1027,11 +1039,18 @@ export class RuntimeHost {
     let contentPaintMs = 0
     let transientPaintMs = 0
     let compositeMs = 0
+    let completed = false
+    let animationFailed = false
+    let animationError: unknown
 
     try {
       this._flushingFrameCommits = true
       try {
         this.pipelineOwner.flushFrameCommits()
+        if (timestamp !== undefined) {
+          try { this.animationClock.tick(timestamp) }
+          catch (error) { animationFailed = true; animationError = error }
+        }
       } finally {
         this._flushingFrameCommits = false
       }
@@ -1057,6 +1076,7 @@ export class RuntimeHost {
       this.pipelineOwner.clearTransientPaintRequests()
       const compositeStart = measurePerformance ? now() : 0
       this.compositor.composite()
+      completed = true
       if (measurePerformance) {
         compositeMs = now() - compositeStart
         this.performanceMonitor.recordFrame({
@@ -1072,8 +1092,18 @@ export class RuntimeHost {
           layerCount: this.compositor.getLayerOrder().length,
         })
       }
+      if (animationFailed) throw animationError
     } finally {
       this._renderingFrame = false
+      if (completed && !this._disposed) {
+        try {
+          if (this.animationClock.hasActiveAnimations) this.scheduleFrame('animation:continue')
+        } catch (error) {
+          // Failed predicates have been removed; let remaining subscriptions recover next frame.
+          if (this.animationClock.subscriberCount > 0) this.scheduleFrame('animation:recover')
+          throw animationFailed ? animationError : error
+        }
+      }
     }
   }
 
@@ -1466,6 +1496,7 @@ export class RuntimeHost {
       : this._contentViewport()
     return {
       theme: this.pipelineOwner.theme,
+      animationClock: this.animationClock,
       viewport: { x: viewport.x, y: viewport.y, width: viewport.width, height: viewport.height, dpr: this.dpr },
       setCursor: cursor => {
         this.canvas.style.cursor = cursor || 'default'

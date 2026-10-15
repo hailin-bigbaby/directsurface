@@ -18,6 +18,7 @@ import {
   isAppContextProvider,
 } from './app_context'
 import { runCleanupSteps } from './disposable'
+import type { AnimationClock, AnimationTick } from '../animation/animation_clock'
 
 export interface Offset {
   x: number
@@ -167,6 +168,7 @@ export abstract class RenderObject {
   private _needsLayout = true
   private _needsPaint = true
   private _owner?: PipelineOwner
+  private _animationBindings?: Set<{ tick: AnimationTick; dispose?: () => void }>
   private _visible = true
   private _detachedTheme: ResolvedTheme | null = null
   private _lastLayoutConstraints?: BoxConstraints
@@ -230,12 +232,22 @@ export abstract class RenderObject {
   }
 
   attach(owner: PipelineOwner): void {
+    if (this._owner !== owner) {
+      for (const binding of this._animationBindings ?? []) {
+        binding.dispose?.()
+        binding.dispose = owner.animationClock?.subscribe(binding.tick, () => this.isAnimationVisible)
+      }
+    }
     if (this._owner && this._owner !== owner) this._owner.forget(this)
     this._owner = owner
     this.visitChildren(child => child.attach(owner))
   }
 
   detach(): void {
+    for (const binding of this._animationBindings ?? []) {
+      binding.dispose?.()
+      binding.dispose = undefined
+    }
     const owner = this._owner
     this._owner = undefined
     owner?.forget(this)
@@ -243,7 +255,48 @@ export abstract class RenderObject {
     this.visitChildren(child => child.detach())
   }
 
-  // 脏标记向上传播
+  /** Register decorative animation intent; attachment owns the actual subscription. */
+  protected registerAnimation(tick: AnimationTick): () => void {
+    const binding = {
+      tick,
+      dispose: this._owner?.animationClock?.subscribe(tick, () => this.isAnimationVisible),
+    }
+    ;(this._animationBindings ??= new Set()).add(binding)
+    return () => {
+      binding.dispose?.()
+      this._animationBindings?.delete(binding)
+    }
+  }
+
+  /** Global clip applied to content children, where a container has one. */
+  get animationContentClip(): Rect | undefined { return undefined }
+
+  get isAnimationVisible(): boolean {
+    if (!this._owner || this.size.width <= 0 || this.size.height <= 0) return false
+    let bounds = this.paintBounds
+    const intersect = (clip: Rect): boolean => {
+      const x = Math.max(bounds.x, clip.x)
+      const y = Math.max(bounds.y, clip.y)
+      bounds = { x, y, width: Math.min(bounds.x + bounds.width, clip.x + clip.width) - x,
+        height: Math.min(bounds.y + bounds.height, clip.y + clip.height) - y }
+      return bounds.width > 0 && bounds.height > 0
+    }
+    const viewport = this._owner.animationViewport
+    if (viewport && !intersect(viewport)) return false
+    for (let node: RenderObject | undefined = this; node; node = node.parent) {
+      if (!node.visible) return false
+      // This hook describes active child membership (tabs, collapsed content), not focusability.
+      if (node.parent && !node.parent.isFocusChildActive(node)) return false
+      const clip = node.parent?.animationContentClip
+      if (clip) {
+        let adorner = false
+        node.parent!.visitAdornerChildren(child => { if (child === node) adorner = true })
+        if (!adorner && !intersect(clip)) return false
+      }
+    }
+    return true
+  }
+
   markNeedsLayout(): void {
     if (this._needsLayout) return
     this._needsLayout = true
@@ -256,7 +309,9 @@ export abstract class RenderObject {
 
   markNeedsPaint(damageRect?: Rect): void {
     if (this._needsPaint) {
-      if (damageRect) this._owner?.requestPaint(this, damageRect)
+      // Re-register an already dirty node after an offscreen paint request was consumed.
+      this._owner?.requestPaint(this, damageRect)
+      if (PopupManager.instance.hasOverlays) PopupManager.instance.requestPaint()
       return
     }
     this._needsPaint = true
@@ -447,6 +502,7 @@ export abstract class RenderObject {
       this._globalOffsetCache = null
       this._globalOffsetDirty = true
       this.detach()
+      this._animationBindings?.clear()
     }
   }
 
@@ -674,6 +730,8 @@ export abstract class RenderObject {
 // ---- PipelineOwner ----
 
 export interface PipelineOwnerOptions {
+  animationClock?: AnimationClock
+  getAnimationViewport?: () => Rect
   onNeedFrameCommit?: (info: PipelineRequestInfo) => void
   onNeedLayout?: (info: PipelineRequestInfo) => void
   onNeedPaint?: (info: PipelineRequestInfo) => void
@@ -700,6 +758,8 @@ export interface PipelineDebugPaintState {
 export type ThemeUpdateKind = 'none' | 'paint' | 'layout'
 
 export class PipelineOwner {
+  get animationClock(): AnimationClock | undefined { return this._options.animationClock }
+  get animationViewport(): Rect | undefined { return this._options.getAnimationViewport?.() }
   private _frameCommits = new Map<RenderObject, {
     active: boolean
     callback: () => void

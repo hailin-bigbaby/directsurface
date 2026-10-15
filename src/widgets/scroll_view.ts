@@ -302,6 +302,10 @@ export class RenderScrollViewer extends RenderBox implements InteractiveRenderOb
     return this._viewport.showHBar
   }
 
+  override get animationContentClip() {
+    return { ...this.globalOffset, width: this._viewW, height: this._viewH }
+  }
+
   performPaint(context: PaintContext, offset: Offset): void {
     const s = deriveScrollbarStyle(context.theme)
     const dl = new DrawList(context)

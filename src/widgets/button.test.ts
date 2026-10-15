@@ -1,3 +1,4 @@
+import { AnimationClock } from '../animation/animation_clock'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ImGuiDarkTheme, ImGuiLightTheme } from '../theme/default_theme'
 import { PaintContext } from '../rendering/paint_context'
@@ -107,42 +108,50 @@ describe('RenderButton lifecycle', () => {
     expect(FocusManager.instance.scopeStack[0]!.focusables).not.toContain(button)
   })
 
-  it('starts and stops the loading spinner timer', () => {
+  it('starts and stops the loading spinner subscription', () => {
     vi.useFakeTimers()
+    const clock = new AnimationClock()
     const button = new RenderButton({ label: 'Save' })
+    button.attach(new PipelineOwner({ animationClock: clock }))
+    button.layout(constraints)
 
     button.setLoading(true)
     button.setLoading(true)
 
     expect(button.loading).toBe(true)
-    expect(vi.getTimerCount()).toBe(1)
+    expect(clock.subscriberCount).toBe(1)
+    expect(vi.getTimerCount()).toBe(0)
 
-    vi.advanceTimersByTime(16)
+    clock.tick(16)
 
     button.setLoading(false)
 
     expect(button.loading).toBe(false)
-    expect(vi.getTimerCount()).toBe(0)
+    expect(clock.subscriberCount).toBe(0)
   })
 
   it('clears the loading spinner on dispose', () => {
     vi.useFakeTimers()
+    const clock = new AnimationClock()
     const button = new RenderButton({
       label: 'Save',
       loading: true,
     })
+    button.attach(new PipelineOwner({ animationClock: clock }))
 
-    expect(vi.getTimerCount()).toBe(1)
+    expect(clock.subscriberCount).toBe(1)
+    expect(vi.getTimerCount()).toBe(0)
 
     button.dispose()
 
-    expect(vi.getTimerCount()).toBe(0)
+    expect(clock.subscriberCount).toBe(0)
   })
 
   it('schedules loading paints through PipelineOwner without an onRepaint callback', () => {
     vi.useFakeTimers()
+    const clock = new AnimationClock()
     const onNeedPaint = vi.fn()
-    const owner = new PipelineOwner({ onNeedPaint })
+    const owner = new PipelineOwner({ onNeedPaint, animationClock: clock })
     const button = new RenderButton({ label: 'Save' })
     button.attach(owner)
     button.layout(constraints)
@@ -156,7 +165,7 @@ describe('RenderButton lifecycle', () => {
     button.paint(createPaintContext(), { x: 0, y: 0 })
     owner.clearPaintRequests()
     onNeedPaint.mockClear()
-    vi.advanceTimersByTime(16)
+    clock.tick(16)
 
     expect(onNeedPaint).toHaveBeenCalledTimes(1)
     button.dispose()

@@ -220,6 +220,7 @@ export {
   type ScrollViewportClient,
 } from './core/scroll_viewport_client'
 export { createStore, Store } from './core/store'
+export { AnimationClock, type AnimationTick, type AnimationRegistrar } from './animation/animation_clock'
 
 export {
   LayoutInspectorService,
