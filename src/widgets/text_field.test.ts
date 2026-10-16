@@ -1137,3 +1137,85 @@ describe('RenderTextBox input lifecycle', () => {
     field.dispose()
   })
 })
+
+describe('TextBox length and Unicode regressions', () => {
+  it.each([
+    ['😀', 0, ''], ['😀', 1, ''], ['😀', 2, '😀'],
+    ['A😀B', 2, 'A'], ['😀AB', 3, '😀A'], ['AB😀', 3, 'AB'],
+  ])('keeps complete UTF-16 scalars when truncating %s to %i units', (value, maxLength, expected) => {
+    const field = new RenderTextBox({ value, maxLength })
+    expect(field.value).toBe(expected)
+    field.maxLength = null
+    field.value = value
+    field.maxLength = maxLength
+    expect(field.value).toBe(expected)
+    field.dispose()
+  })
+
+  it('pastes over scalar-aligned ranges and clamps the selection after maxLength', () => {
+    const changes: string[] = []
+    const field = new RenderTextBox({ value: 'A😀B', onChange: value => changes.push(value) })
+    field.focusIn()
+    const input = inputElement()
+    input.setSelectionRange(2, 3)
+    input.dispatchEvent(pasteEvent('😀'))
+    expect(field.value).toBe('A😀B')
+    expect(changes).toEqual([])
+    field.maxLength = 2
+    input.setSelectionRange(1, 1)
+    input.dispatchEvent(pasteEvent('😀Z'))
+    expect(field.value).toBe('A')
+    expect(input.selectionStart).toBe(1)
+    expect(input.selectionEnd).toBe(1)
+    field.dispose()
+  })
+
+  it.each(['paste', 'input', 'composition'] as const)('preserves the suffix and caret on over-limit %s', source => {
+    const onChange = vi.fn()
+    const listener = vi.fn()
+    const field = new RenderTextBox({ value: 'ABCDE', maxLength: 6, onChange })
+    field.subscribeValueChange(listener)
+    field.focusIn()
+    const ta = inputElement()
+    ta.setSelectionRange(2, 2)
+    if (source === 'paste') ta.dispatchEvent(pasteEvent('XYZ'))
+    else {
+      if (source === 'composition') ta.dispatchEvent(new CompositionEvent('compositionstart'))
+      ta.value = 'ABXYZCDE'
+      ta.setSelectionRange(5, 5)
+      ta.dispatchEvent(source === 'input' ? new Event('input') : new CompositionEvent('compositionend', { data: 'XYZ' }))
+    }
+    expect(field.value).toBe('ABXCDE')
+    expect(ta.value).toBe('ABXCDE')
+    expect(ta.selectionStart).toBe(3)
+    expect(ta.selectionEnd).toBe(3)
+    expect(onChange).toHaveBeenCalledOnce()
+    expect(listener).toHaveBeenCalledOnce()
+    onChange.mockClear()
+    listener.mockClear()
+    ta.dispatchEvent(pasteEvent('Z'))
+    expect(field.value).toBe('ABXCDE')
+    expect(ta.selectionStart).toBe(3)
+    expect(onChange).not.toHaveBeenCalled()
+    expect(listener).not.toHaveBeenCalled()
+    field.dispose()
+  })
+
+  it.each([
+    ['ABCDE', 5, 1, 3, 'xyz', 'AxyDE', 3],
+    ['AB', 3, 1, 1, '😀', 'AB', 1],
+    ['AB', 4, 1, 1, '😀Z', 'A😀B', 3],
+    ['A😀B', 4, 2, 3, 'XYZ', 'AXYB', 3],
+    ['AAAA', 4, 1, 1, 'A', 'AAAA', 1],
+    ['', 0, 0, 0, 'X', '', 0],
+  ] as const)('preserves nonselected text when pasting into %s', (value, maxLength, start, end, paste, expected, caret) => {
+    const field = new RenderTextBox({ value, maxLength })
+    field.focusIn()
+    const ta = inputElement()
+    ta.setSelectionRange(start, end)
+    ta.dispatchEvent(pasteEvent(paste))
+    expect(field.value).toBe(expected)
+    expect(ta.selectionStart).toBe(caret)
+    field.dispose()
+  })
+})

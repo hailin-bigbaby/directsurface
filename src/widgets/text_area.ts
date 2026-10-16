@@ -21,7 +21,7 @@ import { pointerKey } from '../gestures/pointer_identity'
 import { ScrollbarAxisController } from '../gestures/scrollbar_interaction_controller'
 import { FocusManager, type Focusable } from '../core/focus_manager'
 import { SelectionController } from '../core/selection_controller'
-import { resolveWordSelectionRange } from '../core/text_selection'
+import { limitTextEdit, normalizeUtf16ScalarRange, resolveWordSelectionRange, utf16ScalarBoundary } from '../core/text_selection'
 import { TextEditSession } from '../core/text_edit_session'
 import { TextInputController } from '../core/text_input_controller'
 import {
@@ -79,7 +79,7 @@ export class RenderTextArea extends RenderBox implements
   ValueEditor<string, TextAreaValueChangeReason, undefined> {
   static override debugTypeName = 'RenderTextArea'
   readonly preventsPointerActivationOnAccept = true
-  placeholder: string
+  private _placeholder: string
   private _readonly: boolean
   onChange?: (value: string) => void
   onCommit?: (value: string) => void
@@ -140,7 +140,7 @@ export class RenderTextArea extends RenderBox implements
     maxLength?: number
   }) {
     super()
-    this.placeholder = opts.placeholder ?? ''
+    this._placeholder = opts.placeholder ?? ''
     this._readonly = opts.readonly ?? false
     this.onChange = opts.onChange
     this.onCommit = opts.onCommit
@@ -164,6 +164,13 @@ export class RenderTextArea extends RenderBox implements
     if (this._focused) {
       this._editSession.refresh({ syncComposer: true })
     }
+    this.markNeedsPaint()
+  }
+
+  get placeholder(): string { return this._placeholder }
+  set placeholder(placeholder: string) {
+    if (this._placeholder === placeholder) return
+    this._placeholder = placeholder
     this.markNeedsPaint()
   }
 
@@ -832,27 +839,9 @@ export class RenderTextArea extends RenderBox implements
         if (this._textInput.composing) return
         if (this.readonly) return
         const previousValue = this.value
-        if (lineValue.includes('\n')) {
-          // 粘贴多行
-          const pastedLines = lineValue.split('\n')
-          const { line } = this._cursor
-          this._lines.splice(line, 1, ...pastedLines)
-          this._invalidateAllLines()
-          const newLine = line + pastedLines.length - 1
-          const newCol = pastedLines[pastedLines.length - 1]!.length
-          this._cursor = { line: newLine, col: newCol }
-          this._textInput.setSelection(newCol, newCol, { cursorPos: newCol, syncComposer: false })
-          this._textInput.setComposerLineMode(this._lines[newLine] ?? '', newCol)
-        } else {
-          this._lines[this._cursor.line] = lineValue
-          this._invalidateLine(this._cursor.line)
-          this._textInput.syncSelectionFromComposer({ ignoreComposing: true })
-          this._cursor = { line: this._cursor.line, col: this._textInput.cursorPos }
-        }
-        this.value = this.value
-        this._collapseSelectionAtCursor()
-        this._publishUserValueChange(previousValue, 'input')
-        session.refresh()
+        this._applyLineValue(lineValue)
+        if (this.value !== previousValue) this._publishUserValueChange(previousValue, 'input')
+        session.refresh({ syncComposer: true })
       },
       onCompositionStart: session => {
         if (this.readonly) return
@@ -868,14 +857,9 @@ export class RenderTextArea extends RenderBox implements
       onCompositionEnd: (lineValue, session) => {
         if (this.readonly) return
         const previousValue = this.value
-        this._lines[this._cursor.line] = lineValue
-        this._invalidateLine(this._cursor.line)
-        this._textInput.syncSelectionFromComposer()
-        this._cursor = { line: this._cursor.line, col: this._textInput.cursorPos }
-        this.value = this.value
-        this._collapseSelectionAtCursor()
-        this._publishUserValueChange(previousValue, 'composition')
-        session.refresh()
+        this._applyLineValue(lineValue)
+        if (this.value !== previousValue) this._publishUserValueChange(previousValue, 'composition')
+        session.refresh({ syncComposer: true })
       },
       onKeyDown: (e, session) => {
         if (e.key === 'Escape') { e.preventDefault(); this._blur(); return }
@@ -887,7 +871,6 @@ export class RenderTextArea extends RenderBox implements
         if (e.key === 'Enter') {
           e.preventDefault()
           if (!this.readonly) {
-            this._prepareSelectionReplacement()
             this._insertNewline()
           }
           return
@@ -937,7 +920,7 @@ export class RenderTextArea extends RenderBox implements
           event.preventDefault()
           const previousValue = this.value
           this._insertTextAtSelection(text)
-          this._publishUserValueChange(previousValue, 'paste')
+          if (this.value !== previousValue) this._publishUserValueChange(previousValue, 'paste')
           session.refresh({ syncComposer: true, resetBlink: true })
           return
         }
@@ -950,18 +933,33 @@ export class RenderTextArea extends RenderBox implements
     this._invalidateCaret()
   }
 
+  private _applyLineValue(lineValue: string): void {
+    const previousValue = this.value
+    const line = this._cursor.line
+    const lineBase = this._flatOffset({ line, col: 0 })
+    this._textInput.syncSelectionFromComposer({ ignoreComposing: true })
+    const next = [...this._lines]
+    next.splice(line, 1, lineValue)
+    const result = limitTextEdit(previousValue, next.join('\n'),
+      lineBase + this._textInput.selStart, lineBase + this._textInput.selEnd, this.maxLength)
+    this.value = result.value
+    this._cursor = this._posFromFlat(result.selectionEnd)
+    this._collapseSelectionAtCursor()
+  }
+
   private _insertTextAtSelection(text: string): void {
     const value = this.value
     const textToInsert = text.replace(/\r\n?/g, '\n')
-    const start = this._selection.hasRange ? this._selection.start : this._flatOffset(this._cursor)
-    const end = this._selection.hasRange ? this._selection.end : start
-    const nextValue = normalizeTextLength(
-      value.slice(0, start) + textToInsert + value.slice(end),
-      this._maxLength,
-    )
-    const cursorFlat = normalizeTextLength(value.slice(0, start) + textToInsert, this._maxLength).length
-    this.value = nextValue
-    this._cursor = this._posFromFlat(Math.min(cursorFlat, this.value.length))
+    const caret = this._flatOffset(this._cursor)
+    const { start, end } = normalizeUtf16ScalarRange(value, {
+      start: this._selection.hasRange ? this._selection.start : caret,
+      end: this._selection.hasRange ? this._selection.end : caret,
+    })
+    const cursorFlat = start + textToInsert.length
+    const result = limitTextEdit(value, value.slice(0, start) + textToInsert + value.slice(end),
+      cursorFlat, cursorFlat, this.maxLength)
+    this.value = result.value
+    this._cursor = this._posFromFlat(result.selectionEnd)
     this._collapseSelectionAtCursor()
   }
 
@@ -973,16 +971,8 @@ export class RenderTextArea extends RenderBox implements
 
   private _insertNewline(): void {
     const previousValue = this.value
-    const { line, col } = this._cursor
-    const current = this._lines[line] ?? ''
-    const before = current.slice(0, col)
-    const after = current.slice(col)
-    this._lines.splice(line, 1, before, after)
-    this._invalidateAllLines()
-    this._cursor = { line: line + 1, col: 0 }
-    this.value = this.value
-    this._collapseSelectionAtCursor()
-    this._publishUserValueChange(previousValue, 'keyboard')
+    this._insertTextAtSelection('\n')
+    if (this.value !== previousValue) this._publishUserValueChange(previousValue, 'keyboard')
     this._editSession.refresh({ syncComposer: true })
   }
 
@@ -1318,7 +1308,7 @@ function normalizeMaxLength(value?: number | null): number | null {
 
 function normalizeTextLength(value: string, maxLength: number | null): string {
   if (maxLength === null) return value
-  return value.length <= maxLength ? value : value.slice(0, maxLength)
+  return value.length <= maxLength ? value : value.slice(0, utf16ScalarBoundary(value, maxLength))
 }
 
 function unionRect(a: Rect, b: Rect): Rect {

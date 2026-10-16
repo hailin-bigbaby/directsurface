@@ -97,7 +97,7 @@ const reviewTextArea = new RenderTextArea({
 | 属性 | 类型 | 可写 | 说明 |
 | --- | --- | --- | --- |
 | `value` | `string` | 是 | 当前文本。赋值会按 `maxLength` 截断、重建逻辑行、清理折行缓存、校正光标和滚动位置。 |
-| `placeholder` | `string` | 是 | 提示文本。公开字段，动态修改后业务需要触发重绘。 |
+| `placeholder` | `string` | 是 | 提示文本。变化后自动请求重绘，不改变值、焦点或布局。 |
 | `readonly` | `boolean` | 是 | 只读状态。聚焦中设为 `true` 会清理中文组字、拖选和滚动条拖动。 |
 | `onChange` | `(value: string) => void \| undefined` | 是 | 实时变化回调。 |
 | `onCommit` | `(value: string) => void \| undefined` | 是 | 失焦提交回调。 |
@@ -108,7 +108,17 @@ const reviewTextArea = new RenderTextArea({
 | `maxLength` | `number \| null` | 是 | 最大长度。设为 `null` 表示不限制；修改时会重新截断当前文本。 |
 | `isFocused` | `boolean` | 否 | 当前是否拥有焦点。 |
 
-`placeholder`、`onChange`、`onCommit` 是公开字段，不是 setter。动态修改视觉相关字段时，业务应确保页面发生重绘。
+`placeholder` 变化后自动重绘；`onChange` 和 `onCommit` 是可替换的回调字段。
+
+## 长度限制与插入
+
+`maxLength` 继续按 UTF-16 code unit 计数。输入、粘贴和中文确认只裁剪本次新增文本，保留选区之外的原文；替换选区可使用被替换文本释放的容量。没有实际值变化时不发变更通知，光标位于实际插入内容之后。
+
+例如已有 `ABCDE`、上限为 5，在 `AB|CDE` 处粘贴 `x` 会保持原值；上限为 6 时粘贴 `xyz` 得到 `ABxCDE`，不会删除尾部的 `E`。
+
+初始化、外部赋值或降低上限仍截断整体值，但截断点不拆开 UTF-16 代理对：`😀` 在上限为 1 时得到空字符串，上限为 2 时完整保留。这里不提供完整 grapheme cluster 的计数或截断规则。
+
+多行输入与 Enter 换行也遵守此规则，后续行属于必须保留的原文；换行计 1 个 code unit。
 
 ## 方法
 

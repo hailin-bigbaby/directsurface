@@ -176,6 +176,14 @@ const resettableField = new RenderTextBox({
 resettableField.reset('new')
 ```
 
+## 长度限制与插入
+
+`maxLength` 继续按 UTF-16 code unit 计数。输入、粘贴和中文确认只裁剪本次新增文本，保留选区之外的原文；替换选区可使用被替换文本释放的容量。没有实际值变化时不发变更通知，光标位于实际插入内容之后。
+
+例如已有 `ABCDE`、上限为 5，在 `AB|CDE` 处粘贴 `x` 会保持原值；上限为 6 时粘贴 `xyz` 得到 `ABxCDE`，不会删除尾部的 `E`。
+
+初始化、外部赋值或降低上限仍截断整体值，但截断点不拆开 UTF-16 代理对：`😀` 在上限为 1 时得到空字符串，上限为 2 时完整保留。这里不提供完整 grapheme cluster 的计数或截断规则。
+
 ## 输入和键盘行为
 
 | 操作 | 行为 |
@@ -387,7 +395,7 @@ const passwordField = new RenderPasswordField({
 
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
-| `onSearch` | `(value: string) => void \| undefined` | 搜索回调。 |
+| `onSearch` | `(value: string) => void \| undefined` | 可动态替换或清空；回车、图标和 `search()` 均使用当前回调及当前值。 |
 | `search()` | `void` | 使用当前 `value` 主动触发 `onSearch`。 |
 
 `RenderSearchBox` 覆盖了基础提交行为：按 Enter 会触发搜索，但不会自动失焦。这样连续按 Enter 可以执行“下一处搜索”等业务逻辑，除非用户主动点击其他可聚焦组件或按 Tab 移动焦点。

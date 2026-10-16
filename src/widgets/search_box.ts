@@ -22,7 +22,7 @@ export class RenderSearchBox extends RenderTextBox {
       value: options.value,
       placeholder: options.placeholder ?? '搜索...',
       onChange: options.onChange,
-      onSubmit: value => options.onSearch?.(value),
+      onSubmit: () => this.search(),
       onKeyDown: options.onKeyDown,
       readonly: options.readonly,
       disabled: options.disabled,

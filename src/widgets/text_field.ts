@@ -9,6 +9,7 @@ import type { BoxConstraints, LayoutContext, Offset, Rect } from '../core/render
 import { RenderObject } from '../core/render_object'
 import { runCleanupSteps } from '../core/disposable'
 import { TextMeasurer } from '../core/text_measurer'
+import { limitTextEdit, normalizeUtf16ScalarRange, utf16ScalarBoundary } from '../core/text_selection'
 import type { PointerEvent, InteractiveRenderObject } from '../gestures/recognizers'
 import { isPrimaryPointerButton } from '../gestures/hit_test'
 import type { GestureArenaMember } from '../gestures/gesture_arena'
@@ -780,6 +781,10 @@ export class RenderTextBox extends RenderBox implements
     source: TextBoxEditSource,
     historyBefore: TextBoxEditSnapshot = this._editSnapshot(),
   ): AppliedTextBoxEdit {
+    const limited = limitTextEdit(this.value, value, selectionStart, selectionEnd, this.maxLength)
+    value = limited.value
+    selectionStart = limited.selectionStart
+    selectionEnd = limited.selectionEnd
     const context: TextBoxEditContext = {
       value: this.value,
       selectionStart,
@@ -803,8 +808,10 @@ export class RenderTextBox extends RenderBox implements
   ): AppliedTextBoxEdit {
     const previousValue = this.value
     const value = normalizeTextLength(result.value, this.maxLength)
-    const selectionStart = clampTextIndex(result.selectionStart, value.length)
-    const selectionEnd = clampTextIndex(result.selectionEnd, value.length)
+    const { start: selectionStart, end: selectionEnd } = normalizeUtf16ScalarRange(value, {
+      start: clampTextIndex(result.selectionStart, value.length),
+      end: clampTextIndex(result.selectionEnd, value.length),
+    })
     this._applyingEditorValue = true
     try {
       this.value = value
@@ -1077,8 +1084,9 @@ export class RenderTextBox extends RenderBox implements
     text: string,
     source: TextBoxEditSource = 'keyboard',
   ): AppliedTextBoxEdit {
-    const start = this._textInput.selStart
-    const end = this._textInput.selEnd
+    const { start, end } = normalizeUtf16ScalarRange(this.value, {
+      start: this._textInput.selStart, end: this._textInput.selEnd,
+    })
     const normalizedText = text.replace(/\r\n?/g, '\n').replace(/\n/g, ' ')
     const prefix = this.value.slice(0, start)
     const suffix = this.value.slice(end)
@@ -1483,7 +1491,7 @@ function normalizeMaxLength(value?: number | null): number | null {
 
 function normalizeTextLength(value: string, maxLength: number | null): string {
   if (maxLength === null) return value
-  return value.length <= maxLength ? value : value.slice(0, maxLength)
+  return value.length <= maxLength ? value : value.slice(0, utf16ScalarBoundary(value, maxLength))
 }
 
 function clampTextIndex(value: number, length: number): number {
