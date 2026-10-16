@@ -74,6 +74,7 @@ const noteTextArea = new RenderTextArea({
 | `helperText` | `string` | `''` | 下方帮助或错误文案。会增加组件高度。 |
 | `clearable` | `boolean` | `false` | 有值、非禁用、非只读时显示清除按钮。 |
 | `maxLength` | `number` | `undefined` | 最大字符数。非有限数字表示不限制；传入小数向下取整；小于 0 按 0 处理。 |
+| `showCount` | `boolean` | `false` | 在底部右侧显示长度；有上限时显示 `当前长度 / 上限`。 |
 
 ```ts
 const reviewTextArea = new RenderTextArea({
@@ -83,6 +84,7 @@ const reviewTextArea = new RenderTextArea({
   helperText: '支持多行输入',
   clearable: true,
   maxLength: 500,
+  showCount: true,
   onChange: value => {
     state.reviewDraft = value
   },
@@ -106,6 +108,7 @@ const reviewTextArea = new RenderTextArea({
 | `helperText` | `string` | 是 | 帮助文案。赋值会重新 layout。 |
 | `clearable` | `boolean` | 是 | 是否显示清除按钮。赋值会重新 layout 并重绘。 |
 | `maxLength` | `number \| null` | 是 | 最大长度。设为 `null` 表示不限制；修改时会重新截断当前文本。 |
+| `showCount` | `boolean` | 是 | 动态开启或关闭计数，自动请求布局和重绘。 |
 | `isFocused` | `boolean` | 否 | 当前是否拥有焦点。 |
 
 `placeholder` 变化后自动重绘；`onChange` 和 `onCommit` 是可替换的回调字段。
@@ -119,6 +122,22 @@ const reviewTextArea = new RenderTextArea({
 初始化、外部赋值或降低上限仍截断整体值，但截断点不拆开 UTF-16 代理对：`😀` 在上限为 1 时得到空字符串，上限为 2 时完整保留。这里不提供完整 grapheme cluster 的计数或截断规则。
 
 多行输入与 Enter 换行也遵守此规则，后续行属于必须保留的原文；换行计 1 个 code unit。
+
+## 字数显示
+
+`showCount` 默认关闭，原有页面的高度和显示保持不变。开启后：
+
+- 有上限时显示如 `128 / 500`；无上限时只显示当前长度；上限为 `0` 时显示 `0 / 0`。
+- 计数与 `maxLength` 使用相同的 JavaScript `value.length`（UTF-16 code unit）口径：换行计 1，常见 Emoji 通常计 2，不按用户感知字符数统计。
+- 输入、粘贴、清除、外部赋值和修改 `maxLength` 后，计数随当前值刷新。IME 拼音预览不计入，提交后才计入最终文本。
+- 底部只占一行，帮助或错误文本在左、计数在右。两者分别裁剪，窄宽度下优先保留计数区域，避免互相覆盖。
+- 计数数字变化不触发额外布局；只读和禁用状态仍显示计数，禁用时使用主题禁用色。
+
+```ts
+const countedTextArea = new RenderTextArea({ maxLength: 500 })
+countedTextArea.showCount = true
+countedTextArea.placeholder = '请补充审核意见' // 自动刷新
+```
 
 ## 方法
 
@@ -222,7 +241,7 @@ TextArea 内部区分：
 布局行为：
 
 - 父级给无限高度时，默认主体高度约为 6 行文本高度加上下 padding。
-- 父级给有限高度时，TextArea 使用父级高度，并扣除 `helperText` 高度。
+- 父级给有限高度时，TextArea 使用父级高度，为 `helperText` 或 `showCount` 预留同一行底部空间，主体保留最小控件高度。
 - 宽度变化会失效折行缓存并重新折行。
 - 始终预留垂直滚动条宽度，避免“出现滚动条后宽度变窄，又导致重新折行”的循环。
 - 内容超出视口时显示内部垂直滚动条。

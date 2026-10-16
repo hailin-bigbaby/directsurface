@@ -34,6 +34,7 @@ import {
   measureFormFieldHelperHeight,
   paintFormFieldShell,
   pointInFormFieldRect,
+  resolveFormFieldHelperColor,
   resolveFormFieldPlaceholderColor,
   resolveFormFieldTextColor,
   type FormFieldStatus,
@@ -88,6 +89,7 @@ export class RenderTextArea extends RenderBox implements
   private _helperText: string
   private _clearable: boolean
   private _maxLength: number | null
+  private _showCount: boolean
 
   private _lines: string[] = ['']
   private _focused = false
@@ -138,6 +140,7 @@ export class RenderTextArea extends RenderBox implements
     helperText?: string
     clearable?: boolean
     maxLength?: number
+    showCount?: boolean
   }) {
     super()
     this._placeholder = opts.placeholder ?? ''
@@ -149,6 +152,7 @@ export class RenderTextArea extends RenderBox implements
     this._helperText = opts.helperText ?? ''
     this._clearable = opts.clearable ?? false
     this._maxLength = normalizeMaxLength(opts.maxLength)
+    this._showCount = opts.showCount ?? false
     if (opts.value !== undefined) this._lines = normalizeTextLength(opts.value, this._maxLength).split('\n')
     this._syncFocusRegistration()
   }
@@ -171,6 +175,14 @@ export class RenderTextArea extends RenderBox implements
   set placeholder(placeholder: string) {
     if (this._placeholder === placeholder) return
     this._placeholder = placeholder
+    this.markNeedsPaint()
+  }
+
+  get showCount(): boolean { return this._showCount }
+  set showCount(showCount: boolean) {
+    if (this._showCount === showCount) return
+    this._showCount = showCount
+    this.markNeedsLayout()
     this.markNeedsPaint()
   }
 
@@ -276,7 +288,7 @@ export class RenderTextArea extends RenderBox implements
 
   performLayout(constraints: BoxConstraints, context: LayoutContext): void {
     const s = deriveTextInputStyle(context.theme)
-    const helperHeight = measureFormFieldHelperHeight(s, this.helperText)
+    const helperHeight = this._footerHeight(s)
     const fieldHeight = constraints.maxHeight === Infinity
       ? s.fontSize * 6 + s.padding * 2
       : Math.max(s.height, constraints.maxHeight - helperHeight)
@@ -365,9 +377,13 @@ export class RenderTextArea extends RenderBox implements
   }
 
   private _fieldHeight(style: TextInputStyleTokens = this._inputStyle()): number {
-    const helperHeight = measureFormFieldHelperHeight(style, this.helperText)
+    const helperHeight = this._footerHeight(style)
     const current = this.size.height > 0 ? this.size.height - helperHeight : style.fontSize * 6 + style.padding * 2
     return Math.max(style.height, current)
+  }
+
+  private _footerHeight(style: TextInputStyleTokens): number {
+    return measureFormFieldHelperHeight(style, this.helperText || (this.showCount ? ' ' : ''))
   }
 
   private _showClearButton(): boolean {
@@ -676,8 +692,9 @@ export class RenderTextArea extends RenderBox implements
       hovered: this._hovered,
       disabled: this.disabled,
       status: this.status,
-      helperText: this.helperText,
+      helperText: this.showCount ? '' : this.helperText,
     })
+    if (this.showCount) this._paintCountFooter(context, offset, fieldHeight, s)
 
     const px = s.padding
     const sbW = sb.gutterSize  // 始终预留，与 _innerW 一致
@@ -770,6 +787,31 @@ export class RenderTextArea extends RenderBox implements
         scrollOffset: this._scrollY,
         state: this._scrollbarController.state,
       })
+    }
+  }
+
+  private _paintCountFooter(context: PaintContext, offset: Offset, fieldHeight: number, style: TextInputStyleTokens): void {
+    const dl = new DrawList(context)
+    const length = this.value.length
+    const count = this.maxLength === null ? `${length}` : `${length} / ${this.maxLength}`
+    const width = Math.max(0, this.size.width - 2)
+    const countWidth = Math.min(width, TextMeasurer.measureWidth(count, style.helperFontSize, style.fontFamily))
+    const helperWidth = Math.max(0, width - countWidth - style.itemSpacing)
+    const top = offset.y + fieldHeight + style.helperGap
+    const centerY = top + style.helperLineHeight / 2
+    if (this.helperText && helperWidth > 0) {
+      dl.pushClip(offset.x + 1, top, helperWidth, style.helperLineHeight)
+      dl.fillText(this.helperText, offset.x + 1, centerY,
+        resolveFormFieldHelperColor(style, this.status, this.disabled),
+        style.helperFontSize, style.fontFamily, 'left', 'middle')
+      dl.popClip()
+    }
+    if (countWidth > 0) {
+      dl.pushClip(offset.x + 1 + width - countWidth, top, countWidth, style.helperLineHeight)
+      dl.fillText(count, offset.x + 1 + width, centerY,
+        resolveFormFieldHelperColor(style, 'default', this.disabled),
+        style.helperFontSize, style.fontFamily, 'right', 'middle')
+      dl.popClip()
     }
   }
 

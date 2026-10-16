@@ -5,7 +5,9 @@ import { FocusManager } from '../core/focus_manager'
 import { InputComposer } from '../core/input_composer'
 import { PopupManager } from '../core/popup_manager'
 import { PaintContext } from '../rendering/paint_context'
-import { ImGuiDarkTheme } from '../theme/default_theme'
+import { ImGuiDarkTheme, ImGuiLightTheme } from '../theme/default_theme'
+import { TextMeasurer } from '../core/text_measurer'
+import { deriveTextInputStyle } from '../theme/component_styles'
 import { RenderTextArea } from './text_area'
 
 const constraints = { minWidth: 0, maxWidth: 240, minHeight: 0, maxHeight: 120 }
@@ -25,15 +27,16 @@ afterEach(() => {
   InputComposer.disposeInstance()
   vi.restoreAllMocks()
 })
-function createTextRecordingPaintContext() {
+function createTextRecordingPaintContext(theme = ImGuiDarkTheme) {
   const fillText = vi.fn()
+  const rect = vi.fn()
   const ctx = {
     save: vi.fn(), restore: vi.fn(), beginPath: vi.fn(), roundRect: vi.fn(),
-    rect: vi.fn(), clip: vi.fn(), fill: vi.fn(), stroke: vi.fn(),
+    rect, clip: vi.fn(), fill: vi.fn(), stroke: vi.fn(),
     fillText, measureText: (text: string) => ({ width: text.length * 8 }),
     moveTo: vi.fn(), lineTo: vi.fn(),
   } as unknown as CanvasRenderingContext2D
-  return { context: new PaintContext(ctx, ImGuiDarkTheme), fillText }
+  return { context: new PaintContext(ctx, theme), fillText, rect }
 }
 
 describe('TextArea input preservation', () => {
@@ -137,6 +140,115 @@ describe('TextArea input preservation', () => {
     repaint.mockClear()
     area.placeholder = '新提示'
     expect(repaint).not.toHaveBeenCalled()
+    area.dispose()
+  })
+})
+
+describe('TextArea optional count', () => {
+  it('keeps count opt-in and reserves a single stable footer row', () => {
+    const area = new RenderTextArea({ value: 'abc', maxLength: 100 })
+    const unbounded = { ...constraints, maxHeight: Infinity }
+    const style = deriveTextInputStyle(ImGuiDarkTheme)
+    area.layout(unbounded)
+    const originalHeight = area.size.height
+    const painted = createTextRecordingPaintContext()
+    area.performPaint(painted.context, { x: 0, y: 0 })
+    expect(area.showCount).toBe(false)
+    expect(painted.fillText.mock.calls.some(call => call[0] === '3 / 100')).toBe(false)
+
+    area.showCount = true
+    expect(area.needsLayout).toBe(true)
+    area.layout(unbounded)
+    expect(area.size.height).toBe(originalHeight + style.helperGap + style.helperLineHeight)
+    area.helperText = '请填写说明'
+    area.layout(unbounded)
+    expect(area.size.height).toBe(originalHeight + style.helperGap + style.helperLineHeight)
+    area.value = 'abcdefghij'
+    expect(area.needsLayout).toBe(false)
+    painted.fillText.mockClear()
+    area.performPaint(painted.context, { x: 0, y: 0 })
+    expect(painted.fillText.mock.calls.map(call => call[0])).toContain('10 / 100')
+    expect(painted.fillText.mock.calls.map(call => call[0])).toContain('请填写说明')
+
+    area.showCount = false
+    area.helperText = ''
+    area.layout(unbounded)
+    expect(area.size.height).toBe(originalHeight)
+    area.dispose()
+  })
+
+  it('counts UTF-16 units including newlines and follows runtime length limits', () => {
+    const area = new RenderTextArea({ value: '中\n😀', showCount: true })
+    area.layout(constraints)
+    const painted = createTextRecordingPaintContext()
+    const countText = () => {
+      painted.fillText.mockClear()
+      area.performPaint(painted.context, { x: 0, y: 0 })
+      return painted.fillText.mock.calls[0]?.[0]
+    }
+    expect(countText()).toBe('4')
+    area.maxLength = 2
+    expect(area.value).toBe('中\n')
+    expect(countText()).toBe('2 / 2')
+    area.maxLength = 0
+    expect(countText()).toBe('0 / 0')
+    area.maxLength = null
+    expect(countText()).toBe('0')
+    area.dispose()
+  })
+
+  it.each([ImGuiLightTheme, ImGuiDarkTheme])('keeps error text and count in separate clipped footer regions', theme => {
+    vi.spyOn(TextMeasurer, 'measureWidth').mockImplementation(text => text.length * 8)
+    const area = new RenderTextArea({ value: 'abc', showCount: true, maxLength: 100, status: 'error', helperText: '这是一段很长的错误说明，请修正后再提交' })
+    const style = deriveTextInputStyle(theme)
+    area.layout({ ...constraints, maxWidth: 220 }, false, { theme })
+    expect(area.size.height).toBe(120)
+    const painted = createTextRecordingPaintContext(theme)
+    area.performPaint(painted.context, { x: 10, y: 20 })
+    const helperClip = painted.rect.mock.calls[0]!
+    const countClip = painted.rect.mock.calls[1]!
+    expect(helperClip[0] + helperClip[2]).toBeLessThanOrEqual(countClip[0])
+    expect(countClip[0] + countClip[2]).toBeLessThanOrEqual(230)
+    expect(helperClip[1]).toBe(countClip[1])
+    expect(countClip[1] + countClip[3]).toBeLessThanOrEqual(140)
+    expect(painted.fillText.mock.calls.map(call => call[0])).toContain('3 / 100')
+    expect(painted.fillText.mock.calls.map(call => call[0])).toContain(area.helperText)
+    expect(countClip[3]).toBeCloseTo(style.helperLineHeight, 0)
+
+    area.layout({ ...constraints, maxWidth: 20 }, false, { theme })
+    painted.rect.mockClear()
+    painted.fillText.mockClear()
+    area.performPaint(painted.context, { x: 0, y: 0 })
+    const narrowCountClip = painted.rect.mock.calls[0]!
+    expect(narrowCountClip[0]).toBeGreaterThanOrEqual(0)
+    expect(narrowCountClip[0] + narrowCountClip[2]).toBeLessThanOrEqual(20)
+    expect(painted.fillText.mock.calls.map(call => call[0])).not.toContain(area.helperText)
+    area.dispose()
+  })
+
+  it('updates count after paste and IME commit without counting composition preview', () => {
+    const area = new RenderTextArea({ showCount: true, maxLength: 5 })
+    area.layout(constraints)
+    area.focusIn()
+    const painted = createTextRecordingPaintContext()
+    const countText = () => {
+      painted.fillText.mockClear()
+      area.performPaint(painted.context, { x: 0, y: 0 })
+      return painted.fillText.mock.calls[0]?.[0]
+    }
+    const ta = inputElement()
+    ta.dispatchEvent(new CompositionEvent('compositionstart'))
+    ta.dispatchEvent(new CompositionEvent('compositionupdate', { data: 'zhong' }))
+    expect(countText()).toBe('0 / 5')
+    ta.value = '中'
+    ta.setSelectionRange(1, 1)
+    ta.dispatchEvent(new CompositionEvent('compositionend', { data: '中' }))
+    expect(countText()).toBe('1 / 5')
+    ta.dispatchEvent(pasteEvent('\nabcdef'))
+    expect(area.value).toBe('中\nabc')
+    expect(countText()).toBe('5 / 5')
+    area.value = ''
+    expect(countText()).toBe('0 / 5')
     area.dispose()
   })
 })
