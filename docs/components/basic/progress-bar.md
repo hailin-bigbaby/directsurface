@@ -63,6 +63,8 @@ progress.stopIndeterminate(1)
 
 `value < 0` 会调用 `startIndeterminate()`，显示滑动光条。任务结束后调用 `stopIndeterminate(finalValue)` 或把 `value` 设置为 `0..1`。
 
+初始化与 `value` 赋值使用同一归一化规则：确定进度大于 `1` 时归一化为 `1` 并显示 `100%`；`0..1` 保留实际进度，负数进入不确定模式并以 `-1` 表示。
+
 ## 构造参数
 
 | 参数 | 类型 | 默认值 | 说明 |

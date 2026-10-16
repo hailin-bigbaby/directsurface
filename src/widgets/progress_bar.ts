@@ -32,11 +32,11 @@ export class RenderProgressBar extends RenderBox {
 
   constructor(opts: RenderProgressBarOptions) {
     super({ ...opts, height: opts.height ?? deriveProgressBarStyle(ImGuiDarkTheme).height })
-    this._value = opts.value ?? 0
+    this._value = 0
     this.label = opts.label ?? ''
     this.color = opts.color
     this._usesThemeHeight = opts.height === undefined
-    if (this._value < 0) this.startIndeterminate()
+    this.value = opts.value ?? 0
   }
 
   get value(): number { return this._value }

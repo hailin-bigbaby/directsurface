@@ -232,3 +232,23 @@ describe('RenderProgressBar lifecycle', () => {
     expect(progress.height).toBe(18)
   })
 })
+
+describe('Progress normalization', () => {
+  it.each([
+    [2, 1], [1.01, 1], [1, 1], [0.25, 0.25], [0, 0], [-1, -1], [-2, -1],
+  ] as const)('normalizes constructor and assigned progress %s consistently', (provided, expected) => {
+    const initial = new RenderProgressBar({ value: provided })
+    const assigned = new RenderProgressBar({ value: 0 })
+    assigned.value = provided
+    expect(initial.value).toBe(expected)
+    expect(assigned.value).toBe(expected)
+    if (expected >= 0) {
+      initial.layout(constraints)
+      const context = createPaintContext()
+      initial.performPaint(context, { x: 0, y: 0 })
+      expect(vi.mocked(context.ctx.fillText).mock.calls.map(call => call[0])).toContain(`${Math.round(expected * 100)}%`)
+    }
+    initial.dispose()
+    assigned.dispose()
+  })
+})
