@@ -151,3 +151,52 @@ describe('NumberInput editing and wheel regressions', () => {
     input.dispose()
   })
 })
+
+describe('NumberInput wheel policies', () => {
+  it('allows hover wheel stepping only when explicitly enabled', () => {
+    const onChange = vi.fn()
+    const input = new RenderNumberInput({ value: 1, step: 0.5, decimals: 1, max: 2, wheelMode: 'hover', onChange })
+    input.layout(constraints)
+    const event = { pointerId: 1, position: { x: 20, y: 10 }, type: 'wheel' as const, deltaX: 0, deltaY: -1 }
+
+    expect(input.wheelMode).toBe('hover')
+    expect(input.onWheel(event)).toBeUndefined()
+    expect(input.value).toBe(1.5)
+    input.onWheel(event)
+    input.onWheel(event)
+    expect(input.value).toBe(2)
+    expect(onChange).toHaveBeenCalledWith(1.5)
+    expect(input.isFocused).toBe(false)
+    input.dispose()
+  })
+
+  it('changes wheel modes at runtime without disabling keyboard or button stepping', () => {
+    const onChange = vi.fn()
+    const input = new RenderNumberInput({ value: 1, wheelMode: 'none', onChange })
+    input.layout(constraints)
+    input.focusIn()
+    const event = { pointerId: 1, position: { x: 20, y: 10 }, type: 'wheel' as const, deltaX: 0, deltaY: -1 }
+
+    expect(input.onWheel(event)).toBe(false)
+    expect(input.value).toBe(1)
+    expect(onChange).not.toHaveBeenCalled()
+    inputElement().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }))
+    expect(input.value).toBe(2)
+    const position = { x: input.size.width - input.btnWidth / 2, y: 5 }
+    input.onPointerDown({ pointerId: 1, position, type: 'down' })
+    input.onPointerUp({ pointerId: 1, position, type: 'up' })
+    expect(input.value).toBe(3)
+    input.wheelMode = 'hover'
+    input.onWheel({ ...event, deltaY: 1 })
+    expect(input.value).toBe(2)
+    input.wheelMode = 'none'
+    expect(input.onWheel(event)).toBe(false)
+    expect(input.value).toBe(2)
+    input.dispose()
+  })
+  it('defaults the wheel policy to focus', () => {
+    const input = new RenderNumberInput({ value: 1 })
+    expect(input.wheelMode).toBe('focus')
+    input.dispose()
+  })
+})

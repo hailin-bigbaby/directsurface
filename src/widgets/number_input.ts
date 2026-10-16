@@ -55,6 +55,7 @@ import {
 const DRAG_SLOP = 4
 
 export type NumberInputValueChangeReason = 'commit' | 'step'
+export type NumberInputWheelMode = 'hover' | 'focus' | 'none'
 
 export interface NumberInputValueChangeDetail {
   readonly direction: 1 | -1
@@ -72,6 +73,7 @@ export class RenderNumberInput extends RenderBox implements
   max: number
   step: number
   decimals: number
+  wheelMode: NumberInputWheelMode
   label: string
   onChange?: (value: number) => void
   private _disabled: boolean
@@ -124,6 +126,7 @@ export class RenderNumberInput extends RenderBox implements
     max?: number
     step?: number
     decimals?: number
+    wheelMode?: NumberInputWheelMode
     label?: string
     onChange?: (value: number) => void
     disabled?: boolean
@@ -138,6 +141,7 @@ export class RenderNumberInput extends RenderBox implements
     this.max = opts.max ?? Infinity
     this.step = opts.step ?? 1
     this.decimals = opts.decimals ?? 0
+    this.wheelMode = opts.wheelMode ?? 'focus'
     this._value = this._normalizeValue(opts.value ?? 0)
     this.label = opts.label ?? ''
     this.onChange = opts.onChange
@@ -836,7 +840,7 @@ export class RenderNumberInput extends RenderBox implements
   }
 
   onWheel(e: WheelPointerEvent): boolean | void {
-    if (!this._focused) return false
+    if (this.wheelMode === 'none' || (this.wheelMode === 'focus' && !this._focused)) return false
     if (this.disabled || this.readonly || !this._hitField(e.position) || e.deltaY === 0) return
     this._step(e.deltaY < 0 ? 1 : -1)
   }

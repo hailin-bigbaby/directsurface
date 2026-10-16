@@ -126,6 +126,7 @@ const input = new RenderNumberInput({
 | `max` | `number` | `Infinity` | 最大值。 |
 | `step` | `number` | `1` | 步进按钮、上下键和滚轮每次调整的值。 |
 | `decimals` | `number` | `0` | 小数位数。用于取整和格式化显示。 |
+| `wheelMode` | `NumberInputWheelMode` | `'focus'` | 滚轮调值策略：`'focus'`、`'hover'` 或 `'none'`。 |
 | `label` | `string` | `''` | 绘制在输入框右侧的标签。 |
 | `onChange` | `(value: number) => void` | `undefined` | 用户提交或步进后触发。 |
 | `disabled` | `boolean` | `false` | 禁用。不可聚焦、不可编辑、不可步进。 |
@@ -158,6 +159,7 @@ type FormFieldStatus = 'default' | 'success' | 'warning' | 'error'
 | `min` | `number` | 最小值。直接修改不会自动重新归一化现有 `value`。 |
 | `max` | `number` | 最大值。直接修改不会自动重新归一化现有 `value`。 |
 | `step` | `number` | 步进值。 |
+| `wheelMode` | `NumberInputWheelMode` | 可动态修改，下一次滚轮事件立即生效，不改变值或焦点。 |
 | `decimals` | `number` | 小数位数。直接修改不会自动重新归一化现有 `value`。 |
 | `label` | `string` | 右侧标签。直接修改不会自动触发布局。 |
 | `onChange` | `(value: number) => void \| undefined` | 用户提交或步进回调。 |
@@ -254,7 +256,7 @@ input.value // 10
 - 点击右侧下箭头：`value -= step`。
 - 编辑状态按 `ArrowUp`：`value += step`。
 - 编辑状态按 `ArrowDown`：`value -= step`。
-- 已聚焦且鼠标滚轮位于输入框区域内：向上滚 `value += step`，向下滚 `value -= step`。
+- 鼠标滚轮位于输入框区域内且满足 `wheelMode`：向上滚 `value += step`，向下滚 `value -= step`。
 
 编辑中以当前有效草稿为步进起点，未编辑时以已提交值为起点。例如原值为 `1`，输入 `12` 后尚未提交，增加一步得到 `13`。无效或非有限草稿、中文组字期间不执行步进，也不发变更通知。成功步进只更新和通知一次，保留编辑焦点。
 
@@ -266,7 +268,26 @@ input.value // 10
 - 请求重绘。
 - 如果正在编辑，同步编辑文本和输入 composer，并把光标移动到文本末尾。
 
-禁用或只读时不会步进。滚轮调值需要先聚焦，失焦后恢复外层页面滚动；仅悬停不再调值。这项默认交互调整防止滚动页面时意外修改数据，按钮和方向键步进保持可用。
+禁用或只读时不会步进。默认滚轮调值需要先聚焦，失焦后恢复外层页面滚动；按钮和方向键步进保持可用。
+
+### 滚轮策略
+
+`NumberInputWheelMode` 从 `directsurface` 包入口导出：
+
+| 策略 | 行为 |
+| --- | --- |
+| `'focus'` | 默认值。只有已聚焦且指针位于输入框内才调值；未聚焦时滚轮交给外层容器。 |
+| `'hover'` | 显式开启后，指针位于输入框内即可调值，不要求聚焦。 |
+| `'none'` | 关闭滚轮调值，让外层容器滚动；不影响按钮和上下键。 |
+
+```ts
+import { RenderNumberInput, type NumberInputWheelMode } from 'directsurface'
+const mode: NumberInputWheelMode = 'focus'
+const quantity = new RenderNumberInput({ value: 1, min: 0, wheelMode: mode })
+quantity.wheelMode = 'none'
+```
+
+纯横向滚动不会调值。精度、范围、只读和禁用约束继续生效。
 
 ## 鼠标和手势
 

@@ -759,6 +759,7 @@ export {
   RenderNumberInput,
   type NumberInputValueChangeDetail,
   type NumberInputValueChangeReason,
+  type NumberInputWheelMode,
 } from './widgets/number_input'
 export { RenderSearchBox } from './widgets/search_box'
 export {
