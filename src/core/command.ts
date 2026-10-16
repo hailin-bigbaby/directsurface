@@ -5,7 +5,7 @@ import {
   isAppContextProvider,
   type AppContextLookupKey,
 } from './app_context'
-import type { Disposable, DisposeFn } from './disposable'
+import { runCleanupSteps, type Disposable, type DisposeFn } from './disposable'
 import type { RenderObject } from './render_object'
 
 export type CommandTrigger = 'api' | 'click' | 'keyboard' | 'menu'
@@ -311,24 +311,30 @@ export class CommandManager implements Disposable {
       context.appContext.dispose()
       return undefined
     }
+    this._executing.add(command)
+    const isCurrent = () => !this._disposed && !scope.disposed && scope.get(commandId) === command
+    let failed = false
     try {
-      const shouldContinue = await this._runBeforeExecute(command, context)
-      if (!shouldContinue) return undefined
-      this._executing.add(command)
       this.invalidate()
-      try {
-        const result = await command.execute(context) as TResult
-        await this._runAfterExecute(command, context, result)
-        return result
-      } finally {
-        this._executing.delete(command)
-        this._safeInvalidate()
-      }
+      if (!isCurrent()) return undefined
+      const shouldContinue = await this._runBeforeExecute(command, context)
+      if (!shouldContinue || !isCurrent()) return undefined
+      const result = await command.execute(context) as TResult
+      await this._runAfterExecute(command, context, result)
+      return result
     } catch (error) {
+      failed = true
       await this._runExecuteError(command, context, error)
       throw error
     } finally {
-      context.appContext.dispose()
+      this._executing.delete(command)
+      try {
+        this._safeInvalidate()
+      } catch (error) {
+        if (!failed) throw error
+      } finally {
+        context.appContext.dispose()
+      }
     }
   }
 
@@ -380,7 +386,7 @@ export class CommandManager implements Disposable {
   invalidate(): void {
     this._assertActive()
     this._version++
-    for (const listener of [...this._listeners]) listener()
+    runCleanupSteps([...this._listeners].map(listener => () => listener()))
   }
 
   dispose(): void {

@@ -446,6 +446,14 @@ state.submitTooltip = submitCommandButton.tooltip
 
 如果页面上只有一个“保存”或“提交”按钮，使用 `RenderCommandButton` 更直接。如果是完整操作栏，使用 [CommandToolbar](./command-toolbar.md)。
 
+## 执行防重与异常
+
+同一命令实例从进入前置检查开始就处于 `executing` 状态。等待异步 `beforeExecute` 时，重复执行返回 `undefined`，不会再次运行前置检查或业务函数；不同 scope 中的不同实例仍可独立执行。
+
+等待结束后核对原 scope 是否有效，以及该 ID 是否仍解析到原命令实例。注销、替换命令或释放页面 scope 会取消旧调用，不会改为执行新实例或父 scope 的同名命令。管理器释放后也不再启动等待中的业务执行。
+
+取消、执行失败或订阅回调抛错后，都释放执行状态和上下文。状态通知使用订阅者快照，一个回调抛错不阻断其余回调；全部通知尝试完成后报告第一个错误，清理通知的错误不覆盖原执行错误。
+
 ## 常见问题
 
 ### 为什么按钮一直 disabled？
