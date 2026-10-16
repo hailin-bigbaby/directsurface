@@ -9,6 +9,9 @@ import {
   RenderComboBox,
   RenderDataGrid,
   RenderLineChart,
+  RenderNumberInput,
+  RenderTextArea,
+  RenderTokenEdit,
   RenderPage,
   RenderParagraph,
   RenderProgressBar,
@@ -141,6 +144,28 @@ function controlsPage(state: ShowcaseState, setTheme: (dark: boolean) => void): 
     new RenderText('Controls playground', { role: 'title', size: 'large' }),
     new RenderParagraph('Each control below is drawn by DirectSurface. Try typing, selecting, dragging and clicking.'),
     cards,
+    new RenderCard({
+      title: 'Input editing',
+      description: 'Focused wheel input, length feedback and batch tags.',
+      child: column([
+        new RenderText('Quantity: focus before scrolling', { role: 'secondary' }),
+        new RenderNumberInput({ value: 1, min: 0, max: 99, wheelMode: 'focus' }),
+        new RenderTextArea({ placeholder: 'Add a note', maxLength: 120, showCount: true }),
+        new RenderTokenEdit({
+          options: [
+            { value: 'planning', label: 'Planning' },
+            { value: 'review', label: 'Review' },
+            { value: 'ready', label: 'Ready' },
+          ],
+          values: ['planning'],
+          allowCustomTokens: true,
+          maxTokens: 3,
+          splitOnEnter: true,
+          placeholder: 'Paste tags, then press Enter',
+          helperText: 'Up to 3 tags; separate with commas or semicolons.',
+        }),
+      ], 10),
+    }),
   ])
 }
 
