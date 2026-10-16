@@ -373,9 +373,10 @@ export class RenderSlider extends FocusableControl implements
   }
 
   private _decimalPlaces(value: number): number {
-    const asString = value.toString()
-    const dotIndex = asString.indexOf('.')
-    return dotIndex >= 0 ? asString.length - dotIndex - 1 : 0
+    if (!Number.isFinite(value)) return 0
+    const [coefficient = '', exponent = '0'] = value.toString().toLowerCase().split('e')
+    const fractionLength = coefficient.split('.')[1]?.length ?? 0
+    return Math.max(0, Math.min(100, fractionLength - Number(exponent)))
   }
 
   private _resetPendingGesture(): void {
