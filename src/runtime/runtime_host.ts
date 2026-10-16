@@ -1023,7 +1023,9 @@ export class RuntimeHost {
   }
 
   paintLayers(): LayerPaintTimings {
-    return this.layerManager.paintAll()
+    const timings = this.pipelineOwner.paintWithRequestTracking(() => this.layerManager.paintAll())
+    if (this.layerManager.hasDirtyLayers) this.scheduleFrame('paint-invalidation')
+    return timings
   }
 
   renderFrame(timestamp?: number): void {
@@ -1072,8 +1074,6 @@ export class RuntimeHost {
         contentPaintMs = layerPaintTimings.main ?? 0
         transientPaintMs = layerPaintTimings.transient ?? 0
       }
-      this.clearPaintRequests()
-      this.pipelineOwner.clearTransientPaintRequests()
       const compositeStart = measurePerformance ? now() : 0
       this.compositor.composite()
       completed = true

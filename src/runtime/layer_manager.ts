@@ -57,6 +57,7 @@ export class LayerManager {
 
   unregisterLayer(layer: LayerName): void {
     this._layers.delete(layer)
+    this._dirtyLayers.delete(layer)
     for (let i = this._painters.length - 1; i >= 0; i--) {
       if (this._painters[i]!.layer === layer) this._painters.splice(i, 1)
     }
@@ -92,6 +93,10 @@ export class LayerManager {
 
   isLayerDirty(layer: LayerName): boolean {
     return this._dirtyLayers.has(layer)
+  }
+
+  get hasDirtyLayers(): boolean {
+    return this._compositor.getLayerOrder().some(layer => this._dirtyLayers.has(layer))
   }
 
   debugDirtyLayers(): LayerDirtyDebugInfo[] {
@@ -132,15 +137,22 @@ export class LayerManager {
       }
       if (layerDirty === undefined) continue
       const startedAt = now()
-      if (registration.clear) {
-        this._compositor.clearLayer(layer, layerDirty ?? undefined)
-      }
-      for (const painter of painters) {
-        painter.paint({ layer, context })
+      // Consume before callbacks so new invalidations belong to the next pass.
+      this._dirtyLayers.delete(layer)
+      try {
+        if (registration.clear) {
+          this._compositor.clearLayer(layer, layerDirty ?? undefined)
+        }
+        for (const painter of painters) {
+          painter.paint({ layer, context })
+        }
+      } catch (error) {
+        if (layerDirty === null) this.markDirty(layer)
+        else this.markDirtyRect(layer, layerDirty)
+        throw error
       }
       if (layerDirty === null) this._compositor.markDirty(layer)
       else this._compositor.markDirtyRect(layer, layerDirty)
-      this._dirtyLayers.delete(layer)
       timings[layer] = now() - startedAt
     }
     return timings

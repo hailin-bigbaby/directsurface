@@ -771,6 +771,7 @@ export class PipelineOwner {
   private _lastLayoutConstraints = new Map<RenderObject, BoxConstraints>()
   private _paintRects = new Map<RenderObject, Rect>()
   private _transientPaintRects = new Map<RenderObject, Rect>()
+  private _paintInterrupted = false
   private _theme: ResolvedTheme
   private _themeValueSignature: string
   private _themeMetricSignature: string
@@ -902,12 +903,13 @@ export class PipelineOwner {
   }
 
   requestPaint(node: RenderObject, damageRect?: Rect): void {
-    const wasIdle = this._nodesNeedingPaint.size === 0
+    const shouldNotify = this._paintInterrupted || this._nodesNeedingPaint.size === 0
+    this._paintInterrupted = false
     this._nodesNeedingPaint.add(node)
     const nextRect = damageRect ?? node.paintBounds
     const existing = this._paintRects.get(node)
     this._paintRects.set(node, existing ? unionRect(existing, nextRect) : { ...nextRect })
-    if (wasIdle) {
+    if (shouldNotify) {
       this._options.onNeedPaint?.({
         type: 'paint',
         target: debugRenderObjectName(node),
@@ -917,7 +919,8 @@ export class PipelineOwner {
   }
 
   requestTransientPaint(node: RenderObject, rect?: Rect): void {
-    const wasIdle = this._nodesNeedingTransientPaint.size === 0
+    const shouldNotify = this._paintInterrupted || this._nodesNeedingTransientPaint.size === 0
+    this._paintInterrupted = false
     this._nodesNeedingTransientPaint.add(node)
     this._transientPaintReplayNodes.add(node)
     const nextRect = rect ?? {
@@ -928,7 +931,7 @@ export class PipelineOwner {
     }
     const existing = this._transientPaintRects.get(node)
     this._transientPaintRects.set(node, existing ? unionRect(existing, nextRect) : { ...nextRect })
-    if (wasIdle) {
+    if (shouldNotify) {
       this._options.onNeedPaint?.({
         type: 'transient-paint',
         target: debugRenderObjectName(node),
@@ -963,6 +966,43 @@ export class PipelineOwner {
     this._transientPaintRects.clear()
   }
 
+  /** @internal Consume only requests present before painting; callbacks may request another frame. */
+  paintWithRequestTracking<T>(paint: () => T): T {
+    const paintRects = new Map(this._paintRects)
+    const transientRects = new Map(this._transientPaintRects)
+    let result: T
+    try {
+      result = paint()
+    } catch (error) {
+      // Retain damage, but wait for a new invalidation rather than retrying a failing painter forever.
+      this._paintInterrupted = true
+      throw error
+    }
+    this._paintInterrupted = false
+    this._consumePaintRequests(paintRects, this._paintRects, this._nodesNeedingPaint, 'paint')
+    this._consumePaintRequests(transientRects, this._transientPaintRects, this._nodesNeedingTransientPaint, 'transient-paint')
+    return result
+  }
+
+  private _consumePaintRequests(
+    consumed: Map<RenderObject, Rect>,
+    pending: Map<RenderObject, Rect>,
+    nodes: Set<RenderObject>,
+    type: 'paint' | 'transient-paint',
+  ): void {
+    for (const [node, rect] of consumed) {
+      // requestPaint replaces the rect object even when the bounds are unchanged.
+      if (pending.get(node) !== rect) continue
+      pending.delete(node)
+      nodes.delete(node)
+    }
+    // Requests added to a nonempty queue did not emit the idle-to-pending notification.
+    if (consumed.size && pending.size) {
+      const [node, rect] = pending.entries().next().value!
+      this._options.onNeedPaint?.({ type, target: debugRenderObjectName(node), rect })
+    }
+  }
+
   flushLayout(): void {
     const context = this._layoutContext = { theme: this._theme, pass: 'layout' }
     // 按深度排序（浅层先布局）
@@ -983,28 +1023,41 @@ export class PipelineOwner {
   flushPaint(context: PaintContext): void {
     context.setTheme(this._theme)
     const nodes = [...this._nodesNeedingPaint]
-    this._nodesNeedingPaint.clear()
+    this.clearPaintRequests()
     for (const node of nodes) {
       if (node.needsPaint) {
         node.paint(context, node.globalOffset)
       }
     }
-    this._paintRects.clear()
   }
 
   flushTransientPaint(context: PaintContext): void {
     context.setTheme(this._theme)
     const nodes = [...this._nodesNeedingTransientPaint]
-    this._nodesNeedingTransientPaint.clear()
-    for (const node of nodes) {
-      node.paintTransient(context, node.globalOffset)
+    const consumedRects = new Map(this._transientPaintRects)
+    this.clearTransientPaintRequests()
+    try {
+      for (const node of nodes) {
+        node.paintTransient(context, node.globalOffset)
+      }
+    } catch (error) {
+      // The public runtime flushes queued transient nodes. Restore consumed damage
+      // on failure without scheduling an automatic retry or reviving detached nodes.
+      for (const [node, rect] of consumedRects) {
+        if (node.owner !== this) continue
+        const pending = this._transientPaintRects.get(node)
+        this._transientPaintRects.set(node, pending ? unionRect(rect, pending) : rect)
+        this._nodesNeedingTransientPaint.add(node)
+      }
+      this._paintInterrupted = true
+      throw error
     }
-    this._transientPaintRects.clear()
   }
 
   replayTransientPaint(context: PaintContext): void {
     context.setTheme(this._theme)
-    for (const node of this._transientPaintReplayNodes) {
+    for (const node of [...this._transientPaintReplayNodes]) {
+      if (!this._transientPaintReplayNodes.has(node)) continue
       node.paintTransient(context, node.globalOffset)
     }
   }

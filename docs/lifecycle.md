@@ -47,3 +47,14 @@ Actual focus and its navigation outline are separate. Pointer presses hide navig
 Programmatic focus and popup focus restoration inherit the latest input modality; the initial default is keyboard visibility. Text fields and editors retain their editing border, caret and selection after pointer focus. Selected items and active editing cells keep their own state indicators.
 
 `FocusManager.instance.inputModality` returns `keyboard` or `pointer`. `FocusManager.keyboardFocusVisible` is a read-only drawing policy and does not instantiate a manager. Custom navigation outlines should follow that policy while preserving actual focus. Built-in focusable controls also expose `isFocusVisible`. Standard pointer dispatch already calls `notifyPointerInput()`; custom adapters can call it before dispatching pointer-down events. Keyboard events continue through `handleKeyDownEvent()`.
+
+
+## Invalidation during painting
+
+A paint pass consumes the requests that were present when it began. Calling `markNeedsPaint()` or `markNeedsTransientPaint()` from a paint callback preserves the new request for the next frame, including when it targets the same node and rectangle. Popup-owned render trees follow the same rule. Normal invalidations are still coalesced into a single pending frame; once the requested work finishes, the runtime returns to idle.
+
+Layer painters can also invalidate their own layer or a layer already painted earlier in the pass. `RuntimeHost` schedules the remaining dirty work after the pass, instead of clearing it at frame completion. Direct `PipelineOwner` flushes retain newly queued damage; popup transient replay uses a participant snapshot so newly added nodes wait until the next pass and detached nodes are skipped.
+
+If a runtime or popup painter throws, the error propagates and pending damage is retained for recovery. The failure itself does not start an automatic retry loop: after resolving the cause, request another paint to resume. A failed queued transient flush restores its consumed damage without restoring detached participants. Disposing a node or unregistering a layer removes its pending work.
+
+Prefer updating state before painting. If a custom painter intentionally requests another frame, give that update a stopping condition; requesting paint on every paint callback creates continuous rendering.

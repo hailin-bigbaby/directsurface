@@ -149,8 +149,7 @@ export class PopupRenderSurface {
 
   paint(context: PaintContext, popupContext: PopupContext): void {
     this._syncRoot(popupContext)
-    this._root?.paint(context, this._root.offset)
-    this._host.flushAfterFullPaint(context)
+    this._host.paint(context)
   }
 
   reset(): void {

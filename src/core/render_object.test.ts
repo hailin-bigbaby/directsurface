@@ -988,3 +988,97 @@ expect(onNeedPaint).toHaveBeenCalledTimes(1)
     expect(tree.needsPaint).toBe(true)
   })
 })
+
+
+describe('paint request tracking', () => {
+  it.each(['main', 'transient'] as const)('keeps damage queued during a direct %s flush', layer => {
+    const owner = new PipelineOwner()
+    const node = new TestNode()
+    node.attach(owner)
+    node.layout(constraints)
+    const first = { x: 1, y: 2, width: 3, height: 4 }
+    const next = { x: 40, y: 30, width: 8, height: 9 }
+    const request = (rect: typeof first) => layer === 'main'
+      ? node.markNeedsPaint(rect) : node.markNeedsTransientPaint(rect)
+    const paint = vi.spyOn(node, layer === 'main' ? 'performPaint' : 'performTransientPaint')
+      .mockImplementationOnce(() => request(next))
+    request(first)
+    if (layer === 'main') owner.flushPaint(createPaintContext())
+    else owner.flushTransientPaint(createPaintContext())
+    expect(paint).toHaveBeenCalledTimes(1)
+    expect(layer === 'main' ? owner.getDirtyPaintRectInSubtree(node) : owner.getTransientPaintRect()).toEqual(next)
+    if (layer === 'main') owner.flushPaint(createPaintContext())
+    else owner.flushTransientPaint(createPaintContext())
+    expect(paint).toHaveBeenCalledTimes(2)
+    expect(layer === 'main' ? owner.hasDirtyPaintInSubtree(node) : owner.hasTransientPaint()).toBe(false)
+  })
+
+  it('defers new transient replay participants and skips those detached during the pass', () => {
+    const owner = new PipelineOwner()
+    const first = new TestNode()
+    const removed = new TestNode()
+    const added = new TestNode()
+    for (const node of [first, removed, added]) {
+      node.attach(owner)
+      node.layout(constraints)
+    }
+    const firstPaint = vi.spyOn(first, 'performTransientPaint').mockImplementationOnce(() => {
+      removed.detach()
+      added.markNeedsTransientPaint()
+    })
+    const removedPaint = vi.spyOn(removed, 'performTransientPaint')
+    const addedPaint = vi.spyOn(added, 'performTransientPaint')
+    first.markNeedsTransientPaint()
+    removed.markNeedsTransientPaint()
+    owner.paintWithRequestTracking(() => owner.replayTransientPaint(createPaintContext()))
+    expect(firstPaint).toHaveBeenCalledTimes(1)
+    expect(removedPaint).not.toHaveBeenCalled()
+    expect(addedPaint).not.toHaveBeenCalled()
+    expect(owner.hasTransientPaint()).toBe(true)
+    owner.paintWithRequestTracking(() => owner.replayTransientPaint(createPaintContext()))
+    expect(addedPaint).toHaveBeenCalledTimes(1)
+    expect(owner.hasTransientPaint()).toBe(false)
+  })
+
+  it('does not resurrect requests for nodes detached during painting', () => {
+    const onNeedPaint = vi.fn()
+    const owner = new PipelineOwner({ onNeedPaint })
+    const root = new TestNode()
+    root.attach(owner)
+    root.markNeedsPaint()
+    root.markNeedsTransientPaint()
+    onNeedPaint.mockClear()
+    owner.paintWithRequestTracking(() => {
+      root.markNeedsPaint()
+      root.markNeedsTransientPaint()
+      root.detach()
+    })
+    expect(owner.debugPaintState()).toMatchObject({ paintCount: 0, transientPaintCount: 0 })
+    expect(onNeedPaint).not.toHaveBeenCalled()
+  })
+})
+
+
+it('restores failed transient flush damage without reviving a detached participant', () => {
+  const owner = new PipelineOwner()
+  const node = new TestNode()
+  const removed = new TestNode()
+  node.attach(owner)
+  removed.attach(owner)
+  node.markNeedsTransientPaint({ x: 0, y: 0, width: 10, height: 10 })
+  removed.markNeedsTransientPaint({ x: 100, y: 100, width: 10, height: 10 })
+  const paint = vi.spyOn(node, 'performTransientPaint').mockImplementationOnce(() => {
+    removed.detach()
+    node.markNeedsTransientPaint({ x: 20, y: 20, width: 10, height: 10 })
+    throw new Error('transient failure')
+  })
+  expect(() => owner.flushTransientPaint(createPaintContext())).toThrow('transient failure')
+  expect(owner.getTransientPaintRect()).toEqual({ x: 0, y: 0, width: 30, height: 30 })
+  expect(owner.debugPaintState().transientPaintCount).toBe(1)
+  owner.flushTransientPaint(createPaintContext())
+  expect(paint).toHaveBeenCalledTimes(2)
+  expect(owner.hasTransientPaint()).toBe(false)
+  node.dispose()
+  removed.dispose()
+  paint.mockRestore()
+})

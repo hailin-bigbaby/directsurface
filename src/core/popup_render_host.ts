@@ -150,11 +150,13 @@ export class PopupRenderHost {
     }
   }
 
-  flushAfterFullPaint(context: PaintContext): void {
+  paint(context: PaintContext): void {
     this._owner.clearLayoutRequests()
-    this._owner.clearPaintRequests()
-    if (this._owner.hasTransientPaint()) this._owner.flushTransientPaint(context)
-    else this._owner.replayTransientPaint(context)
+    this._owner.paintWithRequestTracking(() => {
+      this._root?.paint(context, this._root.offset)
+      if (this._owner.hasTransientPaint()) this._owner.flushTransientPaint(context)
+      else this._owner.replayTransientPaint(context)
+    })
   }
 
   handlePointerMove(event: PointerEvent): boolean {

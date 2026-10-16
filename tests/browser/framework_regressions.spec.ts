@@ -423,3 +423,77 @@ test('Table cached paints stay identical and reflect in-place sorted data change
       reordered: ['Bravo', 'Charlie', 'Alpha'], descending: ['Alpha', 'Bravo', 'Charlie'] })
   }
 })
+
+
+test('paint-time main and transient invalidations reach the screen on the next scheduled frame', async ({ page }) => {
+  const results = await page.evaluate(async () => {
+    const { RuntimeHost, RenderObject } = renderingUnderTest
+    const results = []
+    for (const layer of ['main', 'transient'] as const) {
+      for (const dpr of [1, 1.5, 2]) {
+        const canvas = document.createElement('canvas')
+        const host = new RuntimeHost({ canvas, dpr, getViewportSize: () => ({ width: 80, height: 40 }) })
+        try {
+          class ReentrantNode extends RenderObject {
+            updateDuringPaint = false
+            rightColor = 'red'
+            paintCount = 0
+            visitChildren(): void {}
+            performLayout(): void { this.size = { width: 80, height: 40 } }
+            performPaint(context: InstanceType<typeof renderingUnderTest.PaintContext>): void {
+              if (layer === 'main') this.draw(context)
+            }
+            performTransientPaint(context: InstanceType<typeof renderingUnderTest.PaintContext>): void {
+              if (layer === 'transient') this.draw(context)
+            }
+            request(x: number): void {
+              const rect = { x, y: 5, width: 10, height: 10 }
+              if (layer === 'main') this.markNeedsPaint(rect)
+              else this.markNeedsTransientPaint(rect)
+            }
+            draw(context: InstanceType<typeof renderingUnderTest.PaintContext>): void {
+              this.paintCount++
+              context.ctx.fillStyle = 'green'
+              context.ctx.fillRect(5, 5, 10, 10)
+              context.ctx.fillStyle = this.rightColor
+              context.ctx.fillRect(55, 5, 10, 10)
+              if (this.updateDuringPaint) {
+                this.updateDuringPaint = false
+                this.rightColor = 'blue'
+                this.request(55)
+              }
+            }
+          }
+          const root = new ReentrantNode()
+          host.addRoot(root)
+          host.registerLayer({ layer: 'main',
+            shouldPaint: () => host.isLayerDirty('main') || host.hasDirtyPaintForRoot(root),
+            dirtyRect: () => host.getDirtyPaintRectForRoots([root]),
+            paint: ({ context }) => root.paint(context, root.globalOffset),
+          })
+          root.request(55)
+          host.renderFrame()
+          host.frameScheduler.cancelFrame()
+          const before = root.paintCount
+          root.updateDuringPaint = true
+          root.request(5)
+          for (let frame = 0; frame < 4; frame++) await new Promise(requestAnimationFrame)
+          const pixels = canvas.getContext('2d')!.getImageData(Math.floor(60 * dpr), Math.floor(10 * dpr), 1, 1).data
+          results.push({ layer, dpr, pixels: [...pixels], paints: root.paintCount - before,
+            pending: host.frameScheduler.frameScheduled,
+            paintCount: host.pipelineOwner.debugPaintState().paintCount,
+            transientPaintCount: host.pipelineOwner.debugPaintState().transientPaintCount,
+          })
+        } finally { host.dispose() }
+      }
+    }
+    return results
+  })
+  for (const result of results) {
+    expect(result.pixels, JSON.stringify(result)).toEqual([0, 0, 255, 255])
+    expect(result.paints, JSON.stringify(result)).toBe(2)
+    expect(result.pending, JSON.stringify(result)).toBe(false)
+    expect(result.paintCount).toBe(0)
+    expect(result.transientPaintCount).toBe(0)
+  }
+})
