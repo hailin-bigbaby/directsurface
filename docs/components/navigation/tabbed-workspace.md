@@ -134,6 +134,10 @@ manager.openDocument({
 
 `beforeClose` 返回 `false` 或抛出异常时，关闭会被取消。异步返回 `Promise<boolean>` 也支持。
 
+关闭请求绑定发起时的文档实例。等待期间通过 `setDocuments()` 或释放后重新打开同一 `tabId`，旧关闭请求返回 `false`，不会关闭新内容。新实例可独立请求关闭；仅调整顺序不使原请求失效。
+
+`closable: false` 同时约束 UI、快捷键和 API。`closeDocument()`、`closeActiveDocument()` 和上下文 `requestClose()` 返回 `false`，不执行关闭保护，也不释放内容。确认等待期间改为不可关闭，也会取消关闭；允许关闭时请先通过 `updateDocument()` 改为 `true`。这是 API 与 UI 关闭规则的一致性修正。
+
 ## TabbedDocumentDefinition
 
 | 字段 | 类型 | 必填 | 说明 |

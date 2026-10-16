@@ -90,7 +90,7 @@ export class TabbedDocumentManager {
   private _documents: TabbedDocumentRecord[] = []
   private _activeTabId: string | null = null
   private _listeners = new Set<TabbedDocumentListener>()
-  private _closingTabIds = new Set<string>()
+  private _closingDocuments = new Set<TabbedDocumentRecord>()
 
   get documents(): readonly TabbedDocumentRecord[] {
     return this._documents
@@ -169,12 +169,13 @@ export class TabbedDocumentManager {
 
   async closeDocument(tabId: string): Promise<boolean> {
     if (!this.hasDocument(tabId)) return false
-    if (this._closingTabIds.has(tabId)) return false
     const record = this.getDocument(tabId)!
-    this._closingTabIds.add(tabId)
+    if (!record.closable) return false
+    if (this._closingDocuments.has(record)) return false
+    this._closingDocuments.add(record)
     try {
       const allowed = await this._runBeforeClose(record)
-      if (!allowed) return false
+      if (!allowed || !record.closable || this.getDocument(tabId) !== record) return false
 
       const index = this._documents.findIndex(document => document.tabId === tabId)
       if (index < 0) return false
@@ -192,7 +193,7 @@ export class TabbedDocumentManager {
       this._emit()
       return true
     } finally {
-      this._closingTabIds.delete(tabId)
+      this._closingDocuments.delete(record)
     }
   }
 
@@ -292,7 +293,7 @@ export class TabbedDocumentManager {
       document.contentHost.dispose()
     }
     this._documents = []
-    this._closingTabIds.clear()
+    this._closingDocuments.clear()
     this._listeners.clear()
   }
 
