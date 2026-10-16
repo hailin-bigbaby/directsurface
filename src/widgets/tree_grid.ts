@@ -399,6 +399,7 @@ export class RenderTreeGrid<T extends Record<string, any> = any>
   get columns(): GridColumnDef<T>[] { return this._columns }
   set columns(columns: GridColumnDef<T>[]) {
     if (this._columns === columns) return
+    this.editing.endEdit()
     this._columns = columns
     this._lookupValues.syncColumns(columns)
     this._treeColumnKey = this._resolveTreeColumnKey(this._treeColumnKey)
@@ -408,7 +409,6 @@ export class RenderTreeGrid<T extends Record<string, any> = any>
     this._sortState = normalizedSortState
     this._viewport.resetColumnWidths()
     if (sortStateChanged) this._syncVisibleItems()
-    if (this.editing.state && this.editing.state.col >= columns.length) this.editing.endEdit()
     if (this._focusedColIndex >= columns.length) this._focusedColIndex = this.structureEditing.lastEditableColumnIndex()
     else this._focusedColIndex = this._normalizeFocusedColumn(this._focusedColIndex)
     this.markNeedsLayout()

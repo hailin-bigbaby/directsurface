@@ -182,7 +182,7 @@ TreeGrid 的特殊点：
 | `margin` | `EdgeInsets` | 组件外部留白。赋值后请求 layout。 |
 | `horizontalAlignment` / `verticalAlignment` | `BoxAlignment \| undefined` | 组件在父布局槽位中的对齐方式。 |
 | `cellTextOverflow` | `GridCellTextOverflow` | 单元格文本溢出策略。 |
-| `columns` | `GridColumnDef<T>[]` | 获取或替换列。替换后会重置列宽并校正 tree column。 |
+| `columns` | `GridColumnDef<T>[]` | 获取或替换列。替换前取消当前编辑并关闭编辑器 popup，之后重置列宽并校正 tree column。 |
 | `roots` | `TreeGridNode<T>[]` | 获取或替换根节点。替换后会清理无效展开状态并重建可视节点。 |
 | `treeColumnKey` | `keyof T & string` | 树形列 key。设置不存在的 key 时会回退到有效列。 |
 | `selectionMode` | `TreeGridSelectionMode` | 当前选择模式。切换模式会结束编辑。 |
@@ -414,3 +414,7 @@ TreeGrid 复用 DataGrid 的列编辑能力：
 - [Table 静态表格](./table.md)：静态数据展示。
 - [CommandToolbar 命令工具栏](../command/command-toolbar.md)：树表操作区。
 - [Runtime Diagnostics](../../lifecycle.md)：调试布局、绘制和事件。
+
+## 动态列定义与编辑
+
+更换 `columns`（换序、同长度的新定义或删除列）会丢弃未提交草稿，不触发 `onCellChange`，避免按旧列位置写错字段。如需保留修改，应先提交并确认校验通过，再换列。完成替换后可按列 key 重新开始编辑。
