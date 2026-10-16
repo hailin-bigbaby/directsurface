@@ -309,11 +309,13 @@ export class RenderButton extends FocusableControl implements InteractiveRenderO
   }
 
   onPointerCancel(e: PointerEvent): void {
+    if (this._disposables.disposed) return
     if (this._pendingGesture.hasOwner && !this._pendingGesture.owns(e)) return
     this._resetInteraction()
   }
 
   onPointerLeave(_e: PointerEvent): void {
+    if (this._disposables.disposed) return
     if (!this._interaction.leaveHover()) return
     this._hoverAnim.reverse()
     if (this.tooltip) TooltipService.currentOrNull?.hide()

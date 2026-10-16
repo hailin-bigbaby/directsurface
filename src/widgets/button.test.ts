@@ -16,6 +16,32 @@ const constraints: BoxConstraints = {
   maxHeight: 40,
 }
 
+it('does not restart animations for a late hover/cancel after disposal', () => {
+  const callbacks = new Map<number, FrameRequestCallback>()
+  let nextId = 1
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+    const id = nextId++
+    callbacks.set(id, callback)
+    return id
+  })
+  vi.stubGlobal('cancelAnimationFrame', (id: number) => callbacks.delete(id))
+  const button = new RenderButton({ label: 'disposed hover' })
+  button.size = { width: 100, height: 40 }
+  const event = { pointerId: 1, pointerType: 'mouse' as const, type: 'move' as const, position: { x: 10, y: 10 } }
+  button.onPointerMove(event)
+  for (const timestamp of [0, 50]) {
+    const [id, callback] = callbacks.entries().next().value!
+    callbacks.delete(id)
+    callback(timestamp)
+  }
+  button.dispose()
+  expect(callbacks.size).toBe(0)
+  button.onPointerLeave(event)
+  button.onPointerCancel({ ...event, type: 'cancel' })
+  expect(callbacks.size).toBe(0)
+  vi.unstubAllGlobals()
+})
+
 function createPaintContext(): PaintContext {
   const gradient = { addColorStop: vi.fn() }
   const ctx = {
@@ -89,6 +115,7 @@ afterEach(() => {
   FocusManager.disposeInstance()
   vi.useRealTimers()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 describe('RenderButton lifecycle', () => {

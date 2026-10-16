@@ -335,6 +335,10 @@ tooltip 行为：
 
 当按钮需要权限、`canExecute`、快捷键、菜单复用、命令诊断或页面级命令生命周期时，使用 `RenderCommandButton`。`RenderButton` 适合简单局部动作。
 
+## 销毁后的事件
+
+调用 `dispose()` 后，迟到的指针离开或取消事件会被忽略，不会重新启动悬停动画或请求动画帧。
+
 ## 相关文档
 
 - [IconButton](./icon-button.md)
