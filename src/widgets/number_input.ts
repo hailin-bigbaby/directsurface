@@ -554,6 +554,7 @@ export class RenderNumberInput extends RenderBox implements
         session.refresh({ syncSelectionFromComposer: true })
       },
       onKeyDown: (e, session) => {
+        if (e.isComposing || e.keyCode === 229 || this._textInput.composing) return
         if (e.key === 'Enter') {
           e.preventDefault()
           this.commitEdit()
@@ -572,9 +573,11 @@ export class RenderNumberInput extends RenderBox implements
   commitEdit(): boolean {
     if (!this._editing) return true
     const parsed = parseFloat(this._editText)
-    if (!isNaN(parsed)) {
+    if (Number.isFinite(parsed)) {
+      const nextValue = this._normalizeValue(parsed)
+      if (!Number.isFinite(nextValue)) return false
       const previousValue = this.value
-      this.value = this._clamp(this._round(parsed))
+      this.value = parsed
       runCleanupSteps([
         () => this._publishValueChange(previousValue, 'commit'),
         () => this._endEdit(),
@@ -622,9 +625,11 @@ export class RenderNumberInput extends RenderBox implements
   }
 
   private _step(dir: 1 | -1): void {
-    if (this.disabled || this.readonly) return
+    if (this.disabled || this.readonly || this._textInput.composing) return
+    const base = this._editing ? parseFloat(this._editText) : this.value
+    if (!Number.isFinite(base)) return
     const previousValue = this.value
-    this.value = this._clamp(this._round(this.value + dir * this.step))
+    this.value = this._clamp(this._round(base + dir * this.step))
     if (this._editing) {
       const nextText = this._formattedValue()
       this._editText = nextText
@@ -830,7 +835,8 @@ export class RenderNumberInput extends RenderBox implements
     this._lastDragPosition = undefined
   }
 
-  onWheel(e: WheelPointerEvent): void {
+  onWheel(e: WheelPointerEvent): boolean | void {
+    if (!this._focused) return false
     if (this.disabled || this.readonly || !this._hitField(e.position) || e.deltaY === 0) return
     this._step(e.deltaY < 0 ? 1 : -1)
   }
