@@ -438,11 +438,10 @@ export class RenderUpload<TResult = unknown> extends RenderBox {
     item.progress = 0
     item.error = undefined
     item.result = undefined
-    this._syncRowControls(item)
-    this._notifyChange()
-    if (!this._isCurrentAttempt(item, attempt) || controller.signal.aborted) return
-
     try {
+      this._syncRowControls(item)
+      this._notifyChange()
+      if (!this._isCurrentAttempt(item, attempt) || controller.signal.aborted) return
       const result = await upload(item.file, {
         signal: controller.signal,
         reportProgress: value => {

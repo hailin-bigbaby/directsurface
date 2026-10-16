@@ -98,6 +98,8 @@ type UploadHandler<TResult> = (
 - Promise 失败后文件进入 `error`，可以点击重试。
 - 返回结果保存在对应 `UploadFileItem.result` 中。
 
+启动上传时先通知 `uploading`。如果该次 `onChange` 抛错，不调用业务上传函数，而是将仍有效的任务恢复到可重试的 `error` 状态、保存错误并释放控制器。如果通知 `error` 时再次抛错，`start()` / `retry()` 会拒绝，但状态恢复和清理已完成。回调中取消、移除或释放的任务不会被旧状态覆盖。
+
 ## 文件状态
 
 | 状态 | 说明 |
