@@ -1644,6 +1644,7 @@ export class RenderDataGrid<T extends Record<string, any> = any>
   }
 
   private rowAtVisibleIndex(rowIndex: number): T | null {
+    if (rowIndex < 0) return null
     return this.dataModel.visibleRows()[rowIndex] ?? null
   }
 

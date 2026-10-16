@@ -151,10 +151,12 @@ export class GridInteractionController<T extends Record<string, any> = any> {
   }
 
   get focusedRow(): number {
+    if (this.focusedItemIndex < 0) return -1
     return this._dataModel.visibleRowIndexForItem(this.focusedItemIndex)
   }
 
   get hoveredRow(): number {
+    if (this.hoveredItemIndex < 0) return -1
     return this._dataModel.visibleRowIndexForItem(this.hoveredItemIndex)
   }
 
@@ -887,7 +889,7 @@ export class GridInteractionController<T extends Record<string, any> = any> {
   pasteFromClipboard(): void {
     if (!this._editable()) return
     if (this._selectionMode !== 'row') return
-    navigator.clipboard.readText().then(text => {
+    ClipboardController.instance.readText().then(text => {
       if (!text) return
       const lines = text.split('\n')
       if (lines.length < 2) return

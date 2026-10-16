@@ -729,6 +729,7 @@ export interface GridPopupDebugState {
 export interface GridEmbeddedPopupDebugState {
   scrollY: number
   focusedRow: number
+  hoveredRow?: number
   sortState: GridSortState
 }
 

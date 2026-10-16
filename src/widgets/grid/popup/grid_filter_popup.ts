@@ -727,6 +727,7 @@ export class GridFilterPopup extends PopupPanelShell implements Popup {
     dl.popClip()
 
     const footer = resolvedLayout.footer
+    dl.pushRoundedClip(layout.x, layout.y, layout.w, layout.h, popup.borderRadius)
     dl.fillRect(footer.x, footer.y, footer.w, footer.h, filterStyle.footerBg)
     dl.line(footer.x, footer.y, footer.x + footer.w, footer.y, filterStyle.footerBorder, filterStyle.borderWidth)
     this.paintButton(
@@ -751,6 +752,8 @@ export class GridFilterPopup extends PopupPanelShell implements Popup {
       true,
       context,
     )
+    dl.popClip()
+    dl.strokeRect(layout.x, layout.y, layout.w, layout.h, popup.borderColor, 1, popup.borderRadius)
   }
 
   protected override onPopupClose(): void {

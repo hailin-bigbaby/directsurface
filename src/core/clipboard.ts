@@ -48,4 +48,15 @@ export class ClipboardController {
     }
     return false
   }
+
+  async readText(): Promise<string | null> {
+    try {
+      const clipboard = typeof navigator !== 'undefined' ? navigator.clipboard : undefined
+      if (!clipboard?.readText) return null
+      const text = await clipboard.readText()
+      return typeof text === 'string' ? text : null
+    } catch {
+      return null
+    }
+  }
 }

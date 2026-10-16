@@ -352,8 +352,10 @@ export class DropdownGridPopup extends ResizablePopupPanelShell implements Popup
     popupContext: PopupContext,
     _layout: PopupResizablePanelLayout,
   ): void {
+    const hoveredBefore = this._grid?.debugState().hoveredRow
     this._searchInput.handlePointerMove(event.position)
     this._gridSurface.handlePointerMove(event, popupContext)
+    if (hoveredBefore !== this._grid?.debugState().hoveredRow) this.requestPopupPaint()
   }
 
   protected override onPanelPointerUp(
@@ -395,7 +397,7 @@ export class DropdownGridPopup extends ResizablePopupPanelShell implements Popup
 
   private _syncGrid(colWidths?: number[]): void {
     if (!this._grid) return
-    this._grid.columns = this._columns.map((col, index) => ({
+    const columns = this._columns.map((col, index) => ({
       key: col.key,
       title: col.title,
       type: 'text',
@@ -403,7 +405,14 @@ export class DropdownGridPopup extends ResizablePopupPanelShell implements Popup
       editable: false,
       sortable: false,
     }) as GridColumnDef<Record<string, any>>)
-    this._grid.rows = this._filteredRows
+    const current = this._grid.columns
+    if (current.length !== columns.length || current.some((column, index) => {
+      const next = columns[index]!
+      return column.key !== next.key || column.title !== next.title ||
+        column.type !== next.type || column.width !== next.width ||
+        column.editable !== next.editable || column.sortable !== next.sortable
+    })) this._grid.columns = columns
+    if (this._grid.rows !== this._filteredRows) this._grid.rows = this._filteredRows
   }
 
   private _syncGridLayout(layout: DropdownGridPopupLayout): void {
