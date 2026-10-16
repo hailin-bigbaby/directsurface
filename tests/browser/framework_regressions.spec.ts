@@ -368,3 +368,58 @@ test('shared scrollbars distinguish track and thumb colors on both axes', async 
   }
   await page.screenshot({ path: info.outputPath('scrollbar-hover.png') })
 })
+
+
+test('Table cached paints stay identical and reflect in-place sorted data changes', async ({ page }) => {
+  const results = await page.evaluate(async () => {
+    const { RenderTable, PaintContext, ImGuiLightTheme, ImGuiDarkTheme, loadDirectSurfaceFonts } = renderingUnderTest
+    const results = []
+    for (const theme of [ImGuiLightTheme, ImGuiDarkTheme]) {
+      const rows = [{ id: 3, name: 'Charlie' }, { id: 1, name: 'Alpha' }, { id: 2, name: 'Bravo' }]
+      const table = new RenderTable({
+        columns: [{ key: 'id', title: 'ID', width: 50, sortable: true }, { key: 'name', title: 'Name', width: 120 }],
+        rows,
+      })
+      table.sortState = { key: 'id', order: 'asc' }
+      table.layout({ minWidth: 0, maxWidth: 200, minHeight: 0, maxHeight: 180 }, false, { theme })
+      const canvas = document.createElement('canvas')
+      canvas.width = 200
+      canvas.height = 180
+      const ctx = canvas.getContext('2d')!
+      const original = ctx.fillText.bind(ctx)
+      let labels: string[] = []
+      ctx.fillText = (text, x, y, maxWidth) => {
+        if (rows.some(row => row.name === text)) labels.push(text)
+        if (maxWidth === undefined) original(text, x, y)
+        else original(text, x, y, maxWidth)
+      }
+      const paint = () => {
+        labels = []
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
+        table.performPaint(new PaintContext(ctx, theme), { x: 0, y: 0 })
+        return { labels: [...labels], image: canvas.toDataURL() }
+      }
+      const first = paint()
+      const cached = paint()
+      await loadDirectSurfaceFonts()
+      const afterFontReady = paint()
+      rows[0]!.id = 0
+      const edited = paint()
+      rows.reverse()
+      rows[0]!.id = 0
+      const reordered = paint()
+      table.sortState = { key: 'id', order: 'desc' }
+      const descending = paint()
+      results.push({ samePixels: first.image === cached.image && first.image === afterFontReady.image,
+        initial: first.labels, cached: cached.labels, edited: edited.labels,
+        reordered: reordered.labels, descending: descending.labels })
+      table.dispose()
+    }
+    return results
+  })
+  for (const result of results) {
+    expect(result).toEqual({ samePixels: true, initial: ['Alpha', 'Bravo', 'Charlie'],
+      cached: ['Alpha', 'Bravo', 'Charlie'], edited: ['Charlie', 'Alpha', 'Bravo'],
+      reordered: ['Bravo', 'Charlie', 'Alpha'], descending: ['Alpha', 'Bravo', 'Charlie'] })
+  }
+})

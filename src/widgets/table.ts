@@ -5,7 +5,7 @@ import { RenderBox, type RenderBoxOptions } from '../layout/render_box'
 import { DrawList } from '../rendering/draw_list'
 import type { PaintContext } from '../rendering/paint_context'
 import { hitTestScrollbarGeometry, paintHBar, paintVBar, resolveScrollbarGeometryForState, type ScrollbarGeometry } from '../rendering/scrollbar'
-import { paintSingleLineText } from '../rendering/text_painter'
+import { fitSingleLineText, paintSingleLineText } from '../rendering/text_painter'
 import {
   deriveScrollbarStyle,
   deriveTableRowStyle,
@@ -24,7 +24,6 @@ import { calcFixedVirtualRange } from '../virtualization/fixed_virtual_range'
 import { ScrollController } from '../virtualization/scroll_controller'
 import { FocusManager } from '../core/focus_manager'
 import { TextMeasurer } from '../core/text_measurer'
-import { ellipsizeText } from '../core/text_overflow'
 import type { Focusable } from '../core/focus_manager'
 import { SelectionController } from '../core/selection_controller'
 import { ImGuiDarkTheme } from '../theme/default_theme'
@@ -70,6 +69,7 @@ export class RenderTable<T extends Record<string, any> = any> extends RenderBox 
 
   private _columns: TableColumn<T>[]
   private _rows: T[]
+  private _sortedRowsCache?: { key: string; order: SortOrder; source: T[]; values: unknown[]; sorted: T[] }
   private _scroll = new ScrollController()
   private _hoveredRow = -1
   private _focusedRow = -1       // 键盘焦点行
@@ -126,6 +126,7 @@ export class RenderTable<T extends Record<string, any> = any> extends RenderBox 
   set rows(rows: T[]) {
     if (rows === this._rows) return
     this._rows = rows
+    this._sortedRowsCache = undefined
     this._syncDataState()
     this.markNeedsPaint()
   }
@@ -202,13 +203,24 @@ export class RenderTable<T extends Record<string, any> = any> extends RenderBox 
     const { key, order } = this._sortState
     if (!key || !order) return this.rows
 
-    return this.rows
-      .map((row, index) => ({ row, index }))
+    const cached = this._sortedRowsCache
+    // Public rows are mutable. Detect in-place edits/reordering as well as setter updates.
+    if (cached && cached.key === key && cached.order === order && cached.source.length === this.rows.length
+      && this.rows.every((row, i) => row === cached.source[i] && Object.is(this._sortValue(row[key]), cached.values[i]))) {
+      return cached.sorted
+    }
+    const values = this.rows.map(row => this._sortValue(row[key]))
+    const sorted = this.rows.map((row, index) => ({ row, index }))
       .sort((a, b) => {
-        const cmp = this._compareValues(a.row[key], b.row[key])
+        const cmp = this._compareValues(values[a.index], values[b.index])
         return cmp === 0 ? a.index - b.index : order === 'asc' ? cmp : -cmp
-      })
-      .map(item => item.row)
+      }).map(item => item.row)
+    this._sortedRowsCache = { key, order, source: this.rows.slice(), values, sorted }
+    return sorted
+  }
+
+  private _sortValue(value: unknown): unknown {
+    return value == null || typeof value === 'number' ? value : String(value)
   }
 
   private _compareValues(a: unknown, b: unknown): number {
@@ -221,7 +233,7 @@ export class RenderTable<T extends Record<string, any> = any> extends RenderBox 
 
   // 总内容高度
   private get _totalContentH(): number {
-    return this._visibleRows().length * this.rowHeight
+    return this.rows.length * this.rowHeight
   }
 
   private get _totalContentW(): number {
@@ -248,7 +260,7 @@ export class RenderTable<T extends Record<string, any> = any> extends RenderBox 
   private _clampState(): void {
     this._scroll.setScrollX(this._scrollX, { viewportSize: this._viewW, contentSize: this._totalContentW })
     this._scroll.setOffset(this._scrollY, { viewportSize: this._viewH, contentSize: this._totalContentH })
-    const rowCount = this._visibleRows().length
+    const rowCount = this.rows.length
     if (this._hoveredRow >= rowCount) this._hoveredRow = -1
     if (this._focusedRow >= rowCount) this._focusedRow = rowCount - 1
     this._rowSelection.clampDiscrete(rowCount)
@@ -467,7 +479,7 @@ export class RenderTable<T extends Record<string, any> = any> extends RenderBox 
     const relY = point.y - bodyY + this._scrollY
     if (relY < 0) return -1
     const ri = Math.floor(relY / this.rowHeight)
-    return ri < this._visibleRows().length ? ri : -1
+    return ri < this.rows.length ? ri : -1
   }
 
   private _inVScrollbar(p: Offset): boolean {
@@ -554,7 +566,7 @@ export class RenderTable<T extends Record<string, any> = any> extends RenderBox 
     fontFamily: string,
   ): string {
     if (overflow !== 'ellipsis') return text
-    return ellipsizeText(text, maxWidth, value => TextMeasurer.measureWidth(value, fontSize, fontFamily))
+    return fitSingleLineText(text, maxWidth, fontSize, fontFamily).text
   }
 
   private _syncOverflowTooltip(position: Offset): void {
@@ -692,7 +704,7 @@ export class RenderTable<T extends Record<string, any> = any> extends RenderBox 
 
   setSelectedRows(rows: Iterable<number>): void {
     const nextRows = new Set<number>()
-    const rowCount = this._visibleRows().length
+    const rowCount = this.rows.length
     for (const row of rows) {
       if (row >= 0 && row < rowCount) nextRows.add(row)
     }
@@ -843,7 +855,7 @@ export class RenderTable<T extends Record<string, any> = any> extends RenderBox 
 
   private _scrollToRow(ri: number): void {
     this._scroll.scrollToIndex({
-      itemCount: this._visibleRows().length,
+      itemCount: this.rows.length,
       itemSize: this.rowHeight,
       viewportSize: this._viewH,
       index: ri,
@@ -889,6 +901,7 @@ export class RenderTable<T extends Record<string, any> = any> extends RenderBox 
   }
 
   dispose(): void {
+    this._sortedRowsCache = undefined
     FocusManager.instance.unregister(this)
     this._vScrollbarController.reset()
     this._hScrollbarController.reset()

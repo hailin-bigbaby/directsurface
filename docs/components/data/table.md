@@ -273,6 +273,10 @@ const sort: TableSortState = {
 
 `onRowClick(row, index)` 和 `selectedRows` 中的 `index` 都是排序后的可见行索引，不是原始 `rows` 数组索引。
 
+相同排序状态和数据会复用已排序行，避免重绘、命中查询时重复排序。每次读取仍会线性检查源行引用、顺序和排序字段值；修改排序列或方向、原地编辑排序值、替换行对象、调整数组顺序或长度、替换 `rows` 时会重新计算。相等值仍按当前源数组顺序排列，排序不会改写源数组；关闭排序后恢复源顺序。
+
+原地修改数据本身不会自动触发刷新，仍需按现有宿主流程请求重绘，内容尺寸变化时请求布局。缓存不改变 `selectedRows` 的可见行索引语义；销毁表格时会释放排序缓存。
+
 ## debugState
 
 `debugState()` 返回：
@@ -363,10 +367,10 @@ const wideTable = new RenderTable({
 
 | 值 | 行为 |
 | --- | --- |
-| `'ellipsis'` | 用 `ellipsizeText()` 根据文本测量结果绘制省略文本。默认值。 |
+| `'ellipsis'` | 根据文本测量结果绘制省略文本，并复用共享文本适配缓存。默认值。 |
 | `'clip'` | 原文绘制，但通过 cell clip 裁剪。 |
 
-列级 `column.cellTextOverflow` 优先于表格级 `cellTextOverflow`。
+列级 `column.cellTextOverflow` 优先于表格级 `cellTextOverflow`。相同文本、可用宽度和字体参数会复用适配结果；字体测量失效时重新计算。`clip` 仍直接裁剪原文。详见[字体与文本适配](../../themes.md#text-fitting-and-font-readiness)。
 
 hover 单元格时，如果完整文本宽度超过可用列宽，会把 `table.tooltip` 设置为完整文本。离开、滚动或取消 pointer 时会清空 tooltip。
 
