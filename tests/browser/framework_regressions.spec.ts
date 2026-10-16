@@ -305,3 +305,66 @@ test('native pointer and keyboard routing controls focus rings while retaining i
   expect(result.composition).toMatchObject({ rings: 0, editingBorders: 1, modality: 'pointer' })
   expect(result.pointerArea).toMatchObject({ rings: 0, editingBorders: 1, focused: true })
 })
+
+
+test('shared scrollbars distinguish track and thumb colors on both axes', async ({ page }, info) => {
+  const samples = await page.evaluate(() => {
+    const { RenderScrollViewer, RenderBox, PaintContext, ImGuiLightTheme, ImGuiDarkTheme } = renderingUnderTest
+    class Content extends RenderBox {
+      constructor(private readonly horizontal: boolean) { super() }
+      visitChildren(): void {}
+      performLayout(): void { this.size = this.horizontal ? { width: 300, height: 80 } : { width: 80, height: 300 } }
+      performPaint(): void {}
+    }
+    const samples: { theme: string; axis: string; dpr: number; state: string; pixel: number[]; expected: number[]; scroll: number[] }[] = []
+    for (const [name, theme] of [['light', ImGuiLightTheme], ['dark', ImGuiDarkTheme]] as const) {
+      for (const axis of ['vertical', 'horizontal'] as const) {
+        for (const dpr of [1, 1.5, 2]) {
+          const view = new RenderScrollViewer({ child: new Content(axis === 'horizontal'), direction: axis })
+          view.layout({ minWidth: 0, maxWidth: 100, minHeight: 0, maxHeight: 100 }, false, { theme })
+          const across = 100 - view.scrollBarSize / 2
+          const point = (along: number) => axis === 'vertical' ? { x: across, y: along } : { x: along, y: across }
+          for (const state of ['idle', 'track', 'thumb', 'drag'] as const) {
+            if (state === 'track') view.onPointerMove({ pointerId: 1, type: 'move', position: point(90) })
+            if (state === 'thumb') view.onPointerMove({ pointerId: 1, type: 'move', position: point(15) })
+            if (state === 'drag') {
+              view.onPointerDown({ pointerId: 1, type: 'down', position: point(15) })
+              view.onPointerLeave({ pointerId: 1, type: 'move', position: { x: -10, y: -10 } })
+            }
+            const canvas = document.createElement('canvas')
+            canvas.width = canvas.height = 100 * dpr
+            canvas.style.cssText = 'width:100px;height:100px;margin:4px'
+            const ctx = canvas.getContext('2d')!
+            ctx.scale(dpr, dpr)
+            // Compare against an independently composited center pixel: track under thumb.
+            ctx.fillStyle = '#fff'
+            ctx.fillRect(0, 0, 100, 100)
+            view.performPaint(new PaintContext(ctx, theme), { x: 0, y: 0 })
+            const at = point(15)
+            const pixel = Array.from(ctx.getImageData(Math.floor(at.x * dpr), Math.floor(at.y * dpr), 1, 1).data)
+            const expectedCanvas = document.createElement('canvas')
+            expectedCanvas.width = expectedCanvas.height = 1
+            const expectedCtx = expectedCanvas.getContext('2d')!
+            const fill = (color: { r: number; g: number; b: number; a: number }, opacity = 1) => {
+              expectedCtx.fillStyle = `rgba(${color.r},${color.g},${color.b},${color.a * opacity})`
+              expectedCtx.fillRect(0, 0, 1, 1)
+            }
+            fill({ r: 255, g: 255, b: 255, a: 1 })
+            fill(theme.scrollbarBg, state === 'idle' ? 0.35 : state === 'drag' ? 1 : 0.7)
+            fill(state === 'drag' ? theme.scrollbarGrabActive : state === 'thumb' ? theme.scrollbarGrabHovered : theme.scrollbarGrab)
+            samples.push({ theme: name, axis, dpr, state, pixel,
+              expected: Array.from(expectedCtx.getImageData(0, 0, 1, 1).data), scroll: [view.scrollX, view.scrollY] })
+            document.body.append(canvas)
+          }
+          view.dispose()
+        }
+      }
+    }
+    return samples
+  })
+  for (const sample of samples) {
+    expect(sample.pixel, JSON.stringify(sample)).toEqual(sample.expected)
+    expect(sample.scroll).toEqual([0, 0])
+  }
+  await page.screenshot({ path: info.outputPath('scrollbar-hover.png') })
+})

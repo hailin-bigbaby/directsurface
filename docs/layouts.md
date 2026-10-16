@@ -19,3 +19,7 @@ column.addChild(new RenderButton({ label: 'Save', onClick: () => {} }))
 Other exported panels include `RenderDockPanel` for edge regions and a fill area, `RenderGridPanel` for row and column tracks, `RenderWrapPanel` for wrapping, and `RenderScrollViewer` for a scrollable viewport. Start with one component that owns scrolling in each region.
 
 When text, children, or dimensions change, layout must run again. Color, hover, and focus changes normally require only painting. See [runtime and lifecycle](lifecycle.md) for invalidation and [the component catalog](components.md) for available panels.
+
+## Scrollbar feedback
+
+Shared scrollbars distinguish the track from the thumb. Hovering an empty part of the track highlights the track; the thumb uses its hover color only when the pointer is over its hit area. Dragging keeps the pressed feedback even when the pointer leaves the track. These states apply to both axes in ScrollViewer and other controls using shared scrollbars. Hover changes repaint without scrolling or relayout, and do not change the hit area, track-click navigation, or drag distance.

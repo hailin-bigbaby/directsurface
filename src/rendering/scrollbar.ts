@@ -10,6 +10,7 @@ import type { Offset, Rect } from '../core/render_object'
 
 export class ScrollbarState {
   hovered = false
+  hoverPosition?: Offset
   dragging = false
   dragStartPos = 0      // 拖拽开始时的鼠标坐标（垂直条用 y，水平条用 x）
   dragStartScroll = 0   // 拖拽开始时的 scrollOffset
@@ -52,6 +53,15 @@ export interface ScrollbarGeometry {
   maxScroll: number
   trackTravel: number
   thumbTravelStart: number
+}
+
+export function isScrollbarThumbHovered(state: ScrollbarState, geometry: ScrollbarGeometry): boolean {
+  const point = state.hoverPosition
+  const rect = geometry.thumbHitRect
+  // Resolve against current geometry so scrolling under a stationary pointer stays accurate.
+  return state.hovered && geometry.maxScroll > 0 && point !== undefined && validPoint(point) &&
+    point.x >= rect.x && point.x <= rect.x + rect.width &&
+    point.y >= rect.y && point.y <= rect.y + rect.height
 }
 
 export function resolveScrollbarGeometry(input: ScrollbarGeometryInput): ScrollbarGeometry {
@@ -223,7 +233,7 @@ export function paintVBar(opts: PaintVBarOpts): void {
   dl.fillRect(trackX, trackY, trackW, trackH, trackColor, s.trackRadius)
 
   const thumbColor = state.dragging ? s.thumbPressedBg
-    : state.hovered ? s.thumbHoveredBg
+    : isScrollbarThumbHovered(state, geometry) ? s.thumbHoveredBg
     : s.thumbBg
   const thumb = geometry.thumbRect
   dl.fillRect(thumb.x, thumb.y, thumb.width, thumb.height, thumbColor, s.thumbRadius)
@@ -266,7 +276,7 @@ export function paintHBar(opts: PaintHBarOpts): void {
   dl.fillRect(trackX, trackY, trackW, trackH, trackColor, s.trackRadius)
 
   const thumbColor = state.dragging ? s.thumbPressedBg
-    : state.hovered ? s.thumbHoveredBg
+    : isScrollbarThumbHovered(state, geometry) ? s.thumbHoveredBg
     : s.thumbBg
   const thumb = geometry.thumbRect
   dl.fillRect(thumb.x, thumb.y, thumb.width, thumb.height, thumbColor, s.thumbRadius)

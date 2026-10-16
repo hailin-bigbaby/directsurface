@@ -2,6 +2,7 @@ import type { Offset } from '../core/render_object'
 import type { PointerKey } from './pointer_identity'
 import {
   ScrollbarState,
+  isScrollbarThumbHovered,
   scrollOffsetForScrollbarPointer,
   type ScrollbarAxis,
   type ScrollbarGeometry,
@@ -30,9 +31,11 @@ export class ScrollbarAxisController {
 
   updateHover(point: Offset, geometry: ScrollbarGeometry): boolean {
     const hovered = geometry.maxScroll > 0 && pointInRect(point, geometry.hitRect)
-    if (hovered === this.state.hovered) return false
+    const wasHovered = this.state.hovered
+    const wasThumbHovered = isScrollbarThumbHovered(this.state, geometry)
     this.state.hovered = hovered
-    return true
+    this.state.hoverPosition = hovered ? { x: point.x, y: point.y } : undefined
+    return hovered !== wasHovered || wasThumbHovered !== isScrollbarThumbHovered(this.state, geometry)
   }
 
   get activePointerKey(): PointerKey | undefined {
@@ -60,14 +63,13 @@ export class ScrollbarAxisController {
     if (geometry.maxScroll <= 0 || !pointInRect(point, geometry.hitRect)) {
       return { handled: false, stateChanged: false, action: 'none' }
     }
-    const wasHovered = this.state.hovered
-    this.state.hovered = true
+    const hoverChanged = this.updateHover(point, geometry)
     if (!pointInRect(point, geometry.thumbHitRect)) {
       this.state.dragging = false
       this._activePointerKey = undefined
       return {
         handled: true,
-        stateChanged: !wasHovered,
+        stateChanged: hoverChanged,
         action: 'track',
         scrollOffset: scrollOffsetForScrollbarPointer(
           geometry,
@@ -75,7 +77,7 @@ export class ScrollbarAxisController {
         ),
       }
     }
-    const stateChanged = !wasHovered || !this.state.dragging
+    const stateChanged = hoverChanged || !this.state.dragging
     this.state.dragging = true
     this._activePointerKey = pointerKey
     this.state.dragStartPos = axisPosition(this.axis, point)
@@ -117,15 +119,12 @@ export class ScrollbarAxisController {
       return { handled: false, stateChanged: false, action: 'none' }
     }
     const wasDragging = this.state.dragging
-    const wasHovered = this.state.hovered
     this.state.dragging = false
     this._activePointerKey = undefined
-    if (point && geometry) {
-      this.state.hovered = geometry.maxScroll > 0 && pointInRect(point, geometry.hitRect)
-    }
+    const hoverChanged = point && geometry ? this.updateHover(point, geometry) : false
     return {
       handled: wasDragging,
-      stateChanged: wasDragging || wasHovered !== this.state.hovered,
+      stateChanged: wasDragging || hoverChanged,
       action: wasDragging ? 'thumb-drag' : 'none',
       dragEnded: wasDragging,
       releasePointer: wasDragging,
@@ -138,14 +137,16 @@ export class ScrollbarAxisController {
   }
 
   clearHover(): boolean {
-    if (!this.state.hovered) return false
+    const changed = this.state.hovered
     this.state.hovered = false
-    return true
+    this.state.hoverPosition = undefined
+    return changed
   }
 
   reset(): boolean {
     const changed = this.state.hovered || this.state.dragging
     this.state.hovered = false
+    this.state.hoverPosition = undefined
     this.state.dragging = false
     this.state.dragStartPos = 0
     this.state.dragStartScroll = 0
