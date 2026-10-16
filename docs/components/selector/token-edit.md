@@ -112,6 +112,8 @@ interface TokenEditToken {
 | `placeholder` | `string` | `'请输入或选择'` | 没有 token 且查询为空时显示。 |
 | `allowCustomTokens` | `boolean` | `false` | 是否允许把未匹配候选项的文本创建为 token。 |
 | `tokenSeparators` | `readonly string[]` | `[',', ';', '，', '；']` | 按下其中任意键时提交当前查询文本。传入空数组会使用默认值。 |
+| `maxTokens` | `number \| null` | `null` | 限制用户新增数量；非有限数表示不限，小数向下取整，负数按 0 处理。 |
+| `splitOnEnter` | `boolean` | `false` | Enter 提交时按 `tokenSeparators` 批量拆分。 |
 | `onChange` | `(values: string[], tokens: TokenEditToken[]) => void` | `undefined` | token 集合变化回调。 |
 | `disabled` | `boolean` | `false` | 禁用输入、删除和候选 popup。 |
 | `readonly` | `boolean` | `false` | 允许只读查看，不允许新增或删除。 |
@@ -152,6 +154,8 @@ const categoryTagEdit = new RenderTokenEdit(categoryTagOptions)
 | `tokens` | `TokenEditToken[]` | 否 | 按当前 `values` 解析出的 token 副本。 |
 | `query` | `string` | 是 | 当前尚未提交的输入文本。 |
 | `allowCustomTokens` | `boolean` | 是 | 是否保留和创建自定义 token。 |
+| `maxTokens` | `number \| null` | 是 | 动态更新上限和建议，不截断已有值，不清空 query 或通知变更。 |
+| `splitOnEnter` | `boolean` | 是 | 动态启停批量提交，更新 popup，不立即提交 query。 |
 | `disabled` | `boolean` | 是 | 设为 `true` 会关闭 popup、清理 chip 指针状态，并由内部 TextBox 退出焦点。 |
 | `readonly` | `boolean` | 是 | 设为 `true` 会关闭 popup并禁止修改。 |
 | `status` | `FormFieldStatus` | 是 | 当前表单状态。 |
@@ -210,6 +214,45 @@ tagEdit.focus()
 
 popup 打开且存在过滤结果时，Enter 优先选择当前高亮建议。popup 没有可选建议时，Enter 才按上述规则提交当前文本。
 
+### 数量限制
+
+`maxTokens` 默认不限。设置后，候选选择、Enter、分隔键及 `commitQuery()` 的新增都会检查上限。计数按去重后的 `value` 计算；提交已有值不占新名额，也不触发变更通知。
+
+- 达到上限时关闭建议 popup，并暂不提供新增建议；输入和删除仍可用。
+- 超限提交不会修改已选值，也不会清空 query。可先删除已有 token、修改输入或调高上限再重试。
+- 删除后恢复可用名额；候选列表在满足查询条件和焦点条件时恢复。
+- `0` 表示不允许新增。运行时设为 `null` 恢复不限。
+- 构造时的 `values`、直接赋值及 `setValue()` 继续按原有值模型归一化，**不会按上限截断**；降低上限也不删除已有值。已有数量超限时仍可删除，但不能继续新增。
+
+该上限约束录入交互，不替代业务数据校验。需要禁止保存超限的外部回填值时，应另外配置表单校验。组件不会覆盖业务设置的 `status` 或 `helperText`。
+
+### 粘贴后按 Enter 批量提交
+
+```ts
+const batchTags = new RenderTokenEdit({
+  options: [
+    { value: 'a', label: '甲' },
+    { value: 'b', label: '乙' },
+  ],
+  allowCustomTokens: true,
+  maxTokens: 5,
+  splitOnEnter: true,
+  helperText: '最多 5 项，粘贴后按 Enter 确认',
+})
+```
+
+粘贴 `甲，乙;自定义` 后，文本先保留在 query 中；按 Enter 才提交为 `['a', 'b', '自定义']`。
+
+- 默认 `splitOnEnter: false`，保留原来的整段文本提交行为。
+- 开启后使用配置的分隔符做字面拆分，较长分隔符优先；忽略空分隔符、空片段和首尾空白。不按普通空格拆分。
+- 各片段沿用单项提交的候选精确匹配和自定义值规则；按解析后的 value 去重，保留首次出现顺序。
+- **整批成功或整批保留**：有片段无法按规则匹配，或去重后的新增会超限时，不提交任何项，query 保留供修正。
+- 成功后清空 query，一次触发 `onChange` 和一次 `subscribeValueChange`（`reason: 'add'`），通知包含最终完整数组；全部重复或只有分隔符时只清空 query，不通知。
+- query 含分隔符时暂不显示建议 popup，防止 Enter 被高亮候选截获；普通单项查询仍沿用建议选择行为。
+- 只有提交时才拆分，不修改底层粘贴机制；中文组字期间 Enter 不提交。单行输入原有的粘贴换行转空格规则仍然生效。
+- `commitQuery()` 和表单绑定调用的 `commitEdit()` 使用同样的批量规则；有未能提交的 query 时 `commitEdit()` 返回 `false`，阻止表单提交。
+- 按分隔键仍提交当前整段 query，不启用批量拆分。标签本身需要包含分隔符时，应关闭 `splitOnEnter` 或改用不冲突的分隔符。
+
 ## 方法
 
 面向业务的公开方法：
@@ -217,7 +260,8 @@ popup 打开且存在过滤结果时，Enter 优先选择当前高亮建议。po
 | 方法 | 返回值 | 说明 |
 | --- | --- | --- |
 | `focus()` | `void` | 让内部文本输入获得焦点，并在有建议时打开 popup。 |
-| `commitQuery(query)` | `void` | 按提交规则把文本转换为预定义或自定义 token。 |
+| `commitQuery(query)` | `void` | 按提交规则转换文本；开启 `splitOnEnter` 时批量处理，遵守新增上限。 |
+| `commitEdit()` | `boolean` | 提交当前 query；无法匹配或超限时保留 query 并返回 `false`。 |
 | `removeToken(value)` | `void` | 按 value 删除一个 token；成功删除时触发 `onChange`。 |
 | `debugState()` | 调试对象 | 返回 query、values、tokens、可见 chip、popup 状态和当前建议，用于测试和诊断。 |
 | `dispose()` | `void` | 释放建议 popup 和内部文本输入。 |
@@ -229,7 +273,7 @@ popup 打开且存在过滤结果时，Enter 优先选择当前高亮建议。po
 会触发：
 
 - 从建议 popup 选择一个新值。
-- 通过 Enter 或分隔符创建一个新 token。
+- 通过 Enter 或分隔符创建一个新 token；成功的批量新增只通知一次。
 - 点击 chip 删除按钮。
 - 查询为空时按 Backspace 或 Delete 删除最后一个 token。
 - 调用 `removeToken(value)` 并且该值确实存在。
@@ -239,7 +283,8 @@ popup 打开且存在过滤结果时，Enter 优先选择当前高亮建议。po
 - 直接给 `values` 赋值。
 - 重新赋值 `options`，即使该操作导致已有 token 被归一化删除。
 - 修改 `allowCustomTokens` 导致未知值被归一化删除。
-- 只修改 `query`。
+- 只修改 `query`、`maxTokens` 或 `splitOnEnter`。
+- 超限或无法匹配而被整体拒绝的批量提交。
 - 提交重复 value。
 - `allowCustomTokens: false` 时提交无法匹配的文本。
 - 只修改 `placeholder`、`status` 或 `helperText`。
@@ -275,7 +320,7 @@ tagEdit.onChange = (values, tokens) => {
 | --- | --- |
 | 普通字符 | 写入 `query` 并实时过滤建议。 |
 | Enter | 有建议时选择高亮建议；没有建议时调用 `commitQuery(query)`。提交后不退出字段。 |
-| `tokenSeparators` 中的键 | 调用 `commitQuery(query)`，分隔符本身不会写入 query。 |
+| `tokenSeparators` 中的键 | 将 query 作为单项提交；分隔符本身不会写入 query。 |
 | Backspace / Delete | query 为空时删除最后一个 token；query 非空时执行普通文本删除。 |
 | Escape | popup 打开时先关闭 popup；再次按下按 TextBox 默认行为退出焦点。 |
 | Tab / Shift+Tab | popup 先关闭，然后继续焦点导航。 |
@@ -331,8 +376,8 @@ TokenEdit 始终保留至少约 48px 的查询输入空间。其余宽度用于�
 - 自定义 token 只是本地字符串，不会自动调用后端创建字典项。
 - 不支持 token 拖动排序；顺序由 `values` 决定。
 - 不支持多行 chip 或自动换行。
-- 不提供 `maxTokens`、单项只读或每个 token 独立样式。
-- 复制粘贴的文本不会按多个分隔符自动拆成多个 token；粘贴内容先进入 query，再由 Enter 或分隔键提交。
+- 不提供单项只读或每个 token 独立样式。
+- 粘贴不会立即创建 token；按 Enter 批量拆分需开启 `splitOnEnter`。
 - 候选项只提供 `value`、`label`、`group` 和 `disabled`。需要多列信息或复杂检索时，应使用 LookupEdit 或 DropTreeGridEdit。
 - 组件负责输入交互和显示，不负责业务校验、持久化或服务端冲突处理。
 

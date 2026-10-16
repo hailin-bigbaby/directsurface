@@ -49,6 +49,8 @@ export interface RenderTokenEditOptions extends RenderBoxOptions {
   placeholder?: string
   allowCustomTokens?: boolean
   tokenSeparators?: readonly string[]
+  maxTokens?: number | null
+  splitOnEnter?: boolean
   onChange?: (values: string[], tokens: TokenEditToken[]) => void
   disabled?: boolean
   readonly?: boolean
@@ -321,6 +323,8 @@ export class RenderTokenEdit extends RenderBox implements
   private _placeholder: string
   private _allowCustomTokens: boolean
   private _tokenSeparators: readonly string[]
+  private _maxTokens: number | null
+  private _splitOnEnter: boolean
   private _onChange?: (values: string[], tokens: TokenEditToken[]) => void
   private _maxVisibleItems: number
   private _syncingPopup = false
@@ -338,6 +342,8 @@ export class RenderTokenEdit extends RenderBox implements
     super(options)
     this._options = [...(options.options ?? [])]
     this._allowCustomTokens = options.allowCustomTokens ?? false
+    this._maxTokens = normalizeMaxTokens(options.maxTokens)
+    this._splitOnEnter = options.splitOnEnter ?? false
     this._values = this._normalizeValues(options.values ?? [])
     this._placeholder = options.placeholder ?? '请输入或选择'
     this._tokenSeparators = options.tokenSeparators?.length
@@ -430,6 +436,21 @@ export class RenderTokenEdit extends RenderBox implements
     if (!sameValues(previousValue, this._values)) {
       this._emitReconciledValueChange('mode-reconcile', previousValue)
     }
+  }
+
+  get maxTokens(): number | null { return this._maxTokens }
+  set maxTokens(maxTokens: number | null) {
+    const next = normalizeMaxTokens(maxTokens)
+    if (this._maxTokens === next) return
+    this._maxTokens = next
+    this._syncPopup()
+  }
+
+  get splitOnEnter(): boolean { return this._splitOnEnter }
+  set splitOnEnter(splitOnEnter: boolean) {
+    if (this._splitOnEnter === splitOnEnter) return
+    this._splitOnEnter = splitOnEnter
+    this._syncPopup()
   }
 
   get disabled(): boolean { return this._input.disabled }
@@ -555,7 +576,7 @@ export class RenderTokenEdit extends RenderBox implements
     }
     if (this._tokenSeparators.includes(event.key)) {
       event.preventDefault()
-      this.commitQuery(this.query)
+      if (this.query.trim()) this._commitQueries([this.query])
       return true
     }
     return false
@@ -565,15 +586,29 @@ export class RenderTokenEdit extends RenderBox implements
     if (this.disabled || this.readonly) return
     const normalizedQuery = query.trim()
     if (!normalizedQuery) return
-    const exactOption = this._options.find(option =>
-      !option.disabled &&
-      (option.value === normalizedQuery || option.label === normalizedQuery),
-    )
-    if (exactOption) {
-      this._addToken(exactOption.value)
-      return
+    let queries = [normalizedQuery]
+    if (this.splitOnEnter) {
+      // Literal separators, longest first, also support punctuation such as "|" and ".".
+      for (const separator of [...this._tokenSeparators].filter(Boolean).sort((a, b) => b.length - a.length)) {
+        queries = queries.flatMap(part => part.split(separator))
+      }
     }
-    if (this.allowCustomTokens) this._addToken(normalizedQuery)
+    this._commitQueries(queries)
+  }
+
+  private _commitQueries(queries: readonly string[]): void {
+    if (this.disabled || this.readonly) return
+    const values: string[] = []
+    for (const query of queries) {
+      const text = query.trim()
+      if (!text) continue
+      const exactOption = this._options.find(option =>
+        !option.disabled && (option.value === text || option.label === text),
+      )
+      if (!exactOption && !this.allowCustomTokens) return
+      values.push(exactOption?.value ?? text)
+    }
+    this._addTokens(values)
   }
 
   commitEdit(): boolean {
@@ -729,13 +764,17 @@ export class RenderTokenEdit extends RenderBox implements
     super.dispose()
   }
 
-  private _addToken(value: string): void {
-    if (this._values.includes(value)) {
+  private _addTokens(values: readonly string[]): void {
+    if (this.disabled || this.readonly) return
+    const selected = new Set(this._values)
+    const additions = [...new Set(values)].filter(value => !selected.has(value))
+    if (additions.length === 0) {
       this._clearQuery()
       return
     }
+    if (this.maxTokens !== null && this._values.length + additions.length > this.maxTokens) return
     const previousValue = this.values
-    this._values = [...this._values, value]
+    this._values = [...this._values, ...additions]
     this._clearQuery()
     runCleanupSteps([
       () => this._emitChange('add', previousValue),
@@ -750,6 +789,8 @@ export class RenderTokenEdit extends RenderBox implements
   }
 
   private _filteredSuggestions(): TokenEditOption[] {
+    if (this.maxTokens !== null && this._values.length >= this.maxTokens) return []
+    if (this.splitOnEnter && this._tokenSeparators.some(separator => separator && this.query.includes(separator))) return []
     const selected = new Set(this._values)
     const query = this.query.trim().toLocaleLowerCase()
     return this._options.filter(option => {
@@ -790,7 +831,7 @@ export class RenderTokenEdit extends RenderBox implements
         maxVisibleItems: this._maxVisibleItems,
         keepOpenOnAnchorPointerDown: true,
         onSelect: value => {
-          this._addToken(value)
+          this._addTokens([value])
         },
         onClose: () => this._input.markNeedsPaint(),
       })
@@ -908,4 +949,8 @@ export class RenderTokenEdit extends RenderBox implements
 function sameValues(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length &&
     left.every((value, index) => value === right[index])
+}
+
+function normalizeMaxTokens(value: number | null | undefined): number | null {
+  return value == null || !Number.isFinite(value) ? null : Math.max(0, Math.floor(value))
 }
