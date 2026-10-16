@@ -63,8 +63,11 @@ function estimateTextWidth(text: string, fontSize: number): number {
 }
 
 const _cache = new LRUCache(CACHE_SIZE)
+let _revision = 0
 
 export const TextMeasurer = {
+  /** Changes when font measurements are invalidated. */
+  get revision(): number { return _revision },
   /**
    * 测量文字宽度（带缓存）
    */
@@ -103,6 +106,7 @@ export const TextMeasurer = {
    * 清空缓存（字体变化时调用）
    */
   clearCache(): void {
+    _revision++
     _cache['map'].clear()
     _measureCanvas = null
     _measureCtx = null

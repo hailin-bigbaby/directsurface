@@ -1,3 +1,4 @@
+import { BoundedCache } from './bounded_cache'
 import { ellipsizeText } from '../core/text_overflow'
 import { TextMeasurer } from '../core/text_measurer'
 import type { Color } from '../theme/theme'
@@ -23,6 +24,10 @@ export interface SingleLineTextPaintResult {
   width: number
 }
 
+const fittedTextCache = new BoundedCache<string, SingleLineTextPaintResult>(2048)
+let fontRevision = -1
+let measureFunction = TextMeasurer.measureWidth
+
 export function fitSingleLineText(
   text: string,
   maxWidth: number,
@@ -32,13 +37,24 @@ export function fitSingleLineText(
   fontStyle?: 'normal' | 'italic',
 ): SingleLineTextPaintResult {
   if (!text || maxWidth <= 0) return { text: '', width: 0 }
+  if (fontRevision !== TextMeasurer.revision || measureFunction !== TextMeasurer.measureWidth) {
+    fittedTextCache.clear()
+    fontRevision = TextMeasurer.revision
+    measureFunction = TextMeasurer.measureWidth
+  }
+  const key = text.length <= 4096
+    ? JSON.stringify([text, String(maxWidth), String(fontSize), fontFamily, fontWeight, fontStyle]) : undefined
+  const cached = key === undefined ? undefined : fittedTextCache.get(key)
+  if (cached) return { ...cached }
   const fitted = Number.isFinite(maxWidth)
     ? ellipsizeText(text, maxWidth, value => TextMeasurer.measureWidth(value, fontSize, fontFamily, fontWeight, fontStyle))
     : text
-  return {
+  const result = {
     text: fitted,
     width: TextMeasurer.measureWidth(fitted, fontSize, fontFamily, fontWeight, fontStyle),
   }
+  if (key !== undefined) fittedTextCache.set(key, result)
+  return { ...result }
 }
 
 export function paintSingleLineText(
