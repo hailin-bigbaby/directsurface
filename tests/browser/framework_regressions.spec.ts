@@ -770,3 +770,137 @@ test('partial paint failure restores Canvas state and recovers without residual 
     expect(result.dirty).toBe(false)
   }
 })
+
+
+test('thin strokes and translated strokes occupy one physical pixel row', async ({ page }, info) => {
+  const result = await page.evaluate(() => {
+    const { DrawList, PaintContext } = renderingUnderTest
+    const samples: Record<string, number[]> = {}
+    document.body.innerHTML = '<h2>Line clarity · real Canvas pixels</h2><p>Left: previous alignment · Right: corrected alignment · nearest-neighbor 8× inspection</p>'
+    for (const [name, width, translation] of [['0.5 px line', 0.5, 0], ['1 px line + 0.5 px translation', 1, 0.5]] as const) {
+      const row = document.createElement('div')
+      row.innerHTML = `<p>${name}</p>`
+      for (const corrected of [false, true]) {
+        const canvas = document.createElement('canvas')
+        canvas.width = 48
+        canvas.height = 20
+        canvas.style.cssText = 'width:384px;height:160px;image-rendering:pixelated;border:1px solid #ddd;margin-right:16px'
+        const ctx = canvas.getContext('2d')!
+        ctx.translate(0, translation)
+        if (corrected) {
+          new DrawList(new PaintContext(ctx)).line(4, 10, 44, 10, { r: 0, g: 0, b: 0, a: 1 }, width)
+        } else {
+          // Previous DPR-1 policy: only exact odd integer widths received a half-pixel offset.
+          const y = 10 + (width === 1 ? 0.5 : 0)
+          ctx.lineWidth = width
+          ctx.beginPath()
+          ctx.moveTo(4, y)
+          ctx.lineTo(44, y)
+          ctx.stroke()
+        }
+        const data = ctx.getImageData(20, 0, 1, 20).data
+        const coverage = []
+        for (let y = 0; y < 20; y++) if (data[y * 4 + 3]) coverage.push(data[y * 4 + 3]!)
+        samples[`${name}/${corrected ? 'after' : 'before'}`] = coverage
+        row.append(canvas)
+      }
+      document.body.append(row)
+    }
+    return samples
+  })
+  expect(result['0.5 px line/before']).toHaveLength(2)
+  expect(result['0.5 px line/after']).toHaveLength(1)
+  expect(result['0.5 px line/after']![0]).toBeGreaterThanOrEqual(126)
+  expect(result['0.5 px line/after']![0]).toBeLessThanOrEqual(128)
+  expect(result['1 px line + 0.5 px translation/after']).toEqual([255])
+  const screenshot = info.outputPath('line-clarity.png')
+  await page.screenshot({ path: screenshot, fullPage: true })
+  await info.attach('line-clarity', { path: screenshot, contentType: 'image/png' })
+  await info.attach('coverage', { body: JSON.stringify(result, null, 2), contentType: 'application/json' })
+})
+
+
+test('hairlines stay sharp across fractional DPR, zoom, reflection and nonuniform scale', async ({ page }) => {
+  const samples = await page.evaluate(() => {
+    const { DrawList, PaintContext } = renderingUnderTest
+    const samples: Array<{ scale: number; vertical: boolean; coverage: number[] }> = []
+    const cases = [0.5, 1, 1.25, 1.5, 2, 3, -2].flatMap(scale =>
+      [false, true].map(vertical => ({ sx: scale, sy: scale, scale, vertical })))
+    cases.push({ sx: 2, sy: 1, scale: 1, vertical: false }, { sx: 1, sy: 2, scale: 1, vertical: true })
+    for (const { sx, sy, scale, vertical } of cases) {
+      const canvas = document.createElement('canvas')
+      canvas.width = canvas.height = 160
+      const ctx = canvas.getContext('2d')!
+      const tx = sx < 0 ? 80.25 : 0.25
+      const ty = sy < 0 ? 80.5 : 0.5
+      ctx.setTransform(sx, 0, 0, sy, tx, ty)
+      const dl = new DrawList(new PaintContext(ctx))
+      dl.line(vertical ? 10 : 4, vertical ? 4 : 10, vertical ? 10 : 30, vertical ? 30 : 10,
+        { r: 0, g: 0, b: 0, a: 1 }, 1 / Math.abs(scale))
+      const tangentPixel = Math.round(17 * (vertical ? sy : sx) + (vertical ? ty : tx))
+      const data = vertical ? ctx.getImageData(0, tangentPixel, 160, 1).data : ctx.getImageData(tangentPixel, 0, 1, 160).data
+      const coverage = []
+      for (let i = 3; i < data.length; i += 4) if (data[i]) coverage.push(data[i]!)
+      samples.push({ scale, vertical, coverage })
+    }
+    return samples
+  })
+  for (const sample of samples) expect(sample.coverage, JSON.stringify(sample)).toEqual([255])
+})
+
+
+test('text and circles match device-aligned native Canvas across DPR and transforms', async ({ page }) => {
+  const results = await page.evaluate(() => {
+    const { DrawList, PaintContext } = renderingUnderTest
+    const results = []
+    for (const dpr of [1, 1.25, 1.5, 2, 3]) {
+      for (const zoom of [0.5, 1, 1.6]) {
+        for (const mode of ['uniform', 'nonuniform', 'reflected'] as const) {
+          for (const primitive of ['text', 'fill-circle', 'stroke-circle'] as const) {
+            const a = dpr * zoom * (mode === 'reflected' ? -1 : 1)
+            const d = dpr * zoom * (mode === 'nonuniform' ? 1.5 : 1)
+            const e = dpr * (mode === 'reflected' ? 100.25 : 0.25), f = dpr * 0.5
+            const canvas = document.createElement('canvas'), reference = document.createElement('canvas')
+            canvas.width = reference.width = Math.ceil(180 * dpr)
+            canvas.height = reference.height = Math.ceil(100 * dpr)
+            const ctx = canvas.getContext('2d')!, expected = reference.getContext('2d')!
+            ctx.setTransform(a, 0, 0, d, e, f)
+            expected.setTransform(a, 0, 0, d, e, f)
+            const dl = new DrawList(new PaintContext(ctx)), color = { r: 16, g: 88, b: 224, a: 1 }
+            const x = 20.3, y = 20.7, radius = 6.3
+            // Independent reference: round the transformed anchor in physical pixels,
+            // then express that point in the original Canvas coordinate system.
+            const px = (Math.round(a * x + e) - e) / a
+            const py = (Math.round(d * y + f) - f) / d
+            expected.fillStyle = expected.strokeStyle = 'rgb(16,88,224)'
+            if (primitive === 'text') {
+              dl.fillText('Ag', x, y, color, 16, 'Arial', 'left', 'middle')
+              expected.font = '16px Arial'; expected.textAlign = 'left'; expected.textBaseline = 'middle'
+              expected.fillText('Ag', px, py)
+            } else {
+              if (primitive === 'fill-circle') dl.fillCircle(x, y, radius, color)
+              else dl.strokeCircle(x, y, radius, color, 1)
+              expected.beginPath(); expected.arc(px, py, radius, 0, Math.PI * 2)
+              if (primitive === 'fill-circle') expected.fill()
+              else { expected.lineWidth = 1; expected.stroke() }
+            }
+            const actual = ctx.getImageData(0, 0, canvas.width, canvas.height).data
+            const wanted = expected.getImageData(0, 0, reference.width, reference.height).data
+            let differences = 0, ink = 0
+            for (let i = 0; i < actual.length; i++) {
+              if (actual[i] !== wanted[i]) differences++
+              if (i % 4 === 3 && actual[i]) ink++
+            }
+            results.push({ dpr, zoom, mode, primitive, differences, ink })
+          }
+        }
+      }
+    }
+    return results
+  })
+  expect(results).toHaveLength(135)
+  for (const result of results) {
+    expect(result.ink, JSON.stringify(result)).toBeGreaterThan(0)
+    expect(result.differences, JSON.stringify(result)).toBe(0)
+  }
+})

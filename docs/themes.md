@@ -33,3 +33,10 @@ Changing width, font family, size, weight or style uses a separate result. When 
 DrawList checks the actual Canvas fill, stroke, font, line width and text alignment state before reusing a cached assignment. Multiple DrawLists and raw Canvas painters can alternate without inheriting stale values. Browser-normalized colors and fonts are retained so repeated matching draws still avoid redundant assignments. This protects drawing properties; custom painters must still balance their own transforms and clips with `save()` and `restore()`.
 
 Stroke primitives ignore zero, negative and non-finite line widths without changing Canvas state. Positive finite widths retain their existing behavior. DrawList's shared color-string and font-string caches use bounded LRU storage: at most 2,048 colors and 256 fonts. Evicted strings are regenerated on demand; no application configuration is needed.
+
+
+## Primitive pixel alignment
+
+DrawList aligns text positions, circle centers and axis-aligned lines in device space using the current Canvas transform, including translation and independent horizontal/vertical scales. This applies to fractional DPR, zoom below one, nonuniform scaling and reflected axes. It reads the current transform for each primitive, so a later transform change takes effect immediately.
+
+Solid and dashed horizontal/vertical lines use the scale perpendicular to the stroke to choose their pixel-center alignment. Diagonal lines and polygon vertices keep their original coordinates; rotation, skew or a singular transform also preserves the original geometry. Text retains its font, alignment and baseline settings. Circle radii and stroke widths are unchanged: center alignment does not remove the normal antialiasing of curved edges or glyphs.

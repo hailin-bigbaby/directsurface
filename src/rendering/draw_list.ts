@@ -3,7 +3,7 @@
 import { colorToCSS, type Color } from '../theme/theme'
 import type { PaintContext } from './paint_context'
 import { BoundedCache } from './bounded_cache'
-import { snapRectToPixels, snapStrokeRectToPixels } from './pixel_geometry'
+import { snapLineToPixels, snapPointToPixels, snapRectToPixels, snapStrokeRectToPixels } from './pixel_geometry'
 
 export interface DrawListStats {
   fillRect: number
@@ -324,7 +324,8 @@ export class DrawList {
     this._setFont(this._fontString(fontSize, fontFamily, fontWeight, fontStyle))
     this._setTextAlign(align)
     this._setTextBaseline(baseline)
-    c.fillText(text, this._snapCoord(x), this._snapCoord(y))
+    const pos = snapPointToPixels(c, x, y)
+    c.fillText(text, pos.x, pos.y)
   }
 
   measureText(text: string, fontSize: number, fontFamily: string, fontWeight?: string | number, fontStyle?: 'normal' | 'italic'): TextMetrics {
@@ -370,9 +371,9 @@ export class DrawList {
     this._count('path')
     this._setFillStyle(this._colorToCSS(color))
     c.beginPath()
-    c.moveTo(this._snapCoord(points[0]!.x), this._snapCoord(points[0]!.y))
+    c.moveTo(points[0]!.x, points[0]!.y)
     for (let i = 1; i < points.length; i++) {
-      c.lineTo(this._snapCoord(points[i]!.x), this._snapCoord(points[i]!.y))
+      c.lineTo(points[i]!.x, points[i]!.y)
     }
     c.closePath()
     c.fill()
@@ -386,9 +387,9 @@ export class DrawList {
     this._setStrokeStyle(this._colorToCSS(color))
     this._setLineWidth(lineWidth)
     c.beginPath()
-    c.moveTo(this._snapCoord(points[0]!.x), this._snapCoord(points[0]!.y))
+    c.moveTo(points[0]!.x, points[0]!.y)
     for (let i = 1; i < points.length; i++) {
-      c.lineTo(this._snapCoord(points[i]!.x), this._snapCoord(points[i]!.y))
+      c.lineTo(points[i]!.x, points[i]!.y)
     }
     c.closePath()
     c.stroke()
@@ -399,7 +400,8 @@ export class DrawList {
     this._count('path')
     this._setFillStyle(this._colorToCSS(color))
     c.beginPath()
-    c.arc(this._snapCoord(cx), this._snapCoord(cy), r, 0, Math.PI * 2)
+    const center = snapPointToPixels(c, cx, cy)
+    c.arc(center.x, center.y, r, 0, Math.PI * 2)
     c.fill()
   }
 
@@ -410,7 +412,8 @@ export class DrawList {
     this._setStrokeStyle(this._colorToCSS(color))
     this._setLineWidth(lineWidth)
     c.beginPath()
-    c.arc(this._snapCoord(cx), this._snapCoord(cy), r, 0, Math.PI * 2)
+    const center = snapPointToPixels(c, cx, cy)
+    c.arc(center.x, center.y, r, 0, Math.PI * 2)
     c.stroke()
   }
 
@@ -548,50 +551,8 @@ export class DrawList {
     return snapStrokeRectToPixels(this.ctx, x, y, w, h, lineWidth)
   }
 
-  private _snapLine(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    lineWidth: number,
-  ): { x1: number; y1: number; x2: number; y2: number } {
-    if (x1 === x2) {
-      const x = this._snapCoord(x1) + this._strokeOffset(lineWidth)
-      return { x1: x, y1: this._snapCoord(y1), x2: x, y2: this._snapCoord(y2) }
-    }
-    if (y1 === y2) {
-      const y = this._snapCoord(y1) + this._strokeOffset(lineWidth)
-      return { x1: this._snapCoord(x1), y1: y, x2: this._snapCoord(x2), y2: y }
-    }
-    return {
-      x1: this._snapCoord(x1),
-      y1: this._snapCoord(y1),
-      x2: this._snapCoord(x2),
-      y2: this._snapCoord(y2),
-    }
-  }
-
-  private _strokeOffset(lineWidth: number): number {
-    const step = this._pixelStep()
-    const physicalLineWidth = lineWidth / step
-    const rounded = Math.round(physicalLineWidth)
-    if (Math.abs(physicalLineWidth - rounded) < 0.001 && rounded % 2 === 1) return step / 2
-    return 0
-  }
-
-  private _snapCoord(value: number): number {
-    const step = this._pixelStep()
-    return this._roundToStep(value, step)
-  }
-
-  private _roundToStep(value: number, step: number): number {
-    return Math.round(value / step) * step
-  }
-
-  private _pixelStep(): number {
-    const transform = typeof this.ctx.getTransform === 'function' ? this.ctx.getTransform() : null
-    const scale = transform ? Math.max(Math.abs(transform.a || 0), Math.abs(transform.d || 0), 1) : 1
-    return 1 / scale
+  private _snapLine(x1: number, y1: number, x2: number, y2: number, lineWidth: number) {
+    return snapLineToPixels(this.ctx, x1, y1, x2, y2, lineWidth)
   }
 
   private _count(key: keyof DrawListStats): void {

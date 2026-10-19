@@ -188,3 +188,94 @@ describe('DrawList state and cache protection', () => {
     expect(assign).toHaveBeenCalledTimes(3)
   })
 })
+
+
+describe("DrawList primitive pixel alignment", () => {
+  it.each([0.5, 1, 1.25, 1.5, 2, -2])('reads one transform per aligned primitive at scale %s', scale => {
+    const { ctx } = createContext(scale)
+    const dl = new DrawList(new PaintContext(ctx))
+    const color = rgba(1, 2, 3)
+    for (const draw of [
+      () => dl.fillRect(-2.3, 4.7, 8.4, 9.2, color),
+      () => dl.strokeRect(-2.3, 4.7, 8.4, 9.2, color),
+      () => dl.line(0, 10, 20, 10, color),
+      () => dl.fillText('text', 1, 2, color, 12, 'Arial'),
+    ]) {
+      vi.mocked(ctx.getTransform).mockClear()
+      draw()
+      expect(ctx.getTransform).toHaveBeenCalledTimes(1)
+    }
+  })
+
+  it('reads external transform changes instead of retaining an obsolete pixel grid', () => {
+    const { ctx } = createContext()
+    const dl = new DrawList(new PaintContext(ctx))
+    const draw = () => dl.fillRect(0.3, 0.3, 3, 3, rgba(1, 2, 3))
+    draw()
+    expect(ctx.fillRect).toHaveBeenLastCalledWith(0, 0, 3, 3)
+    vi.mocked(ctx.getTransform).mockReturnValue({ a: 2, d: 2, e: 0.5, f: 0.5 } as DOMMatrix)
+    draw()
+    expect(ctx.fillRect).toHaveBeenLastCalledWith(0.25, 0.25, 3, 3)
+    vi.mocked(ctx.getTransform).mockReturnValue({ a: 1, d: 1 } as DOMMatrix)
+    draw()
+    expect(ctx.fillRect).toHaveBeenLastCalledWith(0, 0, 3, 3)
+  })
+
+  it('keeps continuous polygon vertices and diagonal line endpoints', () => {
+    const { ctx } = createContext()
+    const dl = new DrawList(new PaintContext(ctx))
+    dl.line(0.2, 0.3, 8.7, 9.8, rgba(0, 0, 0))
+    expect(ctx.moveTo).toHaveBeenLastCalledWith(0.2, 0.3)
+    expect(ctx.lineTo).toHaveBeenLastCalledWith(8.7, 9.8)
+    dl.strokePolygon([{ x: 0.2, y: 0.3 }, { x: 8.7, y: 9.8 }], rgba(0, 0, 0))
+    expect(ctx.lineTo).toHaveBeenLastCalledWith(8.7, 9.8)
+    expect(ctx.getTransform).not.toHaveBeenCalled()
+  })
+
+
+  it.each([
+    [2, 1, 0.5, 0.25], [0.5, 0.5, 0.25, 0.5], [-2, -1.5, 40.25, 30.5],
+    [1.25, 1.5, 0.25, 0.5],
+  ])('aligns text and circle centers for scale (%s, %s) and translation (%s, %s)', (a, d, e, f) => {
+    const { ctx } = createContext()
+    vi.mocked(ctx.getTransform).mockReturnValue({ a, d, e, f } as DOMMatrix)
+    const dl = new DrawList(new PaintContext(ctx))
+    const x = (Math.round(10.3 * a + e) - e) / a
+    const y = (Math.round(12.7 * d + f) - f) / d
+    dl.fillText('Text', 10.3, 12.7, rgba(0, 0, 0), 12, 'Arial')
+    expect(ctx.fillText).toHaveBeenLastCalledWith('Text', x, y)
+    dl.fillCircle(10.3, 12.7, 4.3, rgba(0, 0, 0))
+    expect(ctx.arc).toHaveBeenLastCalledWith(x, y, 4.3, 0, Math.PI * 2)
+    dl.strokeCircle(10.3, 12.7, 4.3, rgba(0, 0, 0), 1)
+    expect(ctx.arc).toHaveBeenLastCalledWith(x, y, 4.3, 0, Math.PI * 2)
+  })
+
+  it('uses independent axes for solid and dashed strokes', () => {
+    const { ctx } = createContext()
+    vi.mocked(ctx.getTransform).mockReturnValue({ a: 2, d: 1, e: 0.5, f: 0.25 } as DOMMatrix)
+    const dl = new DrawList(new PaintContext(ctx))
+    dl.line(4, 10, 28, 10, rgba(0, 0, 0), 1)
+    expect(ctx.moveTo).toHaveBeenLastCalledWith(4.25, 10.25)
+    expect(ctx.lineTo).toHaveBeenLastCalledWith(28.25, 10.25)
+    dl.lineDashed(10, 4, 10, 28, rgba(0, 0, 0), 1)
+    expect(ctx.moveTo).toHaveBeenLastCalledWith(10.25, 3.75)
+    expect(ctx.lineTo).toHaveBeenLastCalledWith(10.25, 27.75)
+  })
+
+  it.each([
+    { a: 0, b: 1, c: -1, d: 0, e: 20, f: 0 },
+    { a: 1, b: 0.2, c: 0, d: 1, e: 0.25, f: 0.5 },
+    { a: 0, b: 0, c: 0, d: 0, e: 0, f: 0 },
+  ])('keeps rotated, skewed or singular geometry intact: %j', transform => {
+    const { ctx } = createContext()
+    vi.mocked(ctx.getTransform).mockReturnValue(transform as DOMMatrix)
+    const dl = new DrawList(new PaintContext(ctx))
+    dl.fillText('A', 0.2, 1.3, rgba(0, 0, 0), 12, 'Arial')
+    expect(ctx.fillText).toHaveBeenLastCalledWith('A', 0.2, 1.3)
+    dl.fillCircle(0.2, 1.3, 4.5, rgba(0, 0, 0))
+    expect(ctx.arc).toHaveBeenLastCalledWith(0.2, 1.3, 4.5, 0, Math.PI * 2)
+    dl.line(0.2, 1.3, 8.7, 1.3, rgba(0, 0, 0))
+    expect(ctx.moveTo).toHaveBeenLastCalledWith(0.2, 1.3)
+    expect(ctx.lineTo).toHaveBeenLastCalledWith(8.7, 1.3)
+  })
+})
