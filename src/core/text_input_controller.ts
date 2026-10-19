@@ -15,6 +15,7 @@ export interface TextInputSessionHandlers {
 
 export interface TextInputSessionOptions {
   focus?: boolean
+  readOnly?: boolean
 }
 
 export type TextInputInvalidateReason = 'caret-blink'

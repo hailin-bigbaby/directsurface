@@ -273,6 +273,7 @@ export class RenderTextBox extends RenderBox implements
   set readonly(readonly: boolean) {
     if (this._readonly === readonly) return
     this._readonly = readonly
+    if (this._focused) this._textInput.setComposerReadOnly(readonly)
     if (readonly && this._focused) {
       this._compositionHistoryStart = undefined
       this._clearActionInteraction()
@@ -917,6 +918,7 @@ export class RenderTextBox extends RenderBox implements
         cursorPos: this.value.length,
       },
       refreshOnStart: true,
+      readOnly: this.readonly,
       onInput: (value, session) => {
         if (this.readonly) {
           this._textInput.setComposerValue(this.value)

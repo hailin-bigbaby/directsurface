@@ -2,6 +2,7 @@
 
 import { colorToCSS, type Color } from '../theme/theme'
 import type { PaintContext } from './paint_context'
+import { BoundedCache } from './bounded_cache'
 import { snapRectToPixels, snapStrokeRectToPixels } from './pixel_geometry'
 
 export interface DrawListStats {
@@ -32,16 +33,22 @@ const emptyStats = (): DrawListStats => ({
   fontChanges: 0,
 })
 
+const COLOR_CACHE_CAPACITY = 2048
+const FONT_CACHE_CAPACITY = 256
+
 export class DrawList {
   private ctx: CanvasRenderingContext2D
   private _fillStyle: string | CanvasGradient | CanvasPattern | null = null
   private _strokeStyle: string | CanvasGradient | CanvasPattern | null = null
+  private _actualFillStyle: CanvasRenderingContext2D['fillStyle'] | null = null
+  private _actualStrokeStyle: CanvasRenderingContext2D['strokeStyle'] | null = null
+  private _actualFont = ''
   private _font = ''
   private _lineWidth = NaN
   private _textAlign: CanvasTextAlign | null = null
   private _textBaseline: CanvasTextBaseline | null = null
-  private static _colorCache = new Map<string, string>()
-  private static _fontCache = new Map<string, string>()
+  private static _colorCache = new BoundedCache<string, string>(COLOR_CACHE_CAPACITY)
+  private static _fontCache = new BoundedCache<string, string>(FONT_CACHE_CAPACITY)
   private static _profileEnabled = false
   private static _stats: DrawListStats = emptyStats()
 
@@ -99,6 +106,7 @@ export class DrawList {
   }
 
   strokeRect(x: number, y: number, w: number, h: number, color: Color, lineWidth = 1, rounding = 0): void {
+    if (!Number.isFinite(lineWidth) || lineWidth <= 0) return
     const c = this.ctx
     this._count('strokeRect')
     this._setStrokeStyle(this._colorToCSS(color))
@@ -126,6 +134,7 @@ export class DrawList {
     rounding = 0,
     dash: readonly number[] = [4, 3],
   ): void {
+    if (!Number.isFinite(lineWidth) || lineWidth <= 0) return
     const c = this.ctx
     this._count('strokeRect')
     this._save()
@@ -325,6 +334,7 @@ export class DrawList {
   }
 
   line(x1: number, y1: number, x2: number, y2: number, color: Color, lineWidth = 1): void {
+    if (!Number.isFinite(lineWidth) || lineWidth <= 0) return
     const c = this.ctx
     this._count('line')
     this._setStrokeStyle(this._colorToCSS(color))
@@ -337,6 +347,7 @@ export class DrawList {
   }
 
   lineDashed(x1: number, y1: number, x2: number, y2: number, color: Color, lineWidth = 1, dash: readonly number[] = [4, 3]): void {
+    if (!Number.isFinite(lineWidth) || lineWidth <= 0) return
     const c = this.ctx
     this._count('line')
     this._save()
@@ -368,6 +379,7 @@ export class DrawList {
   }
 
   strokePolygon(points: ReadonlyArray<{ x: number; y: number }>, color: Color, lineWidth = 1): void {
+    if (!Number.isFinite(lineWidth) || lineWidth <= 0) return
     if (points.length < 2) return
     const c = this.ctx
     this._count('path')
@@ -392,6 +404,7 @@ export class DrawList {
   }
 
   strokeCircle(cx: number, cy: number, r: number, color: Color, lineWidth = 1): void {
+    if (!Number.isFinite(lineWidth) || lineWidth <= 0) return
     const c = this.ctx
     this._count('path')
     this._setStrokeStyle(this._colorToCSS(color))
@@ -402,6 +415,7 @@ export class DrawList {
   }
 
   drawCheckmark(x: number, y: number, size: number, color: Color, lineWidth = 2): void {
+    if (!Number.isFinite(lineWidth) || lineWidth <= 0) return
     const c = this.ctx
     this._count('path')
     this._save()
@@ -443,41 +457,46 @@ export class DrawList {
     this._invalidateState()
   }
 
+  // Canvas is also used by other DrawLists and raw painters. Check the actual
+  // value, retaining its browser-normalized form after assignment.
   private _setFillStyle(style: string | CanvasGradient | CanvasPattern): void {
-    if (this._fillStyle === style) return
+    if (this._fillStyle === style && this.ctx.fillStyle === this._actualFillStyle) return
     this.ctx.fillStyle = style
     this._fillStyle = style
+    this._actualFillStyle = this.ctx.fillStyle
     this._count('fillStyleChanges')
   }
 
   private _setStrokeStyle(style: string | CanvasGradient | CanvasPattern): void {
-    if (this._strokeStyle === style) return
+    if (this._strokeStyle === style && this.ctx.strokeStyle === this._actualStrokeStyle) return
     this.ctx.strokeStyle = style
     this._strokeStyle = style
+    this._actualStrokeStyle = this.ctx.strokeStyle
     this._count('strokeStyleChanges')
   }
 
   private _setFont(font: string): void {
-    if (this._font === font) return
+    if (this._font === font && this.ctx.font === this._actualFont) return
     this.ctx.font = font
     this._font = font
+    this._actualFont = this.ctx.font
     this._count('fontChanges')
   }
 
   private _setLineWidth(lineWidth: number): void {
-    if (this._lineWidth === lineWidth) return
+    if (this._lineWidth === lineWidth && this.ctx.lineWidth === lineWidth) return
     this.ctx.lineWidth = lineWidth
     this._lineWidth = lineWidth
   }
 
   private _setTextAlign(align: CanvasTextAlign): void {
-    if (this._textAlign === align) return
+    if (this._textAlign === align && this.ctx.textAlign === align) return
     this.ctx.textAlign = align
     this._textAlign = align
   }
 
   private _setTextBaseline(baseline: CanvasTextBaseline): void {
-    if (this._textBaseline === baseline) return
+    if (this._textBaseline === baseline && this.ctx.textBaseline === baseline) return
     this.ctx.textBaseline = baseline
     this._textBaseline = baseline
   }

@@ -497,3 +497,78 @@ test('paint-time main and transient invalidations reach the screen on the next s
     expect(result.transientPaintCount).toBe(0)
   }
 })
+
+
+test('DrawList repairs real Canvas state and ignores invalid stroke widths', async ({ page }) => {
+  const result = await page.evaluate(() => {
+    const { DrawList, PaintContext, rgba } = renderingUnderTest
+    const canvas = document.createElement('canvas')
+    canvas.width = 100; canvas.height = 50
+    const ctx = canvas.getContext('2d')!
+    const a = new DrawList(new PaintContext(ctx)), b = new DrawList(new PaintContext(ctx))
+    const red = rgba(255, 0, 0), blue = rgba(0, 0, 255)
+    a.fillRect(0, 0, 10, 10, red)
+    b.fillRect(10, 0, 10, 10, blue)
+    a.fillRect(20, 0, 10, 10, red)
+    const pixels = [5, 15, 25].map(x => Array.from(ctx.getImageData(x, 5, 1, 1).data))
+    a.line(0, 15, 30, 15, red, 2)
+    b.line(0, 18, 30, 18, blue, 4)
+    a.line(0, 22, 30, 22, red, 2)
+    const stroke = { color: ctx.strokeStyle, width: ctx.lineWidth }
+    a.fillText('A', 40, 20, red, 12, 'Arial', 'left', 'middle')
+    const initialFont = ctx.font
+    ctx.font = '20px serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'top'
+    a.fillText('B', 60, 20, red, 12, 'Arial', 'left', 'middle')
+    const text = { sameFont: ctx.font === initialFont, align: ctx.textAlign, baseline: ctx.textBaseline }
+    const before = canvas.toDataURL()
+    for (const width of [0, -1, NaN, Infinity]) {
+      a.line(0, 30, 90, 30, blue, width)
+      a.lineDashed(0, 35, 90, 35, blue, width)
+      a.strokeRect(0, 25, 90, 20, blue, width)
+      a.strokeRectDashed(0, 25, 90, 20, blue, width)
+      a.strokeCircle(50, 30, 10, blue, width)
+      a.strokePolygon([{ x: 30, y: 30 }, { x: 80, y: 45 }], blue, width)
+      a.drawCheckmark(30, 30, 10, blue, width)
+    }
+    return { pixels, stroke, text, unchanged: canvas.toDataURL() === before }
+  })
+  expect(result).toEqual({ pixels: [[255, 0, 0, 255], [0, 0, 255, 255], [255, 0, 0, 255]],
+    stroke: { color: '#ff0000', width: 2 }, text: { sameFont: true, align: 'left', baseline: 'middle' }, unchanged: true })
+})
+
+test('TextBox native readonly blocks typing and resets between sessions', async ({ page }) => {
+  await page.evaluate(() => {
+    const field = new renderingUnderTest.RenderTextBox({ value: 'locked', readonly: true })
+    ;(window as any).__readonlyField = field
+    field.focusIn()
+  })
+  try {
+    await page.keyboard.type('x')
+    expect(await page.evaluate(() => ({ value: (window as any).__readonlyField.value,
+      nativeReadonly: (document.querySelector('#__ds_ui_input__') as HTMLTextAreaElement).readOnly })))
+      .toEqual({ value: 'locked', nativeReadonly: true })
+    await page.evaluate(() => {
+      ;(window as any).__readonlyField.readonly = false
+      const input = document.querySelector('#__ds_ui_input__') as HTMLTextAreaElement
+      input.setSelectionRange(input.value.length, input.value.length)
+    })
+    await page.keyboard.type('!')
+    expect(await page.evaluate(() => (window as any).__readonlyField.value)).toBe('locked!')
+    await page.evaluate(() => {
+      const field = (window as any).__readonlyField
+      field.readonly = true
+      field.focusOut(); field.dispose()
+      const next = new renderingUnderTest.RenderTextBox({ value: 'next' })
+      ;(window as any).__readonlyField = next
+      next.focusIn()
+      const input = document.querySelector('#__ds_ui_input__') as HTMLTextAreaElement
+      input.setSelectionRange(input.value.length, input.value.length)
+    })
+    await page.keyboard.type('?')
+    expect(await page.evaluate(() => ({ value: (window as any).__readonlyField.value,
+      nativeReadonly: (document.querySelector('#__ds_ui_input__') as HTMLTextAreaElement).readOnly })))
+      .toEqual({ value: 'next?', nativeReadonly: false })
+  } finally {
+    await page.evaluate(() => { (window as any).__readonlyField?.dispose(); delete (window as any).__readonlyField })
+  }
+})

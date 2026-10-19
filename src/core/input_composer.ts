@@ -25,6 +25,7 @@ export interface InputSession {
 
 export interface InputComposerBeginOptions {
   focus?: boolean
+  readOnly?: boolean
 }
 
 export type InputSessionToken = symbol
@@ -134,8 +135,8 @@ export class InputComposer {
     this._session = session
     this._sessionToken = token
     this._composing = false
+    this._ta.readOnly = options?.readOnly ?? false
     this._resetTextareaIfNeeded(initialValue, { preserveFocus: options?.focus !== false })
-    this._ta.readOnly = false
     this._ta.value = initialValue
     this._ta.setSelectionRange(initialValue.length, initialValue.length)
     if (options?.focus !== false) this._focusTextarea()
