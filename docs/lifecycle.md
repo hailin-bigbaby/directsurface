@@ -58,3 +58,14 @@ Layer painters can also invalidate their own layer or a layer already painted ea
 If a runtime or popup painter throws, the error propagates and pending damage is retained for recovery. The failure itself does not start an automatic retry loop: after resolving the cause, request another paint to resume. A failed queued transient flush restores its consumed damage without restoring detached participants. Disposing a node or unregistering a layer removes its pending work.
 
 Prefer updating state before painting. If a custom painter intentionally requests another frame, give that update a stopping condition; requesting paint on every paint callback creates continuous rendering.
+
+
+## Partial repainting
+
+LayerManager unions the damage reported by every participating painter. Painters without a `shouldPaint` predicate provide persistent content whenever that layer needs repainting; a predicate returning `false` still excludes its painter. An explicit damage rectangle remains partial unless another requested painter reports a larger region.
+
+Clearing, repaint clipping and screen composition use the same viewport-clamped physical-pixel extent, including at fractional DPR. Each painter runs inside its own `save()` / `restore()` scope, with restoration in `finally`, so changes to transforms or clips do not leak into the next painter or a recovery pass. Empty offscreen damage is consumed without drawing. Painters must balance any additional save/restore scopes they create themselves.
+
+Runtime and popup transient painting replays retained visible participants when a region is damaged. This restores unchanged content that overlaps the cleared region; partial layer clips prevent opacity from accumulating outside it. Nodes under hidden ancestors are skipped. Requests raised during replay still remain queued for the next frame.
+
+RenderBox includes a margin for standard strokes and antialiasing in `paintBounds`, without enlarging layout or hit-test size. Custom effects extending farther must report their complete painted extent; moving content must invalidate both its old and new extents. After a painter throws, consumed damage and new damage remain available for the next explicit invalidation, while the Canvas state is restored. This does not change DrawList's primitive coordinate-snapping rules.

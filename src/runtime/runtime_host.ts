@@ -447,7 +447,10 @@ export class RuntimeHost {
     })
     this._disposables.add(this.registerLayerPainter({
       layer: 'transient',
-      paint: ({ context }) => this.pipelineOwner.flushTransientPaint(context),
+      paint: ({ context }) => {
+        // Clearing damage may also erase unchanged overlapping transient content.
+        this.pipelineOwner.replayTransientPaint(context)
+      },
       shouldPaint: () =>
         this.isLayerDirty('transient') ||
         this.pipelineOwner.hasTransientPaint(),

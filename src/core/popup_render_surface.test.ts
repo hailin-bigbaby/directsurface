@@ -91,3 +91,30 @@ describe('Popup paint request tracking', () => {
     }
   })
 })
+
+
+it('replays unchanged popup transient children when another child requests paint', () => {
+  const first = new PopupRenderNode({ paint: () => {} })
+  const second = new PopupRenderNode({ paint: () => {} })
+  const root = new PopupRenderNode({ paint: () => {}, visitChildren: (_node, visit) => {
+    visit(first); visit(second)
+  } })
+  first.parent = root; second.parent = root
+  const surface = new PopupRenderSurface(root, node => {
+    node.layout({ minWidth: 40, maxWidth: 40, minHeight: 24, maxHeight: 24 })
+  })
+  const firstPaint = vi.spyOn(first, 'performTransientPaint')
+  const secondPaint = vi.spyOn(second, 'performTransientPaint')
+  try {
+    const context = createPaintContext()
+    surface.paint(context, popupContext())
+    first.markNeedsTransientPaint(); second.markNeedsTransientPaint()
+    surface.paint(context, popupContext())
+    firstPaint.mockClear(); secondPaint.mockClear()
+    first.markNeedsTransientPaint()
+    surface.paint(context, popupContext())
+    expect(firstPaint).toHaveBeenCalledTimes(1)
+    expect(secondPaint).toHaveBeenCalledTimes(1)
+    expect(root.owner!.hasTransientPaint()).toBe(false)
+  } finally { surface.dispose(); vi.restoreAllMocks(); OverlayInvalidator.disposeInstance() }
+})

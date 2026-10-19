@@ -1058,6 +1058,9 @@ export class PipelineOwner {
     context.setTheme(this._theme)
     for (const node of [...this._transientPaintReplayNodes]) {
       if (!this._transientPaintReplayNodes.has(node)) continue
+      let ancestor: RenderObject | undefined = node
+      while (ancestor?.visible) ancestor = ancestor.parent
+      if (ancestor) continue
       node.paintTransient(context, node.globalOffset)
     }
   }

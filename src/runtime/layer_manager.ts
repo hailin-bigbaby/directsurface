@@ -115,44 +115,51 @@ export class LayerManager {
       }
       const registration = this._layers.get(layer)!
       let layerDirty = this._dirtyLayers.get(layer)
-      const context = this._compositor.getContext(layer)
+      const explicitlyDirty = layerDirty !== undefined
       const painters: LayerPainterRegistration[] = []
       for (const painter of this._painters) {
         if (painter.layer !== layer) continue
-        if (layerDirty !== undefined) {
-          if (painter.shouldPaint && !painter.shouldPaint()) continue
-          painters.push(painter)
-          continue
-        }
-        if (!painter.shouldPaint || !painter.shouldPaint()) continue
+        const requested = painter.shouldPaint?.()
+        if (requested === false) continue
         painters.push(painter)
+        if (requested !== true || layerDirty === null) continue
         const painterDirty = painter.dirtyRect?.()
-        if (painterDirty === undefined) {
+        if (painterDirty) {
+          layerDirty = layerDirty === undefined ? painterDirty : unionRect(layerDirty, painterDirty)
+        } else if (!explicitlyDirty) {
+          // An explicit damage rect already defines the requested redraw boundary.
           layerDirty = null
-        } else if (layerDirty === undefined) {
-          layerDirty = painterDirty
-        } else if (layerDirty !== null) {
-          layerDirty = unionRect(layerDirty, painterDirty)
         }
       }
       if (layerDirty === undefined) continue
       const startedAt = now()
-      // Consume before callbacks so new invalidations belong to the next pass.
+      const paintRect = layerDirty === null ? undefined : this._compositor.getPaintRect(layerDirty)
+      // Consume before callbacks so invalidations raised while painting belong to the next pass.
       this._dirtyLayers.delete(layer)
+      if (paintRect && (paintRect.width <= 0 || paintRect.height <= 0)) {
+        continue
+      }
       try {
-        if (registration.clear) {
-          this._compositor.clearLayer(layer, layerDirty ?? undefined)
-        }
+        if (registration.clear) this._compositor.clearLayer(layer, paintRect)
+        const context = this._compositor.getContext(layer)
         for (const painter of painters) {
-          painter.paint({ layer, context })
+          // Each painter gets the same damage clip and starts from the layer's base transform.
+          // Restore even on exceptions so a painter cannot leak its clip or drawing state.
+          context.ctx.save()
+          try {
+            if (paintRect) context.clipRect(paintRect.x, paintRect.y, paintRect.width, paintRect.height)
+            painter.paint({ layer, context })
+          } finally {
+            context.ctx.restore()
+          }
         }
       } catch (error) {
         if (layerDirty === null) this.markDirty(layer)
         else this.markDirtyRect(layer, layerDirty)
         throw error
       }
-      if (layerDirty === null) this._compositor.markDirty(layer)
-      else this._compositor.markDirtyRect(layer, layerDirty)
+      if (paintRect) this._compositor.markDirtyRect(layer, paintRect)
+      else this._compositor.markDirty(layer)
       timings[layer] = now() - startedAt
     }
     return timings

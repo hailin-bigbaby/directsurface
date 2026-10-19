@@ -183,4 +183,42 @@ describe('Runtime paint invalidation', () => {
     } finally { host.dispose() }
   })
 
+  it('replays unchanged transient content when another transient object damages the layer', () => {
+    vi.stubGlobal('OffscreenCanvas', TestOffscreenCanvas)
+    const canvas = document.createElement('canvas')
+    ;(canvas as any).getContext = vi.fn(() => createCanvasContext())
+    const host = new RuntimeHost({ canvas, onFrame: vi.fn(), getViewportSize: () => ({ width: 120, height: 80 }) })
+    const first = new TestRoot()
+    const second = new TestRoot()
+    first.size = second.size = { width: 20, height: 20 }
+    const firstPaint = vi.spyOn(first, 'paintTransient')
+    const secondPaint = vi.spyOn(second, 'paintTransient')
+    host.addRoot(first)
+    host.addRoot(second)
+    host.paintLayers()
+    first.markNeedsTransientPaint()
+    second.markNeedsTransientPaint()
+    host.paintLayers()
+    firstPaint.mockClear()
+    secondPaint.mockClear()
+    first.markNeedsTransientPaint()
+    host.paintLayers()
+    expect(firstPaint).toHaveBeenCalledTimes(1)
+    expect(secondPaint).toHaveBeenCalledTimes(1)
+    expect(host.pipelineOwner.hasTransientPaint()).toBe(false)
+    const parent = new TestRoot()
+    const child = new TestRoot()
+    child.size = { width: 20, height: 20 }
+    parent.addChild(child)
+    host.addRoot(parent)
+    child.markNeedsTransientPaint()
+    host.paintLayers()
+    const childPaint = vi.spyOn(child, 'paintTransient')
+    parent.visible = false
+    first.markNeedsTransientPaint()
+    host.paintLayers()
+    expect(childPaint).not.toHaveBeenCalled()
+    host.dispose()
+  })
+
 })

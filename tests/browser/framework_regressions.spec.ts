@@ -572,3 +572,201 @@ test('TextBox native readonly blocks typing and resets between sessions', async 
     await page.evaluate(() => { (window as any).__readonlyField?.dispose(); delete (window as any).__readonlyField })
   }
 })
+
+
+test('partial paints preserve overlapping translucent content and fractional damage edges', async ({ page }) => {
+  const results = await page.evaluate(() => {
+    const { RuntimeHost } = renderingUnderTest
+    return [1, 1.25, 1.5, 2].map(dpr => {
+      const canvas = document.createElement('canvas')
+      const host = new RuntimeHost({ canvas, dpr, getViewportSize: () => ({ width: 40, height: 30 }) })
+      const compositor = host.compositor
+      const manager = host.layerManager
+      manager.registerPainter({ layer: 'main', paint: ({ context }) => {
+        context.ctx.fillStyle = 'rgba(255,0,0,0.5)'
+        context.ctx.fillRect(0, 0, 40, 30)
+      } })
+      manager.registerPainter({ layer: 'main', paint: ({ context }) => {
+        context.ctx.fillStyle = 'rgba(0,0,255,0.5)'
+        context.ctx.fillRect(5, 0, 20, 30)
+      } })
+      const pixels = () => Array.from(canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data)
+      manager.paintAll()
+      compositor.composite()
+      const before = pixels()
+      for (let n = 0; n < 10; n++) {
+        manager.markDirtyRect('main', { x: 6.25, y: 4.2, width: 5.5, height: 6.4 })
+        manager.paintAll()
+        compositor.composite()
+      }
+      compositor.markDirty('overlay')
+      compositor.composite()
+      const after = pixels()
+      host.dispose()
+      return { dpr, differences: before.filter((value, i) => value !== after[i]).length }
+    })
+  })
+  for (const result of results) expect(result.differences, `DPR ${result.dpr}`).toBe(0)
+})
+
+
+test('painter transform and clipping cannot leak into the next painter', async ({ page }) => {
+  const result = await page.evaluate(() => {
+    const { RuntimeHost } = renderingUnderTest
+    const canvas = document.createElement('canvas')
+    canvas.width = canvas.height = 40
+    const host = new RuntimeHost({ canvas, getViewportSize: () => ({ width: 40, height: 40 }) })
+    const compositor = host.compositor
+    const manager = host.layerManager
+    manager.registerPainter({ layer: 'main', paint: ({ context }) => {
+      context.ctx.translate(20, 20)
+      context.clipRect(0, 0, 1, 1)
+    } })
+    manager.registerPainter({ layer: 'main', paint: ({ context }) => {
+      context.ctx.fillStyle = 'red'
+      context.ctx.fillRect(0, 0, 10, 10)
+    } })
+    manager.paintAll()
+    compositor.composite()
+    const pixel = Array.from(canvas.getContext('2d')!.getImageData(5, 5, 1, 1).data)
+    host.dispose()
+    return pixel
+  })
+  expect(result).toEqual([255, 0, 0, 255])
+})
+
+
+test('paint-only button border changes match a full repaint at fractional and high DPR', async ({ page }) => {
+  const results = await page.evaluate(() => {
+    const { RuntimeHost, RenderButton } = renderingUnderTest
+    const results = []
+    for (const dpr of [1, 1.25, 1.5, 2, 3]) {
+      const canvas = document.createElement('canvas')
+      const host = new RuntimeHost({ canvas, dpr, onFrame: () => {}, getViewportSize: () => ({ width: 160, height: 90 }) })
+      const button = new RenderButton({ label: 'Button' })
+      const theme = { ...host.pipelineOwner.theme, frameBorderSize: 1 }
+      host.pipelineOwner.setTheme(theme)
+      host.addRoot(button)
+      host.setRootConstraints(button, { minWidth: 80, maxWidth: 80, minHeight: 30, maxHeight: 30 })
+      button.offset = { x: 20, y: 20 }
+      host.registerLayer({ layer: 'main',
+        shouldPaint: () => host.isLayerDirty('main') || host.hasDirtyPaintForRoots([button]),
+        dirtyRect: () => host.getDirtyPaintRectForRoots([button]),
+        paint: ({ context }) => {
+          context.setTheme(theme)
+          context.ctx.fillStyle = 'white'
+          context.ctx.fillRect(0, 0, 160, 90)
+          button.paint(context, button.offset)
+        },
+      })
+      host.renderFrame()
+      for (const variant of ['danger', 'text', 'default'] as const) {
+        button.variant = variant
+        host.renderFrame()
+        const partial = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data
+        host.markLayerDirty('main')
+        host.renderFrame()
+        const full = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data
+        results.push({ dpr, variant, differences: partial.filter((value, i) => value !== full[i]).length })
+      }
+      host.dispose()
+    }
+    return results
+  })
+  for (const result of results) expect(result.differences, JSON.stringify(result)).toBe(0)
+})
+
+
+test('partial transient repaint preserves unchanged translucent overlaps', async ({ page }) => {
+  const results = await page.evaluate(() => {
+    const { RuntimeHost, RenderObject } = renderingUnderTest
+    return [1, 1.25, 1.5, 2, 3].map(dpr => {
+      const canvas = document.createElement('canvas')
+      const host = new RuntimeHost({ canvas, dpr, getViewportSize: () => ({ width: 80, height: 50 }) })
+      class Transient extends RenderObject {
+        constructor(private readonly color: string, private readonly x: number) { super() }
+        visitChildren(): void {}
+        performLayout(): void { this.size = { width: 80, height: 50 } }
+        performPaint(): void {}
+        performTransientPaint(context: InstanceType<typeof renderingUnderTest.PaintContext>): void {
+          context.ctx.fillStyle = this.color
+          context.ctx.fillRect(this.x, 5, 45, 35)
+        }
+      }
+      try {
+        const a = new Transient('rgba(255,0,0,0.5)', 5)
+        const b = new Transient('rgba(0,0,255,0.5)', 20)
+        host.addRoot(a); host.addRoot(b)
+        a.markNeedsTransientPaint(); b.markNeedsTransientPaint()
+        host.renderFrame(); host.frameScheduler.cancelFrame()
+        const pixels = () => Array.from(canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data)
+        const before = pixels()
+        for (let i = 0; i < 10; i++) {
+          a.markNeedsTransientPaint({ x: 25.3, y: 10.2, width: 10.1, height: 12.4 })
+          host.renderFrame(); host.frameScheduler.cancelFrame()
+        }
+        // Reveal any accumulation outside the partial composite area as well.
+        host.compositor.markDirty('overlay'); host.compositor.composite()
+        const after = pixels()
+        return { dpr, differences: before.filter((value, i) => value !== after[i]).length,
+          dirty: host.pipelineOwner.hasTransientPaint(), pending: host.frameScheduler.frameScheduled }
+      } finally { host.dispose() }
+    })
+  })
+  for (const result of results) {
+    expect(result.differences, JSON.stringify(result)).toBe(0)
+    expect(result.dirty).toBe(false)
+    expect(result.pending).toBe(false)
+  }
+})
+
+test('partial paint failure restores Canvas state and recovers without residual pixels', async ({ page }) => {
+  const results = await page.evaluate(() => {
+    const { RuntimeHost } = renderingUnderTest
+    return [1, 1.25, 1.5, 2, 3].map(dpr => {
+      const canvas = document.createElement('canvas')
+      const host = new RuntimeHost({ canvas, dpr, getViewportSize: () => ({ width: 60, height: 40 }) })
+      let fail = false
+      host.registerLayerPainter({ layer: 'main', paint: ({ context }) => {
+        if (!fail) return
+        context.ctx.translate(15, 10)
+        context.clipRect(0, 0, 2, 2)
+        context.ctx.fillStyle = 'magenta'; context.ctx.fillRect(0, 0, 10, 10)
+        host.markLayerDirtyRect('main', { x: 30, y: 10, width: 10, height: 10 })
+        throw new Error('expected paint failure')
+      } })
+      host.registerLayerPainter({ layer: 'main', paint: ({ context }) => {
+        context.ctx.fillStyle = 'rgba(255,0,0,0.5)'; context.ctx.fillRect(0, 0, 60, 40)
+        context.ctx.fillStyle = 'rgba(0,0,255,0.5)'; context.ctx.fillRect(15, 5, 30, 30)
+      } })
+      try {
+        host.renderFrame(); host.frameScheduler.cancelFrame()
+        const pixels = () => Array.from(canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data)
+        const reference = pixels()
+        fail = true
+        host.markLayerDirtyRect('main', { x: 6.25, y: 4.2, width: 15.5, height: 12.4 })
+        let error = ''
+        try { host.renderFrame() } catch (cause) { error = (cause as Error).message }
+        const pendingAfterError = host.frameScheduler.frameScheduled
+        const dirtyAfterError = host.isLayerDirty('main')
+        const transform = host.compositor.getContext('main').ctx.getTransform()
+        fail = false
+        host.renderFrame()
+        host.compositor.markDirty('overlay'); host.compositor.composite()
+        const recovered = pixels()
+        return { dpr, error, pendingAfterError, dirtyAfterError,
+          transform: [transform.a, transform.d, transform.e, transform.f],
+          differences: reference.filter((value, i) => value !== recovered[i]).length,
+          dirty: host.layerManager.hasDirtyLayers }
+      } finally { host.dispose() }
+    })
+  })
+  for (const result of results) {
+    expect(result.error).toBe('expected paint failure')
+    expect(result.pendingAfterError).toBe(false)
+    expect(result.dirtyAfterError).toBe(true)
+    expect(result.transform).toEqual([result.dpr, result.dpr, 0, 0])
+    expect(result.differences, JSON.stringify(result)).toBe(0)
+    expect(result.dirty).toBe(false)
+  }
+})

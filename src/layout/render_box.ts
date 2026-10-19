@@ -152,6 +152,17 @@ export abstract class RenderBox extends RenderObject {
     }
   }
 
+  override get paintBounds(): Rect {
+    const bounds = super.paintBounds
+    if (bounds.width <= 0 || bounds.height <= 0) return bounds
+    // Standard control strokes and antialiasing can extend outside the layout box.
+    // Keep this extent even when a border is removed; larger effects must override it.
+    const border = this.currentTheme.frameBorderSize
+    const outset = Math.max(2, Number.isFinite(border) ? border : 0)
+    return { x: bounds.x - outset, y: bounds.y - outset,
+      width: bounds.width + outset * 2, height: bounds.height + outset * 2 }
+  }
+
   get participatesInLayout(): boolean {
     return this.contributesOuterLayoutSpace
   }

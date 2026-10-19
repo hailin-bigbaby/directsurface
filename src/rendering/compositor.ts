@@ -98,6 +98,8 @@ export class Compositor {
 
   // 标记局部脏矩形
   markDirtyRect(layer: LayerName, rect: DirtyRect): void {
+    rect = this.getPaintRect(rect)
+    if (rect.width <= 0 || rect.height <= 0) return
     const existing = this.dirtyRects.get(layer)
     if (existing === null) return  // 已经是全层脏，不需要合并
     if (existing === undefined) {
@@ -107,15 +109,31 @@ export class Compositor {
     }
   }
 
+  /** Resolve the same physical-pixel boundary for clearing, painting and compositing. */
+  getPaintRect(rect?: DirtyRect): DirtyRect {
+    if (!rect || ![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite)) {
+      return { x: 0, y: 0, width: this.physicalWidth / this.dpr, height: this.physicalHeight / this.dpr }
+    }
+    if (rect.width <= 0 || rect.height <= 0) return { x: 0, y: 0, width: 0, height: 0 }
+    const physical = this._toPhysicalRect(rect)
+    return {
+      x: physical.x / this.dpr,
+      y: physical.y / this.dpr,
+      width: physical.width / this.dpr,
+      height: physical.height / this.dpr,
+    }
+  }
+
   // 清除指定层（全层或脏矩形区域）
   clearLayer(layer: LayerName, rect?: DirtyRect): void {
     if (!this.layers.has(layer)) this.registerLayer(layer)
     const off = this.layers.get(layer)!
     const ctx = this._getLayerContext(off)
     if (rect) {
-      ctx.clearRect(rect.x, rect.y, rect.width, rect.height)
+      const aligned = this.getPaintRect(rect)
+      ctx.clearRect(aligned.x, aligned.y, aligned.width, aligned.height)
     } else {
-      ctx.clearRect(0, 0, this.width, this.height)
+      ctx.clearRect(0, 0, this.physicalWidth / this.dpr, this.physicalHeight / this.dpr)
     }
   }
 
@@ -187,10 +205,12 @@ export class Compositor {
   }
 
   private _toPhysicalRect(rect: DirtyRect): DirtyRect {
-    const x = Math.floor(rect.x * this.dpr)
-    const y = Math.floor(rect.y * this.dpr)
-    const right = Math.ceil((rect.x + rect.width) * this.dpr)
-    const bottom = Math.ceil((rect.y + rect.height) * this.dpr)
+    // Converting an already aligned rect back through a fractional DPR must be idempotent.
+    const stable = (value: number) => Math.abs(value - Math.round(value)) < 1e-7 ? Math.round(value) : value
+    const x = Math.max(0, Math.min(this.physicalWidth, Math.floor(stable(rect.x * this.dpr))))
+    const y = Math.max(0, Math.min(this.physicalHeight, Math.floor(stable(rect.y * this.dpr))))
+    const right = Math.max(x, Math.min(this.physicalWidth, Math.ceil(stable((rect.x + Math.max(0, rect.width)) * this.dpr))))
+    const bottom = Math.max(y, Math.min(this.physicalHeight, Math.ceil(stable((rect.y + Math.max(0, rect.height)) * this.dpr))))
     return {
       x,
       y,
