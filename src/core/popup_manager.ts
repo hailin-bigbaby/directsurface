@@ -4,6 +4,7 @@ import { isPrimaryPointerButton, type PointerEvent, type WheelPointerEvent } fro
 import {
   pointerKey,
   type PointerKey,
+  type PointerType,
 } from '../gestures/pointer_identity'
 import { ImGuiDarkTheme } from '../theme/default_theme'
 import type { ResolvedTheme } from '../theme/theme'
@@ -25,7 +26,18 @@ export interface PopupContext {
   setCursor?: (cursor: string) => void
 }
 
+/** Read-only pointer observation; never participates in input routing or capture. */
+export interface PopupPointerObservation {
+  readonly pointerId: number
+  readonly pointerType: PointerType
+  readonly position: Readonly<Offset>
+  readonly phase: 'move' | 'leave'
+}
+
 export interface Popup {
+  /** @internal Release host subscriptions when removed, without invoking close again. */
+  onPopupUnregistered?(): void
+  observePointer?(observation: PopupPointerObservation, context: PopupContext): void
   hitTest(point: Offset, context: PopupContext): boolean
   close(): void
   ownsCursor?(): boolean
@@ -182,6 +194,7 @@ export class PopupManager {
   private readonly _pointerSequenceGenerations = new Map<PointerKey, number>()
   private readonly _pointerHoverOwners = new Map<PointerKey, PopupStackEntry>()
   private readonly _terminatingPointers = new Set<PointerKey>()
+  private readonly _observingPointers = new Set<PointerKey>()
   private _nextPointerSequenceGeneration = 0
   private _disposing = false
   private _disposed = false
@@ -284,6 +297,18 @@ export class PopupManager {
     this._syncPopupScope()
   }
 
+  /** Change input policy without rebinding the popup to the currently active window. */
+  updateInteractionMode(popup: Popup, mode: PopupInteractionMode, options: { closeOnTransient?: boolean } = {}): boolean {
+    const entry = this._entry(popup)
+    if (!entry || (entry.interactionMode === mode &&
+      (options.closeOnTransient === undefined || options.closeOnTransient === entry.closeOnTransient))) return false
+    entry.interactionMode = mode
+    if (options.closeOnTransient !== undefined) entry.closeOnTransient = options.closeOnTransient
+    this._syncPopupScope()
+    this.requestPaint()
+    return true
+  }
+
   closeAll(): void {
     this._closeEntries([...this._stack])
   }
@@ -365,7 +390,35 @@ export class PopupManager {
     }
   }
 
+  /** Observe coverage without focus changes, hit testing, pointer capture or consumption. */
+  observePointer(event: PointerEvent): void {
+    const key = pointerKey(event)
+    if (this._disposed || this._observingPointers.has(key)) return
+    this._observingPointers.add(key)
+    try {
+      for (const entry of [...this._stack]) {
+        if (!entry.popup.observePointer || !this._stack.includes(entry)) continue
+        const blocked = entry.interactionMode !== 'popup' && FocusManager.instance.hasModalScope
+        try {
+          const context = this._context(entry.popup)
+          if (!this._stack.includes(entry)) continue
+          this.withContextFor(entry.popup, () => entry.popup.observePointer!({
+            pointerId: event.pointerId,
+            pointerType: event.pointerType ?? 'mouse',
+            position: { ...event.position },
+            phase: blocked || event.type === 'cancel' ? 'leave' : 'move',
+          }, context))
+        } catch (error) {
+          this._reportPopupCallbackError('pointer observation', error)
+        }
+      }
+    } finally {
+      this._observingPointers.delete(key)
+    }
+  }
+
   handlePointerMove(event: PointerEvent): boolean {
+    this.observePointer(event)
     const key = pointerKey(event)
     const generation = this._pointerSequenceGenerations.get(key)
     if (this._terminatingPointers.has(key)) return true
@@ -475,6 +528,7 @@ export class PopupManager {
   }
 
   handlePointerCancel(event: PointerEvent): boolean {
+    this.observePointer({ ...event, type: 'cancel' })
     const key = pointerKey(event)
     const generation = this._pointerSequenceGenerations.get(key)
     if (this._terminatingPointers.has(key)) return true
@@ -718,6 +772,10 @@ export class PopupManager {
     }
     for (const [key, entry] of this._pointerHoverOwners) {
       if (removedEntries.has(entry)) this._pointerHoverOwners.delete(key)
+    }
+    for (const entry of entries) {
+      try { entry.popup.onPopupUnregistered?.() }
+      catch (error) { this._reportPopupCallbackError('unregister', error) }
     }
   }
 

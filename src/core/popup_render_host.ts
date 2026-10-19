@@ -1,4 +1,6 @@
-import type { Offset, RenderObject } from './render_object'
+import type { AnimationClock } from '../animation/animation_clock'
+import { popupViewportRect, type PopupContext } from './popup_manager'
+import type { Offset, Rect, RenderObject } from './render_object'
 import { PipelineOwner } from './render_object'
 import {
   HitTestResult,
@@ -41,13 +43,18 @@ export class PopupRenderHost {
   private _lifecycleEpoch = 0
   private _resetting = false
   private _disposed = false
+  private _animationClock?: AnimationClock
+  private _animationViewport?: Rect
 
   constructor(
     root?: RenderObject | null,
     setCursor?: (cursor: string) => void,
   ) {
     this._setCursor = setCursor
+    const host = this
     this._owner = new PipelineOwner({
+      get animationClock() { return host._animationClock },
+      getAnimationViewport: () => host._animationViewport,
       onNeedLayout: () => OverlayInvalidator.instance.requestPaint(),
       onNeedPaint: () => OverlayInvalidator.instance.requestPaint(),
       setCursor: cursor => this._syncCursor(cursor),
@@ -80,6 +87,24 @@ export class PopupRenderHost {
 
   setTheme(theme: ResolvedTheme): void {
     this._owner.setTheme(theme)
+  }
+
+  setContext(context: PopupContext): void {
+    if (this._disposed) return
+    this._animationViewport = popupViewportRect(context)
+    this.setTheme(context.theme)
+    this._setAnimationClock(context.animationClock)
+  }
+
+  suspendAnimations(): void {
+    this._setAnimationClock(undefined)
+  }
+
+  private _setAnimationClock(clock: AnimationClock | undefined): void {
+    if (this._animationClock === clock) return
+    this._animationClock = clock
+    // Rebind animations in place: detaching would also close owned popups and reset input.
+    this._root?.attach(this._owner)
   }
 
   handlePointerDown(event: PointerEvent): boolean {

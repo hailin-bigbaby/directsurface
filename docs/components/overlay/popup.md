@@ -38,6 +38,7 @@ import {
   type PopupAnchorTarget,
   type PopupContext,
   type PopupContextProvider,
+  type PopupPointerObservation,
   type PopupOpenOptions,
   type PopupViewport,
   type TooltipContent,
@@ -62,7 +63,7 @@ import {
 | `TooltipTarget` | class | 包装 tooltip 内容，供组件 hover 时调用当前 tooltip service。 |
 | `TooltipContent` / `TooltipPresenter` | type | tooltip 内容和 presenter 协议。 |
 
-最小装配顺序是：实现一个可重复关闭的 `Popup`，通过 `PopupManager.instance.open(popup, options)` 打开，在页面或 owner 销毁时调用 `closeOwnedBy(owner)` 或 `dismiss(popup)`。
+最小装配顺序是：实现一个可重复关闭的 `Popup`，通过 `PopupManager.instance.open(popup, options)` 打开，在页面或 owner 销毁时调用 `closeOwnedBy(owner)`；自行实现的 `close()` 可调用 `dismiss(popup)` 移除栈记录。
 
 ## 何时关注 Popup
 
@@ -220,7 +221,7 @@ PopupManager.instance.open(childPopup, { parent: rootPopup })
 父子关系用于子菜单、级联选择器和弹窗内再弹出的局部浮层：
 
 - `closeTop()` 只关闭当前 interactive popup。
-- `dismiss(rootPopup)` 会关闭 root 及其所有 descendants。
+- `dismiss(rootPopup)` 移除 root 及其 descendants 的栈记录，并关闭 descendants；不会再次调用 root 的 `close()`。根浮层自身的可见状态和关闭回调由调用方完成。框架内容树在移出栈时停止动画订阅。
 - 外部点击嵌套子树时，会关闭当前 active root branch。
 - 点击父 popup 时，会先关闭命中点上方的子 popup，再把事件路由给父 popup。
 - 未显式传 `parent`、但在某个 Popup 回调中同步打开的新 Popup，会继承正在执行的 stable 根，避免串联弹框迁移到其他顶层窗口。
@@ -431,3 +432,18 @@ popup 的 `onWheel()` 返回了 `false` 或没有实现。需要阻止外层滚�
 - [Modal](./modal.md)
 - [Drawer](./drawer.md)
 - [生命周期和销毁](../../lifecycle.md)
+
+
+## 观察指针与输入路由
+
+自定义 Popup 可实现可选的 `observePointer(observation, context)`。`PopupPointerObservation` 只包含 `pointerId`、`pointerType`、只读位置和 `phase: 'move' | 'leave'`，不提供捕获指针、阻止冒泡或改变焦点的事件方法，也没有“消费事件”的返回值。它用于悬停计时等观察行为；点击、拖动和键盘仍由既有交互模式决定。
+
+PopupManager 在路由移动事件时通知观察者。框架也覆盖主场景拖动/捕获、Canvas leave 和窗口失焦的清理路径。焦点系统的模态作用域阻止非模态浮层输入期间，指针观察事件被转换为 leave，以释放悬停状态。观察回调的异常会被隔离并报告，同一指针的重入观察不会递归分发。`passive` 仍保持点击穿透。
+
+需要原位改变交互模式时，可使用 `PopupManager.updateInteractionMode(popup, mode, { closeOnTransient? })`。它保留原 anchor root、owner、parent 和栈位置；未传 `closeOnTransient` 时保留原关闭策略，避免因重新 open 而意外绑定当前活动窗口。
+
+## 浮层内容树的动画与失效
+
+框架提供的 Popup 内容树使用自己的渲染 owner，但从 `PopupContext` 继承宿主 `animationClock` 和动画可见视口。相同上下文不会重复订阅；时钟变化时原位重绑，关闭内容 surface 或直接移出 PopupManager 栈时暂停订阅，重新打开时恢复，释放时取消。手动提供 PopupContext 的宿主应传入其动画时钟，框架不会为 loading 等装饰动画隐式创建另一条全局计时链。
+
+几何同步必须对未变化输入保持幂等；静态内容不应通过每次 paint 再次标脏来维持显示。绘制期间产生的真实失效请求仍会保留到下一帧，不应使用全局屏蔽来隐藏组件重复标脏的问题。

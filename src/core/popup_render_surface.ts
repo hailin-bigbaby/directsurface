@@ -152,8 +152,12 @@ export class PopupRenderSurface {
     this._host.paint(context)
   }
 
+  suspendAnimations(): void {
+    this._host.suspendAnimations()
+  }
+
   reset(): void {
-    this._host.reset()
+    try { this._host.reset() } finally { this._host.suspendAnimations() }
   }
 
   dispose(): void {
@@ -164,7 +168,7 @@ export class PopupRenderSurface {
 
   private _syncRoot(popupContext: PopupContext): void {
     if (!this._root) return
-    this._host.setTheme(popupContext.theme)
+    this._host.setContext(popupContext)
     this._sync?.(this._root, popupContext)
   }
 }

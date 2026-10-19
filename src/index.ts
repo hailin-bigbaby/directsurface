@@ -194,6 +194,7 @@ export {
   type Popup,
   type PopupAnchorMode,
   type PopupContext,
+  type PopupPointerObservation,
   type PopupContextProvider,
   type PopupInteractionMode,
   type PopupOpenOptions,

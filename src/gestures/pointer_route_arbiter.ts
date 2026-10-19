@@ -63,11 +63,13 @@ export class PointerRouteArbiter {
 
   routePointerMove(event: PointerEvent, session?: PointerDispatchSession): PointerRouteDecision {
     if (session?.routeScope === 'interceptor' && session.routeTarget) {
+      PopupManager.instance.observePointer(event)
       const interceptor = session.routeTarget as PointerRouteInterceptor
       const consumed = interceptor.onPointerMove(event)
       return { scope: 'interceptor', consumed: consumed !== false, target: interceptor }
     }
     if (session?.routeScope === 'main') {
+      PopupManager.instance.observePointer(event)
       return { scope: 'main', consumed: false }
     }
 
@@ -101,11 +103,13 @@ export class PointerRouteArbiter {
 
   routePointerCancel(event: PointerEvent, session?: PointerDispatchSession): PointerRouteDecision {
     if (session?.routeScope === 'interceptor' && session.routeTarget) {
+      PopupManager.instance.observePointer({ ...event, type: 'cancel' })
       const interceptor = session.routeTarget as PointerRouteInterceptor
       const consumed = interceptor.onPointerCancel?.(event)
       return { scope: 'interceptor', consumed: consumed !== false, target: interceptor }
     }
     if (session?.routeScope === 'main') {
+      PopupManager.instance.observePointer({ ...event, type: 'cancel' })
       return { scope: 'main', consumed: false }
     }
 

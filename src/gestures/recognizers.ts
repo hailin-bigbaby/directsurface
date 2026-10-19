@@ -1,3 +1,4 @@
+import { PopupManager } from '../core/popup_manager'
 // EventDispatcher: 基于 HitTestResult 路径的事件分发
 // 事件流：DOM event → normalize → 命中测试 → overlay 优先 → path dispatch
 // 路径收集替代旧的 _collectInteractive 扁平遍历，支持 capture/bubble 语义
@@ -895,6 +896,8 @@ export class EventDispatcher {
 
       const captured = this.sessions.getCapture(pe)
       if (captured) {
+        PopupManager.instance.observePointer(pe)
+        if (!isMoveFrameCurrent()) return
         this.pointerDispatcher.dispatchToCapturedTarget(captured, pe)
         return
       }
@@ -1203,6 +1206,7 @@ export class EventDispatcher {
       const session = this.sessions.get(identity)
       if (!session || this.sessions.isTerminating(identity)) continue
       try {
+        PopupManager.instance.observePointer({ ...identity, type: 'cancel', position: session.lastPosition ?? { x: 0, y: 0 } })
         if (this.sessions.hasActiveSequence(identity)) {
           this._handlePointerCancel({
             pointerId: identity.pointerId,
@@ -1496,18 +1500,22 @@ export class EventDispatcher {
     })
 
     this._listen('mouseleave', (e) => {
-      if (this.sessions.isTerminating(0)) return
       const pos = this._getCanvasPos(e)
-      if (this.sessions.hasActiveSequence(0)) {
-        this.sessions.rememberPosition(0, pos)
+      try {
+        if (this.sessions.isTerminating(0)) return
+        if (this.sessions.hasActiveSequence(0)) {
+          this.sessions.rememberPosition(0, pos)
+          this._clearHoveredTargets(0, pos)
+          return
+        }
+        this.routeArbiter.routePointerMove({
+          pointerId: 0, position: pos, type: 'move',
+          button: e.button, buttons: e.buttons, pointerType: 'mouse',
+        }, this.sessions.get(0))
         this._clearHoveredTargets(0, pos)
-        return
+      } finally {
+        PopupManager.instance.observePointer({ pointerId: 0, pointerType: 'mouse', position: pos, type: 'cancel' })
       }
-      this.routeArbiter.routePointerMove({
-        pointerId: 0, position: pos, type: 'move',
-        button: e.button, buttons: e.buttons, pointerType: 'mouse',
-      }, this.sessions.get(0))
-      this._clearHoveredTargets(0, pos)
     })
 
     this._listenWindow('blur', () => {

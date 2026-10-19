@@ -1076,3 +1076,82 @@ test('encoded image previews decode through the browser loader and retain borrow
   })
   expect(result).toEqual({ loaded: 'loaded', red: [255, 0, 0, 255], blue: [0, 0, 255, 255] })
 })
+
+
+test('notifications become idle and popup action spinners use the host clock', async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const { RuntimeHost, NotificationManager } = renderingUnderTest
+    const canvas = document.createElement('canvas')
+    document.body.append(canvas)
+    let frames = 0
+    const host = new RuntimeHost({ canvas, getViewportSize: () => ({ width: 800, height: 600 }), onFrame: () => { frames++ } })
+    const manager = new NotificationManager()
+    const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+    try {
+      manager.notify({ type: 'error', title: 'Persistent notification', duration: 0 })
+      await wait(650)
+      const idleStart = frames
+      await wait(160)
+      const idleEnd = frames
+      manager.close()
+      manager.notify({ type: 'error', title: 'Retry action', duration: 0,
+        action: { label: 'Retry', onInvoke: () => new Promise<void>(() => {}) } })
+      await wait(250)
+      const surface = (manager as any)._notificationSurface
+      const button = surface._cards[0]._actionButton
+      button.onClick()
+      await wait(80)
+      const firstAngle = button._spinAngle
+      const activeFrames = frames
+      await wait(160)
+      const secondAngle = button._spinAngle
+      const animatedFrames = frames - activeFrames
+      const clockInherited = button.owner.animationClock === host.animationClock
+      manager.close()
+      await wait(100)
+      const closedStart = frames
+      await wait(160)
+      return { idleStart, idleEnd, firstAngle, secondAngle, animatedFrames, clockInherited,
+        closedFrames: frames - closedStart, subscribers: host.animationClock.subscriberCount }
+    } finally { manager.dispose(); host.dispose(); canvas.remove() }
+  })
+  expect(result.idleEnd).toBe(result.idleStart)
+  expect(result.clockInherited).toBe(true)
+  expect(result.secondAngle).not.toBe(result.firstAngle)
+  expect(result.animatedFrames).toBeGreaterThan(0)
+  expect(result.closedFrames).toBe(0)
+  expect(result.subscribers).toBe(0)
+})
+
+test('passive notifications pause on hover while clicks still reach the page', async ({ page }) => {
+  const point = await page.evaluate(() => {
+    const { RuntimeHost, NotificationManager, RenderButton } = renderingUnderTest
+    const canvas = document.createElement('canvas')
+    document.body.append(canvas)
+    let clicks = 0
+    const host = new RuntimeHost({ canvas, getViewportSize: () => ({ width: 800, height: 600 }) })
+    const button = new RenderButton({ label: 'Page button', onClick: () => { clicks++ } })
+    button.width = 800
+    button.height = 600
+    host.addRoot(button)
+    const manager = new NotificationManager()
+    const handle = manager.notify({ type: 'success', title: 'Hover to read', dismissible: false, duration: 350 })
+    manager.hitTest({ x: 0, y: 0 }, (manager as any).popupContext)
+    const card = (manager as any)._notificationSurface._cards[0]
+    const rect = canvas.getBoundingClientRect()
+    ;(window as any).notificationProbe = { get closed() { return handle.closed }, get clicks() { return clicks },
+      dispose: () => { manager.dispose(); host.dispose(); canvas.remove() } }
+    return { x: rect.left + card.globalOffset.x + 40, y: rect.top + card.globalOffset.y + 20 }
+  })
+  try {
+    await page.mouse.move(point.x, point.y)
+    await page.waitForTimeout(650)
+    expect(await page.evaluate(() => (window as any).notificationProbe.closed)).toBe(false)
+    await page.mouse.click(point.x, point.y)
+    expect(await page.evaluate(() => (window as any).notificationProbe.clicks)).toBe(1)
+    await page.mouse.move(0, 0)
+    await page.waitForFunction(() => (window as any).notificationProbe.closed)
+  } finally {
+    await page.evaluate(() => { (window as any).notificationProbe.dispose(); delete (window as any).notificationProbe })
+  }
+})

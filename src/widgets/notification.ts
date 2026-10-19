@@ -1,6 +1,9 @@
-import { popupViewportRect, PopupManager, type PopupContext, type PopupInteractionMode } from '../core/popup_manager'
+import { pointerKey, type PointerKey } from '../gestures/pointer_identity'
+import type { Offset } from '../core/render_object'
+import { popupViewportRect, PopupManager, type PopupContext, type PopupInteractionMode, type PopupPointerObservation } from '../core/popup_manager'
 import { PopupSurfaceShell } from '../core/popup_shell'
-import { resolveThemeMotion } from '../theme/theme'
+import { TextMeasurer } from '../core/text_measurer'
+import { resolveThemeMotion, themeValueSignature } from '../theme/theme'
 import { deriveNotificationStyle } from '../theme/component_styles'
 import { calculateNotificationLayout } from './notification_layout'
 import {
@@ -28,6 +31,9 @@ export class NotificationManager extends PopupSurfaceShell {
   private readonly _store: NotificationStore
   private _interactionMode: PopupInteractionMode = 'passive'
   private _disposed = false
+  private _revision = 0
+  private _surfaceKey = ''
+  private readonly _hoverPointers = new Map<PointerKey, { position: Offset; id?: number }>()
 
   constructor() {
     const surface = new RenderNotificationSurface()
@@ -35,7 +41,7 @@ export class NotificationManager extends PopupSurfaceShell {
     this._notificationSurface = surface
     this._store = new NotificationStore({
       onChange: () => this._handleStoreChange(),
-      exitDuration: () => resolveThemeMotion(PopupManager.instance.context.theme).slowDuration,
+      exitDuration: () => resolveThemeMotion(this._context().theme).slowDuration,
     })
     this.setPopupSurfaceSync((_root, popupContext) => this._syncSurface(popupContext))
   }
@@ -88,7 +94,44 @@ export class NotificationManager extends PopupSurfaceShell {
     this.disposePopupSurface()
   }
 
+  observePointer(observation: PopupPointerObservation, context: PopupContext): void {
+    if (this._disposed || !this.popupOpen) return
+    const key = pointerKey(observation)
+    if (observation.phase === 'leave' || observation.pointerType === 'touch') {
+      const previous = this._hoverPointers.get(key)
+      this._hoverPointers.delete(key)
+      if (previous?.id !== undefined) this._store.setPaused(previous.id, `hover:${key}`, false)
+      return
+    }
+    this._syncSurface(context)
+    if (this._disposed || !this.popupOpen) return
+    const pointer = this._hoverPointers.get(key) ?? { position: { ...observation.position } }
+    pointer.position = { ...observation.position }
+    this._hoverPointers.set(key, pointer)
+    this._refreshObservedHover()
+  }
+
+  private _refreshObservedHover(): void {
+    for (const [key, pointer] of this._hoverPointers) {
+      const id = this._notificationSurface.notificationAt(pointer.position)
+      if (id === pointer.id) continue
+      if (pointer.id !== undefined) this._store.setPaused(pointer.id, `hover:${key}`, false)
+      pointer.id = id
+      if (id !== undefined) this._store.setPaused(id, `hover:${key}`, true)
+    }
+  }
+
+  protected override onPopupClose(): void {
+    for (const [key, pointer] of this._hoverPointers) {
+      if (pointer.id !== undefined) this._store.setPaused(pointer.id, `hover:${key}`, false)
+    }
+    this._hoverPointers.clear()
+    this._surfaceKey = ''
+    super.onPopupClose()
+  }
+
   private _handleStoreChange(): void {
+    this._revision++
     this._notificationSurface.prune(this._store.entries)
     if (!this._store.hasItems) {
       if (this.popupOpen) super.close()
@@ -108,13 +151,24 @@ export class NotificationManager extends PopupSurfaceShell {
     }
     if (this._interactionMode === mode) return false
     this._interactionMode = mode
-    PopupManager.instance.open(this, { interactionMode: mode })
+    PopupManager.instance.updateInteractionMode(this, mode, { closeOnTransient: mode !== 'nonmodal' })
     return false
   }
 
+  private _surfaceSignature(context: PopupContext): string {
+    return JSON.stringify([this._revision, TextMeasurer.revision, themeValueSignature(context.theme), context.viewport])
+  }
+
+  private _context(): PopupContext {
+    return this.popupOpen ? PopupManager.instance.contextFor(this) : PopupManager.instance.context
+  }
+
   private _syncSurface(popupContext: PopupContext): void {
+    if (this._surfaceKey === this._surfaceSignature(popupContext) && !this._notificationSurface.needsLayout) return
     const viewport = popupViewportRect(popupContext)
     const measured = this._measureReconciledLayout(popupContext)
+    if (!this.hasItems || this._disposed) return
+    const revision = this._revision
     const viewportOffset = { x: viewport.x, y: viewport.y }
     this._notificationSurface.offset = viewportOffset
     this._notificationSurface.sync(
@@ -136,10 +190,12 @@ export class NotificationManager extends PopupSurfaceShell {
       minHeight: viewport.height,
       maxHeight: viewport.height,
     }, false, { theme: popupContext.theme })
+    this._refreshObservedHover()
+    if (revision === this._revision) this._surfaceKey = this._surfaceSignature(popupContext)
   }
 
   private _reconcileCapacity(): void {
-    this._measureReconciledLayout(PopupManager.instance.context)
+    this._measureReconciledLayout(this._context())
   }
 
   private _measureReconciledLayout(popupContext: PopupContext) {
@@ -184,7 +240,7 @@ export class NotificationManager extends PopupSurfaceShell {
     return { layout, presentations, style }
   }
 
-  private _style(theme = PopupManager.instance.context.theme) {
+  private _style(theme = this._context().theme) {
     return deriveNotificationStyle(theme)
   }
 }

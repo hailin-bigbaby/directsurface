@@ -3,7 +3,7 @@ import { Curves } from '../animation/curves'
 import { FocusManager, type AuxiliaryFocusRootRegistration } from '../core/focus_manager'
 import { TextMeasurer } from '../core/text_measurer'
 import { constrainSize, type BoxConstraints, type LayoutContext, type Offset, type RenderObject } from '../core/render_object'
-import type { PointerEvent, InteractiveRenderObject } from '../gestures/recognizers'
+import type { InteractiveRenderObject } from '../gestures/recognizers'
 import { RenderBox } from '../layout/render_box'
 import { DrawList } from '../rendering/draw_list'
 import type { PaintContext } from '../rendering/paint_context'
@@ -274,14 +274,6 @@ export class RenderNotificationToast extends RenderBox implements InteractiveRen
     return super.hitTest(point)
   }
 
-  onPointerEnter(_event: PointerEvent): void {
-    this._callbacks.pause(this._entry.id, 'hover', true)
-  }
-
-  onPointerLeave(_event: PointerEvent): void {
-    this._callbacks.pause(this._entry.id, 'hover', false)
-  }
-
   handleUnhandledKeyDownFromDescendant(_target: unknown, event: KeyboardEvent): boolean {
     if (event.key !== 'Escape') return false
     event.preventDefault()
@@ -409,6 +401,15 @@ export class RenderNotificationSurface extends RenderBox {
 
   performPaint(context: PaintContext, offset: Offset): void {
     super.performPaint(context, offset)
+  }
+
+  notificationAt(point: Offset): number | undefined {
+    for (const card of this._cards) {
+      const offset = card.globalOffset
+      if (point.x >= offset.x && point.x < offset.x + card.size.width &&
+        point.y >= offset.y && point.y < offset.y + card.size.height) return card.entry.id
+    }
+    return undefined
   }
 
   override hitTest(_point: Offset): boolean {

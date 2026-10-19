@@ -139,6 +139,11 @@ export abstract class PopupSurfaceShell extends PopupShell {
     )
   }
 
+  /** @internal */
+  onPopupUnregistered(): void {
+    this._surface.suspendAnimations()
+  }
+
   protected resetPopupSurface(): void {
     this._surface.reset()
   }

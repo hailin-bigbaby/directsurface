@@ -231,8 +231,10 @@ export abstract class RenderObject {
     }
   }
 
+  private _boundAnimationClock?: AnimationClock
+
   attach(owner: PipelineOwner): void {
-    if (this._owner !== owner) {
+    if (this._owner !== owner || this._boundAnimationClock !== owner.animationClock) {
       for (const binding of this._animationBindings ?? []) {
         binding.dispose?.()
         binding.dispose = owner.animationClock?.subscribe(binding.tick, () => this.isAnimationVisible)
@@ -240,6 +242,7 @@ export abstract class RenderObject {
     }
     if (this._owner && this._owner !== owner) this._owner.forget(this)
     this._owner = owner
+    this._boundAnimationClock = owner.animationClock
     this.visitChildren(child => child.attach(owner))
   }
 
@@ -250,6 +253,7 @@ export abstract class RenderObject {
     }
     const owner = this._owner
     this._owner = undefined
+    this._boundAnimationClock = undefined
     owner?.forget(this)
     PopupManager.instance.closeOwnedBy(this)
     this.visitChildren(child => child.detach())
@@ -731,7 +735,7 @@ export abstract class RenderObject {
 
 export interface PipelineOwnerOptions {
   animationClock?: AnimationClock
-  getAnimationViewport?: () => Rect
+  getAnimationViewport?: () => Rect | undefined
   onNeedFrameCommit?: (info: PipelineRequestInfo) => void
   onNeedLayout?: (info: PipelineRequestInfo) => void
   onNeedPaint?: (info: PipelineRequestInfo) => void
