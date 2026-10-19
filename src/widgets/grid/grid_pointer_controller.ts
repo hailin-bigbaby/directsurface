@@ -40,6 +40,7 @@ export interface GridPointerControllerOptions<T extends Record<string, any>> {
   onToggleGroup: (pathKey: string) => boolean
   onSyncEditingViewportState: () => void
   onInteractionStateChange?: () => void
+  onUserScroll?: () => void
   onSetCursor: (cursor: string) => void
   onMarkNeedsPaint: () => void
 }
@@ -74,6 +75,7 @@ export class GridPointerController<T extends Record<string, any> = any> {
   private readonly _onToggleGroup: GridPointerControllerOptions<T>['onToggleGroup']
   private readonly _onSyncEditingViewportState: GridPointerControllerOptions<T>['onSyncEditingViewportState']
   private readonly _onInteractionStateChange: () => void
+  private readonly _onUserScroll: () => void
   private readonly _onSetCursor: GridPointerControllerOptions<T>['onSetCursor']
   private readonly _onMarkNeedsPaint: GridPointerControllerOptions<T>['onMarkNeedsPaint']
   private readonly _rangeAutoScrollDriver: EdgeAutoScrollDriver
@@ -111,6 +113,7 @@ export class GridPointerController<T extends Record<string, any> = any> {
     this._onToggleGroup = options.onToggleGroup
     this._onSyncEditingViewportState = options.onSyncEditingViewportState
     this._onInteractionStateChange = options.onInteractionStateChange ?? (() => {})
+    this._onUserScroll = options.onUserScroll ?? (() => {})
     this._onSetCursor = options.onSetCursor
     this._onMarkNeedsPaint = options.onMarkNeedsPaint
     this._rangeAutoScrollDriver = new EdgeAutoScrollDriver({
@@ -218,6 +221,7 @@ export class GridPointerController<T extends Record<string, any> = any> {
         this._vScrollbarController.cancelPointer(key)
         return
       }
+      this._onUserScroll()
       if (verticalResult.scrollOffset !== undefined) {
         this._viewport.setScrollY(visibleItemCount, verticalResult.scrollOffset)
         this._onSyncEditingViewportState()
@@ -237,6 +241,7 @@ export class GridPointerController<T extends Record<string, any> = any> {
         this._hScrollbarController.cancelPointer(key)
         return
       }
+      this._onUserScroll()
       if (horizontalResult.scrollOffset !== undefined) {
         this._viewport.setScrollX(columns, horizontalResult.scrollOffset)
         this._onSyncEditingViewportState()
@@ -397,6 +402,7 @@ export class GridPointerController<T extends Record<string, any> = any> {
     }
 
     if (this._viewport.vScrollbar.dragging) {
+      this._onUserScroll()
       event.stopPropagation?.()
       const visibleItemCount = this._dataModel.visibleItemCount()
       const result = this._vScrollbarController.updatePointer(
@@ -413,6 +419,7 @@ export class GridPointerController<T extends Record<string, any> = any> {
     }
 
     if (this._viewport.hScrollbar.dragging) {
+      this._onUserScroll()
       event.stopPropagation?.()
       const result = this._hScrollbarController.updatePointer(
         event.position,
@@ -767,6 +774,7 @@ export class GridPointerController<T extends Record<string, any> = any> {
 
   onWheel(event: WheelPointerEvent): boolean {
     if (!this._hitTest(event.position)) return false
+    if (event.deltaX !== 0 || event.deltaY !== 0) this._onUserScroll()
     const columns = this._getColumns()
     const visibleItemCount = this._dataModel.visibleItemCount()
     const canScrollX = this._viewport.canScrollX(columns)
@@ -902,6 +910,7 @@ export class GridPointerController<T extends Record<string, any> = any> {
       return false
     }
 
+    if (delta.x !== 0 || delta.y !== 0) this._onUserScroll()
     const columns = this._getColumns()
     const beforeX = this._viewport.scrollX
     const beforeY = this._viewport.scrollY

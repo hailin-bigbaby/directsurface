@@ -16,6 +16,10 @@ export interface GridColumnBase<T extends Record<string, any> = any> {
   hidden?: boolean
   widthMode?: GridColumnWidthMode
   align?: 'left' | 'center' | 'right'
+  /** Wrap displayed text at the actual column width. */
+  wrapText?: boolean
+  /** Include this column when measuring row height (implies wrapping). */
+  autoRowHeight?: boolean
   cellTextOverflow?: GridCellTextOverflow
   editable?: boolean
   /** Merge adjacent display rows in this column without changing source values. */
@@ -530,7 +534,12 @@ export interface DataGridOptions<T extends Record<string, any>> extends RenderBo
   footerHeight?: number
   filterRowVisible?: boolean
   filterRowHeight?: number
+  /** Minimum body row height, also used for group rows. */
   rowHeight?: number
+  /** Enable automatic height for all non-checkbox columns unless opted out. */
+  autoRowHeight?: boolean
+  /** Maximum automatic row height. Defaults to no limit. */
+  maxRowHeight?: number
   headerHeight?: number
   cellTextOverflow?: GridCellTextOverflow
   validateCell?: (args: GridCellValidationArgs<T>) => GridCellValidationResult

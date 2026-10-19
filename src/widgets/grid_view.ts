@@ -2,7 +2,7 @@ import { FocusManager, type Focusable } from '../core/focus_manager'
 import type { CopyableSelection } from '../core/clipboard'
 import { PopupManager } from '../core/popup_manager'
 import { GET_POPUP_ANCHOR_RECT } from '../core/popup_anchor'
-import { RenderObject, constrainSize, type BoxConstraints, type LayoutContext, type Offset } from '../core/render_object'
+import { RenderObject, constrainSize, type BoxConstraints, type LayoutContext, type Offset, type Rect } from '../core/render_object'
 import { RenderBox } from '../layout/render_box'
 import type { PaintContext } from '../rendering/paint_context'
 import { TextMeasurer } from '../core/text_measurer'
@@ -20,7 +20,9 @@ import { GridPointerController } from './grid/grid_pointer_controller'
 import { GridStateController } from './grid/grid_state_controller'
 import { GridStructureEditController } from './grid/grid_structure_edit_controller'
 import { createGridControllerBundle } from './grid/grid_controller_bundle'
-import { GridPainter } from './grid/grid_painter'
+import { gridColumnWraps, layoutGridCellText, layoutGridMergedCellText } from './grid/grid_cell_text_layout'
+import { GridAutoRowHeight } from './grid/grid_auto_row_height'
+import { GridPainter, type GridPainterSnapshot } from './grid/grid_painter'
 import { GridRowMergeModel } from './grid/grid_row_merge_model'
 import { GridViewShellController } from './grid/grid_view_shell_controller'
 import { resolveGridHeaderActionLayout } from './grid/grid_header_actions'
@@ -56,6 +58,7 @@ import type {
   GridColumnDef,
   GridCellTextOverflow,
   GridDataItem,
+  GridVisibleItem,
   GridDataChangeListener,
   GridDataChangeOrigin,
   GridDataMutationOptions,
@@ -293,6 +296,11 @@ export class RenderDataGrid<T extends Record<string, any> = any>
   private _unsubscribeMergeSelection?: () => void
   private _mergeValidationSyncQueued = false
   private _gridDisposed = false
+  private readonly _autoHeights = new GridAutoRowHeight<T>()
+  private _autoRowHeight = false
+  private _maxRowHeight = Infinity
+  private _heightRevision = 0
+  private _pendingRowReveal?: { item: GridVisibleItem<T>; columnKey?: string }
 
   constructor(options: DataGridOptions<T>) {
     super(options)
@@ -304,6 +312,8 @@ export class RenderDataGrid<T extends Record<string, any> = any>
     this._rangeSelectionAutoScroll = options.rangeSelectionAutoScroll ?? true
     this._sortable = options.sortable ?? true
     this._cellTextOverflow = options.cellTextOverflow ?? 'ellipsis'
+    this._autoRowHeight = options.autoRowHeight ?? false
+    this._maxRowHeight = Number.isFinite(options.maxRowHeight) ? Math.max(1, options.maxRowHeight!) : Infinity
     this._reorderableColumns = options.reorderableColumns ?? true
     this._dataState = options.dataState ?? 'ready'
     this._stateMessage = options.stateMessage ?? ''
@@ -355,6 +365,8 @@ export class RenderDataGrid<T extends Record<string, any> = any>
     let shell!: GridViewShellController<T>
     const controllers = createGridControllerBundle<T>({
       owner: this,
+      onRevealItem: (index, col) => this.deferRowReveal(index, col),
+      onCancelPendingReveal: () => this.cancelPendingRowReveal(),
       dataModel: this.dataModel,
       viewport: this.viewport,
       editable: () => this.canUserEdit,
@@ -427,6 +439,7 @@ export class RenderDataGrid<T extends Record<string, any> = any>
     this.interaction = controllers.interaction
     this.interaction.rowMerges = this.rowMerges
     this._unsubscribeMergeSelection = this.dataModel.subscribeDataChange(() => {
+      this._heightRevision++
       this.syncMergeSelection()
     })
     this.editingGeometry = controllers.editingGeometry
@@ -862,6 +875,36 @@ export class RenderDataGrid<T extends Record<string, any> = any>
     this.stateController.setGroupBy(groupBy)
   }
 
+  get autoRowHeight(): boolean { return this._autoRowHeight }
+  set autoRowHeight(value: boolean) {
+    if (this._autoRowHeight === value) return
+    this._autoRowHeight = value
+    this.markNeedsLayout()
+  }
+
+  get maxRowHeight(): number { return this._maxRowHeight }
+  set maxRowHeight(value: number) {
+    const next = Number.isFinite(value) ? Math.max(1, value) : Infinity
+    if (next === this._maxRowHeight) return
+    this._maxRowHeight = next
+    this.markNeedsLayout()
+  }
+
+  private hasAutoRowHeight(): boolean {
+    return this._autoRowHeight || this.dataModel?.columns.some(column => column.autoRowHeight === true) === true
+  }
+
+  override markNeedsPaint(damageRect?: Rect): void {
+    // Style callbacks may depend on selection/focus/hover. Resolve geometry before paint.
+    // Scrolling and caret blinking must not schedule ancestor layout work.
+    if (this.hasAutoRowHeight() && (!this._shell || this._autoHeights.needsLayout(
+      this.createPainterSnapshot(this.currentTheme),
+      this._heightRevision + this.structureEditing.validationRevision,
+      this._maxRowHeight,
+    ))) this.markNeedsLayout()
+    super.markNeedsPaint(damageRect)
+  }
+
   get rowHeight(): number { return this.viewport.rowHeight }
   set rowHeight(value: number) {
     if (!this.viewport.setRowHeight(value)) return
@@ -938,6 +981,7 @@ export class RenderDataGrid<T extends Record<string, any> = any>
     if (this._getCellDisplayText === value) return
     this.closeFilterPopupForExternalMutation()
     this._getCellDisplayText = value
+    this._heightRevision++
     this.dataModel.getCellDisplayText = value
     this.markNeedsPaint()
   }
@@ -965,6 +1009,7 @@ export class RenderDataGrid<T extends Record<string, any> = any>
     | undefined) {
     if (this._resolveRowStyle === value) return
     this._resolveRowStyle = value
+    this._heightRevision++
     this.editing.refreshActiveTextPresentation()
     this.markNeedsPaint()
   }
@@ -979,6 +1024,7 @@ export class RenderDataGrid<T extends Record<string, any> = any>
     | undefined) {
     if (this._resolveCellStyle === value) return
     this._resolveCellStyle = value
+    this._heightRevision++
     this.editing.refreshActiveTextPresentation()
     this.markNeedsPaint()
   }
@@ -995,6 +1041,7 @@ export class RenderDataGrid<T extends Record<string, any> = any>
     this._resolveCellEditPolicy = value
     this._cellEditPolicyErrorLogged = false
     this.rowMerges.invalidate()
+    this._heightRevision++
     this.reconcileActiveCellEditPolicy()
     this.syncMergeSelection()
   }
@@ -1032,6 +1079,38 @@ export class RenderDataGrid<T extends Record<string, any> = any>
     return this._shell.popupAnchorRect(anchor)
   }
 
+  private cancelPendingRowReveal(): void {
+    this._pendingRowReveal = undefined
+  }
+
+  private deferRowReveal(itemIndex: number, colIndex?: number): void {
+    if (!this.hasAutoRowHeight()) return
+    const snapshot = this.createPainterSnapshot(this.currentTheme)
+    if (!this.needsLayout && !this._autoHeights.needsLayout(snapshot,
+      this._heightRevision + this.structureEditing.validationRevision, this._maxRowHeight)) return
+    const item = snapshot.visibleItems[itemIndex]
+    if (!item) return
+    this._pendingRowReveal = { item, columnKey: colIndex === undefined ? undefined : snapshot.columns[colIndex]?.key }
+    this.markNeedsLayout()
+  }
+
+  private applyPendingRowReveal(): void {
+    const pending = this._pendingRowReveal
+    this._pendingRowReveal = undefined
+    if (!pending) return
+    const target = pending.item
+    const items = this.dataModel.visibleItems()
+    const index = items.findIndex(item => target.kind === 'group'
+      ? item.kind === 'group' && item.pathKey === target.pathKey
+      : item.kind === 'data' && (target.rowId !== null ? item.rowId === target.rowId : item.row === target.row))
+    if (index < 0) return
+    this.viewport.scrollToRow(items.length, index)
+    if (pending.columnKey !== undefined) {
+      const columns = this.visibleColumns
+      this.viewport.scrollToColumn(columns, columns.findIndex(column => column.key === pending.columnKey))
+    }
+  }
+
   performLayout(constraints: BoxConstraints, context: LayoutContext): void {
     const columns = this.visibleColumns
     if (context.pass === 'measure') {
@@ -1041,17 +1120,36 @@ export class RenderDataGrid<T extends Record<string, any> = any>
       })
       return
     }
+    const edit = this.editing.state
+    const previousEditGeometry = edit ? JSON.stringify([
+      this.editingGeometry.cellEditorGlobalRect(edit.row, edit.col), this.viewport.viewWidth, this.viewport.viewHeight,
+    ]) : ''
     this.size = this.viewport.performLayout(constraints, context.theme, columns, {
       preferredWidth: (_column, colIndex) => this.measureAutoFitColumnWidth(colIndex),
     })
+    if (this.hasAutoRowHeight()) {
+      this._autoHeights.sync(this.createPainterSnapshot(context.theme),
+        this._heightRevision + this.structureEditing.validationRevision, this._maxRowHeight)
+    } else {
+      this._autoHeights.reset(this.viewport)
+    }
     this.viewport.clampScrollOffsets(columns, this.dataModel.visibleItemCount())
-    this.editingGeometry.syncEditingViewportState()
+    // Explicit reveal wins over anchor preservation after the new sizes are known.
+    this.applyPendingRowReveal()
+    const editGeometryChanged = edit && previousEditGeometry !== JSON.stringify([
+      this.editingGeometry.cellEditorGlobalRect(edit.row, edit.col), this.viewport.viewWidth, this.viewport.viewHeight,
+    ])
+    this.editingGeometry.syncEditingViewportState(!this.hasAutoRowHeight() || !!editGeometryChanged)
   }
 
   performPaint(context: PaintContext, offset: Offset): void {
+    this.painter.paint(context, offset, this.createPainterSnapshot(context.theme))
+  }
+
+  private createPainterSnapshot(theme: PaintContext['theme']): GridPainterSnapshot<T> {
     const columns = this.visibleColumns
-    this.painter.paint(context, offset, {
-      theme: context.theme,
+    return {
+      theme,
       columns,
       visibleItems: this.dataModel.visibleItems(),
       viewport: this.viewport,
@@ -1075,11 +1173,13 @@ export class RenderDataGrid<T extends Record<string, any> = any>
       stateMessage: this._stateMessage,
       summaryCells: this.dataModel.summaryCells(),
       footerHeight: this._footerHeight,
+      textMeasurementRevision: TextMeasurer.revision,
+      autoRowHeight: this.autoRowHeight,
       cellTextOverflow: this.cellTextOverflow,
       editableState: this.editing.state,
       editInput: this.editing.input,
-      gridTokens: this._shell.gridTokens(context.theme),
-      scrollbarTokens: this._shell.scrollbarTokens(context.theme),
+      gridTokens: this._shell.gridTokens(theme),
+      scrollbarTokens: this._shell.scrollbarTokens(theme),
       getCellDisplayText: this.getCellDisplayText,
       getGroupDisplayText: this.getGroupDisplayText,
       resolveRowStyle: this.resolveRowStyle,
@@ -1088,7 +1188,7 @@ export class RenderDataGrid<T extends Record<string, any> = any>
       getCellError: (sourceRowIndex, key) => this.structureEditing.cellErrorForSource(sourceRowIndex, key),
       lookupValues: this.dataModel.lookupValues,
       measureText: (text, fontSize, fontFamily) => TextMeasurer.measureWidth(text, fontSize, fontFamily),
-    })
+    }
   }
 
   beginEdit(row: T | number, key: (keyof T & string) | number): boolean {
@@ -1825,6 +1925,7 @@ export class RenderDataGrid<T extends Record<string, any> = any>
   }
 
   private invalidateDataPresentation(): void {
+    this._heightRevision++
     if (this.hasAutoContentColumns()) this.markNeedsLayout()
     else this.markNeedsPaint()
   }
@@ -1949,8 +2050,11 @@ export class RenderDataGrid<T extends Record<string, any> = any>
     const tokens = this._shell.gridTokens(this.currentTheme)
     const isSelected = merge ? this.interaction.isMergeFullySelected(merge) : this.selectedRows.has(item.dataRowIndex)
     const isHovered = !merge && itemIndex === this.interaction.hoveredItemIndex
-    const isFocused = this.interaction.isFocused && presentationIndex === this.interaction.focusedItemIndex
-    const isEditingRow = this.editing.state?.row === presentationItem.dataRowIndex
+    const isFocused = this.interaction.isFocused && (merge
+      ? this.interaction.focusedColIndex === colIndex && this.interaction.focusedItemIndex >= merge.startItemIndex &&
+        this.interaction.focusedItemIndex <= merge.endItemIndex
+      : presentationIndex === this.interaction.focusedItemIndex)
+    const isEditingRow = !merge && this.editing.state?.row === presentationItem.dataRowIndex
     const rowPresentation = resolveGridRowPresentation({
       item: presentationItem,
       theme: this.currentTheme,
@@ -1991,7 +2095,20 @@ export class RenderDataGrid<T extends Record<string, any> = any>
 
     const columnWidth = this.viewport.colWidths[colIndex] ?? column.width ?? 0
     const availableWidth = Math.max(0, columnWidth - tokens.paddingH * 2)
-    if (TextMeasurer.measureWidth(text, cellPresentation.fontSize, cellPresentation.fontFamily) > availableWidth) {
+    const overflow = column.cellTextOverflow ?? this.cellTextOverflow
+    const measureText = TextMeasurer.measureWidth.bind(TextMeasurer)
+    const truncated = gridColumnWraps(column, this.autoRowHeight)
+      ? merge
+        ? layoutGridMergedCellText(cellPresentation, columnWidth, {
+          top: this.viewport.rowOffset(merge.startItemIndex) - this.viewport.scrollY,
+          bottom: this.viewport.rowOffset(merge.endItemIndex + 1) - this.viewport.scrollY,
+          viewportTop: 0,
+          viewportHeight: this.viewport.viewHeight,
+        }, tokens.paddingH, overflow, measureText).layout.truncated
+        : layoutGridCellText(cellPresentation, columnWidth, this.viewport.rowHeightAt(itemIndex),
+          tokens.paddingH, overflow, measureText).truncated
+      : measureText(text, cellPresentation.fontSize, cellPresentation.fontFamily) > availableWidth
+    if (truncated) {
       this.tooltip = editReason ? `${text}\n${editReason}` : text
     } else {
       this.tooltip = editReason
@@ -2050,12 +2167,9 @@ export class RenderDataGrid<T extends Record<string, any> = any>
         : undefined
 
     return resolveGridCellInteractionHit(position, {
-      rect: this.viewport.cellGlobalRect(
-        columns,
-        this.globalOffset,
-        itemIndex,
-        colIndex,
-      ),
+      rect: numberStepperWidth !== undefined
+        ? this.editingGeometry.cellEditorGlobalRect(item.dataRowIndex, colIndex)
+        : this.viewport.cellGlobalRect(columns, this.globalOffset, itemIndex, colIndex),
       row: item.row,
       rowId: item.rowId,
       interactionKey: numberStepperWidth === undefined
@@ -2236,11 +2350,13 @@ export class RenderDataGrid<T extends Record<string, any> = any>
   }
 
   detach(): void {
+    this.cancelPendingRowReveal()
     this.editing.endEdit()
     super.detach()
   }
 
   private cancelUserInteraction(): void {
+    this.cancelPendingRowReveal()
     this.editing.endEdit({ restoreFocus: false })
     this._filterPopupController.closeFilterPopup()
     this._columnMenuController.closeColumnMenu()
@@ -2285,6 +2401,7 @@ export class RenderDataGrid<T extends Record<string, any> = any>
   }
 
   dispose(): void {
+    this.cancelPendingRowReveal()
     this._gridDisposed = true
     if (this._focusRegistered) FocusManager.instance.unregister(this)
     this._focusRegistered = false

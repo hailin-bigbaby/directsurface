@@ -133,7 +133,9 @@ const grid = new RenderDataGrid<ItemRow>({
 | `footerHeight` | `number` | 有汇总时 `28`，否则 `0` | 页脚高度。显式设置后不再随 summary 自动切换。 |
 | `filterRowVisible` | `boolean` | `false` | 是否显示过滤行。 |
 | `filterRowHeight` | `number` | `28` | 过滤行高度。 |
-| `rowHeight` | `number` | viewport 默认值 | 数据行高度。 |
+| `rowHeight` | `number` | viewport 默认值 | 固定行高；自动行高模式下作为最小行高，分组标题仍使用该高度。 |
+| `autoRowHeight` | `boolean` | `false` | 默认让所有非 checkbox 列参与自动行高，可由列配置覆盖。 |
+| `maxRowHeight` | `number` | `Infinity` | 自动行高上限，实际值不小于 `rowHeight`。 |
 | `headerHeight` | `number` | viewport 默认值 | 表头高度。 |
 | `cellTextOverflow` | `'clip' \| 'ellipsis'` | `'ellipsis'` | 单元格文本溢出策略。 |
 | `validateCell` | `(args) => GridCellValidationResult` | `undefined` | 单元格提交时校验。返回 false、字符串或 `{ valid:false }` 会阻止提交。 |
@@ -175,6 +177,8 @@ const grid = new RenderDataGrid<ItemRow>({
 | `hidden` | `boolean` | `false` | 是否隐藏。隐藏列仍保留在 `columns` 中。 |
 | `widthMode` | `'fixed' \| 'interactive' \| 'stretch' \| 'autoContent'` | `'interactive'` | 列宽模式。`autoContent` 会测量内容，需注意性能。 |
 | `align` | `'left' \| 'center' \| 'right'` | 按列类型决定 | 单元格文本对齐。 |
+| `wrapText` | `boolean` | `false` | 单元格文本自动换行；单独开启时不改变行高。 |
+| `autoRowHeight` | `boolean` | 继承表格配置 | 当前列参与自动行高，隐含开启换行；设为 `false` 可退出全局自动行高。 |
 | `cellTextOverflow` | `'clip' \| 'ellipsis'` | 继承表格配置 | 当前列文本溢出策略。 |
 | `editable` | `boolean` | 继承表格配置 | 当前列是否可编辑。 |
 | `sortable` | `boolean` | `false` | 当前列是否可排序。表格的 `sortable` 是全局开关，列仍需显式设置 `sortable: true`。 |
@@ -530,7 +534,9 @@ const queryProcessor: GridLookupQueryProcessor<OrderOption, OrderRow> = context 
 | `groupBy` | `GridGroupDef<T>[]` | 当前分组配置。 |
 | `disabled` | `boolean` | 整体禁用状态。切换为 `true` 会取消编辑、拖拽、popup、hover 和焦点。 |
 | `readonly` | `boolean` | 只读状态。切换为 `true` 会取消当前编辑，但保留选择、复制和数据视图操作。 |
-| `rowHeight` | `number` | 行高。 |
+| `rowHeight` | `number` | 固定行高或自动行高的下限。 |
+| `autoRowHeight` | `boolean` | 全局自动行高开关。 |
+| `maxRowHeight` | `number` | 自动行高上限，不小于 `rowHeight`。 |
 | `headerHeight` | `number` | 表头高度。 |
 | `sortState` | `GridSortState` | 单列排序状态。 |
 | `sort` | `GridSortDescriptor[]` | 多列排序状态。 |
@@ -904,12 +910,40 @@ const columns: GridColumnDef<OrderRow>[] = [
 
 合并只改变画面，不修改任何源行。分组标题、不同分组路径和带有单元格校验错误的行会断开合并；基础编辑状态、Tab 停靠状态或不可编辑原因不同也会断开。合并区不能直接编辑，但 `setCellValue()` 仍可修改其中任一源行并触发重算。数据在组件外被原地修改时，调用 `refreshRow()` 或 `refreshData()`；比较函数或编辑策略依赖外部状态时也应这样刷新。
 
-点击合并区时，行选择及行回调仍对应指针下的真实源行；单元格焦点落在合并区锚点，范围选择包含整个合并区。复制保持逐行输出，覆盖格的值不会被清空；即使自定义规则合并了不同原始值，各行仍按原值格式化。按行粘贴会跳过开始粘贴时已合并或不可编辑的格。长合并区可跨越虚拟滚动视口，文字会在当前可见部分出现。锚点文字溢出且单元格有不可编辑原因时，悬浮提示会同时显示完整文字和原因；未溢出时只显示原因。
+点击合并区时，行选择及行回调仍对应指针下的真实源行；单元格焦点落在合并区锚点，范围选择包含整个合并区。复制保持逐行输出，覆盖格的值不会被清空；即使自定义规则合并了不同原始值，各行仍按原值格式化。按行粘贴会跳过开始粘贴时已合并或不可编辑的格。长合并区可跨越虚拟滚动视口。短文字保持在当前可见部分；开启换行后，超过视口高度的文字按完整合并区排版，可滚动阅读后续行。绘制与溢出提示使用相同的文本框尺寸：短文字因当前可见部分过小而被裁剪或省略时，悬浮提示提供完整文字；长文字仅因滚动暂时离开视口时，不视为内容溢出。锚点文字溢出且单元格有不可编辑原因时，悬浮提示会同时显示完整文字和原因；未溢出时只显示原因。
+
+## 自动行高与换行
+
+默认保持统一行高。可仅让长文本列参与自动测量：
+
+```ts
+const grid = new RenderDataGrid({
+  columns: [
+    { key: 'id', title: '编号', type: 'number', width: 80, pinned: 'left' },
+    { key: 'description', title: '说明', type: 'text', width: 240, autoRowHeight: true },
+  ],
+  rows,
+  rowKey: 'id',
+  rowHeight: 28,
+  maxRowHeight: 180,
+})
+```
+
+- `autoRowHeight` 可设在表格或列上。列配置优先，checkbox 列不参与测量；同一行取参与列所需高度的最大值。所有未隐藏的参与列都会测量，包括横向视口外的列和左右固定列，因此横向滚动不会改变行高。
+- `wrapText: true` 可单独开启固定行高内的换行。自动行高隐含换行，不受 `wrapText: false` 覆盖。文本支持显式换行，超过高度上限时按 `cellTextOverflow` 裁剪或省略。
+- 测量使用最终显示文本和字体，支持 `getCellDisplayText`、返回字符串的 custom 列及行/单元格字体覆盖。列宽、数据、主题和相关状态变化会重算。外部原地修改数据或显示回调依赖的外部状态后，调用 `refreshRow()` 或 `refreshData()`。
+- 分组标题保持 `rowHeight`。纵向合并区按锚点文本测量；若各行高度之和不足，将差额分配给合并区各行，每行仍受 `maxRowHeight` 限制。多列合并按显示列顺序处理，满足先前合并区的高度不会被缩减；可放入视口的短文字仍在当前可见部分显示；超过视口高度的多行文字使用完整合并区坐标，随滚动逐段显示，避免始终重复开头。
+- 编辑器保持现有单行输入行为。编辑期间保持该行进入编辑前的高度，提交成功或取消后按当前显示内容和列宽重算；验证失败时保持编辑状态和行高。当行高超过视口高度时，编辑内容、数字步进器和输入法位置随该行的可见部分定位。显示换行不代表编辑器支持多行输入。
+- 行高变化时尽量保留顶部行及行内位置；顶部行变矮时将行内偏移限制在该行范围内。配置 `rowKey` 时按稳定、唯一的行 id 识别记录；未配置时按行对象引用识别，因此插入或删除前方记录不会把行高缓存、滚动锚点或编辑高度关联到另一行。整体替换为新行对象并希望保留身份时，应配置 `rowKey`。排序和过滤保持既有的滚动到顶部行为。
+
+数据变更后立即调用 `selectCell(..., { scroll: true })`、`beginEdit()` 或键盘定位时，如果行尺寸尚未更新，框架会记录最后一次定位目标，在下一次布局完成测量后按行身份执行。该显式定位优先于滚动锚点保持；目标已被删除或过滤时不再执行。后发生的排序、过滤、有效滚轮输入、滚动条操作或选区自动滚动会取消先前排队的定位；这些操作之后发起的新定位仍然有效，避免旧请求覆盖用户的最新操作。
+
+自动行高首次布局及数据、列宽、字体等布局输入失效时会测量完整的显示投影，缓存文本测量结果。悬停、焦点和选择状态变化只重新测量状态受影响的行；若这些行涉及纵向合并，则从基础行高重新分配相连合并区的高度，避免收缩后残留旧高度。滚动帧复用行尺寸，只绘制可见行。这样可以获得确定的滚动范围和合并区高度，但首次测量成本随行数与参与列数增加。大量数据建议限制参与列并分页；当前不采用基于估算高度的渐进测量。
 
 ## 当前限制
 
 - 排序、过滤、分组和汇总均在客户端数据模型中执行。几十万行或远程数据源应由业务层提供分页、服务端查询和防抖，不应一次传入全部数据。
-- 虚拟化使用统一 `rowHeight`，当前不支持按行动态高度、横向合并或任意矩形手工合并。
+- 支持固定行高和基于显示文本的自动行高；当前不支持任意组件作为单元格内容、横向合并或任意矩形手工合并。
 - `GridColumnCustom` 主要用于自定义显示；需要完整自定义交互或层级行时，应分别使用显式 editor 或 [TreeGrid](./tree-grid.md)。
 - 只读状态面向交互约束；业务代码仍可通过 `setCellValue()`、替换 `rows` 等公开 API 主动更新数据。
 

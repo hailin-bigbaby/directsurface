@@ -180,7 +180,7 @@ interface ProjectRow {
 function dataPage(): RenderStackPanel {
   const rows: ProjectRow[] = [
     { id: 'p1', name: 'Canvas runtime', owner: 'Alex', status: 'Active', tasks: 24 },
-    { id: 'p2', name: 'Component library', owner: 'Morgan', status: 'Active', tasks: 42 },
+    { id: 'p2', name: 'Component library and shared interaction patterns for desktop workspaces', owner: 'Morgan', status: 'Active', tasks: 42 },
     { id: 'p3', name: 'Documentation', owner: 'Sam', status: 'Review', tasks: 18 },
     { id: 'p4', name: 'Example apps', owner: 'Jamie', status: 'Planned', tasks: 12 },
     { id: 'p5', name: 'Performance', owner: 'Taylor', status: 'Active', tasks: 31 },
@@ -188,7 +188,7 @@ function dataPage(): RenderStackPanel {
   const grid = new RenderDataGrid<ProjectRow>({
     rowKey: 'id',
     columns: [
-      { key: 'name', title: 'Project', type: 'text', width: 220, sortable: true },
+      { key: 'name', title: 'Project', type: 'text', width: 220, sortable: true, autoRowHeight: true },
       { key: 'owner', title: 'Owner', type: 'text', width: 130, sortable: true },
       { key: 'status', title: 'Status', type: 'text', width: 130, sortable: true },
       { key: 'tasks', title: 'Tasks', type: 'number', width: 90, align: 'right', sortable: true },
@@ -197,6 +197,7 @@ function dataPage(): RenderStackPanel {
     selectionMode: 'row',
     sortable: true,
     height: 280,
+    maxRowHeight: 120,
   })
   const chart = new RenderLineChart({
     series: [{ name: 'Completed tasks', data: [
@@ -213,7 +214,7 @@ function dataPage(): RenderStackPanel {
     new RenderParagraph('Select a row, click a column header to sort, and hover the chart to inspect values. All data on this page is sample data.'),
     new RenderCard({
       title: 'Projects',
-      description: 'A compact sortable data grid.',
+      description: 'Automatic row height: resize the Project column to change text wrapping.',
       child: grid,
     }),
     new RenderCard({

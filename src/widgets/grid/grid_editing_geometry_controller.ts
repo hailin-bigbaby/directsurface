@@ -127,8 +127,15 @@ export class GridEditingGeometryController<T extends Record<string, any> = any> 
     return this._viewport.cellGlobalRect(this._getColumns(), this._getGlobalOffset(), itemIndex, colIndex)
   }
 
-  cellVisibleGlobalRect(rowIndex: number, colIndex: number): { x: number; y: number; w: number; h: number } {
+  cellEditorGlobalRect(rowIndex: number, colIndex: number): { x: number; y: number; w: number; h: number } {
     const rect = this.cellGlobalRect(rowIndex, colIndex)
+    const bounds = this._viewport.editorRowBounds(rect.y, rect.h,
+      this._getGlobalOffset().y + this._viewport.headerSectionHeight)
+    return { ...rect, ...bounds }
+  }
+
+  cellVisibleGlobalRect(rowIndex: number, colIndex: number): { x: number; y: number; w: number; h: number } {
+    const rect = this.cellEditorGlobalRect(rowIndex, colIndex)
     const visibleRect = this._viewport.visibleCellRect(
       this._getColumns(),
       this._getGlobalOffset().x,
@@ -137,10 +144,10 @@ export class GridEditingGeometryController<T extends Record<string, any> = any> 
     return { ...rect, x: visibleRect.x, w: visibleRect.w }
   }
 
-  syncEditingViewportState(): void {
+  syncEditingViewportState(cancelStepper = true): void {
     const edit = this._editing.state
     if (!edit) return
-    this._editing.cancelNumberStepperPress(true)
+    if (cancelStepper) this._editing.cancelNumberStepperPress(true)
     if (this._isPopupEditColumn(edit.col) && !this._isEditCellVisible(edit.row, edit.col)) {
       this._editing.endEdit()
       return

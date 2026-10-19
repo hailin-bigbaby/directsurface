@@ -72,6 +72,8 @@ export interface GridControllerBundleOptions<T extends Record<string, any>> {
   onResizeColumn?: (colIndex: number, width: number) => void
   onAutoFitColumn?: (colIndex: number) => void
   isInGroupToggleHitBox: (item: GridGroupItem<T>, position: Offset) => boolean
+  onRevealItem?: (itemIndex: number, colIndex?: number) => void
+  onCancelPendingReveal?: () => void
   createEmbeddedGrid: () => GridEmbeddedPopupGrid
 }
 
@@ -108,12 +110,14 @@ export function createGridControllerBundle<T extends Record<string, any>>(
   const markNeedsPaint = () => options.owner.markNeedsPaint()
   const syncEditingViewportState = () => editingGeometry.syncEditingViewportState()
   const scrollToItem = (itemIndex: number) => {
+    options.onRevealItem?.(itemIndex)
     options.viewport.scrollToRow(options.dataModel.visibleItemCount(), itemIndex)
     syncEditingViewportState()
   }
   const revealCell = (rowIndex: number, colIndex: number) => {
     const itemIndex = options.dataModel.visibleItemIndexForVisibleRow(rowIndex)
     if (itemIndex < 0) return
+    options.onRevealItem?.(itemIndex, colIndex)
     options.viewport.scrollToRow(options.dataModel.visibleItemCount(), itemIndex)
     options.viewport.scrollToColumn(options.getColumns(), colIndex)
     syncEditingViewportState()
@@ -148,7 +152,7 @@ export function createGridControllerBundle<T extends Record<string, any>>(
     getVisibleRowIndexForRowId: rowId => options.dataModel.visibleRowIndexForRowId(rowId),
     getEditTextMetrics: (row, col) => editingGeometry.editTextMetrics(row, col),
     measureText: (text, fontSize, fontFamily) => TextMeasurer.measureWidth(text, fontSize, fontFamily),
-    getCellGlobalRect: (row, col) => editingGeometry.cellGlobalRect(row, col),
+    getCellGlobalRect: (row, col) => editingGeometry.cellEditorGlobalRect(row, col),
     getCellEditRect: (row, col) => editingGeometry.cellVisibleGlobalRect(row, col),
     onMarkNeedsPaint: markNeedsPaint,
     onRevealCell: revealCell,
@@ -164,7 +168,7 @@ export function createGridControllerBundle<T extends Record<string, any>>(
     structureEditing,
     editable: options.editable,
     getColumns: options.getColumns,
-    getPageStep: () => Math.max(1, Math.floor(options.viewport.viewHeight / Math.max(1, options.viewport.rowHeight)) - 1),
+    getPageStep: (index, direction) => options.viewport.pageStep(index, direction, options.dataModel.visibleItemCount()),
     onMarkNeedsPaint: markNeedsPaint,
     onScrollToItem: scrollToItem,
     onRevealCell: revealCell,
@@ -202,9 +206,14 @@ export function createGridControllerBundle<T extends Record<string, any>>(
     onMarkNeedsPaint: markNeedsPaint,
     onMarkNeedsLayout: () => options.owner.markNeedsLayout(),
   })
-  options.dataModel.onVisibleRowsInvalidated = reason => stateController.handleVisibleRowsInvalidated(reason)
+  options.dataModel.onVisibleRowsInvalidated = reason => {
+    // Reset intent precedes notifications, so a new reveal requested by a listener wins.
+    if (reason === 'sort' || reason === 'filter') options.onCancelPendingReveal?.()
+    stateController.handleVisibleRowsInvalidated(reason)
+  }
 
   const pointer = new GridPointerController<T>({
+    onUserScroll: options.onCancelPendingReveal,
     focusableOwner: options.owner,
     dataModel: options.dataModel,
     viewport: options.viewport,

@@ -60,4 +60,8 @@ const grid = new RenderDataGrid<ProductRow>({
 })
 ```
 
+Set `autoRowHeight: true` on a text column to wrap its display text and measure each row from its content. `rowHeight` supplies the minimum and `maxRowHeight` limits growth; `wrapText: true` alone wraps inside a fixed row height. See [automatic row height](components/data/data-grid.md#自动行高与换行) for merged cells, editing and scroll behavior.
+
+The first layout measures the display projection to establish exact scroll extents; only visible rows are painted. Data, width and font changes remeasure the projection, while hover, focus and selection changes remeasure affected rows and update connected merged spans. For large datasets, limit participating columns and use paging. Without `rowKey`, row objects provide identity; configure stable keys when replacing those objects.
+
 The grid has more selection, sorting, filtering, and editing options. Use TypeScript completion on `DataGridOptions` and `GridColumnDef` for the full contracts. See the [component catalog](components.md) for related table and tree controls.

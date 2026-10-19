@@ -51,6 +51,7 @@ import {
 } from './grid_display_resolver'
 import type { GridLookupValueResolver } from './lookup_value_index'
 import type { GridRowMergeModel, GridRowMergeRun } from './grid_row_merge_model'
+import { gridColumnWraps, layoutGridCellText, layoutGridMergedCellText } from './grid_cell_text_layout'
 
 export interface GridPainterSnapshot<T extends Record<string, any>> {
   theme: ResolvedTheme
@@ -77,6 +78,8 @@ export interface GridPainterSnapshot<T extends Record<string, any>> {
   stateMessage: string
   summaryCells: GridSummaryCellDebugState[]
   footerHeight: number
+  textMeasurementRevision?: number
+  autoRowHeight?: boolean
   cellTextOverflow: GridCellTextOverflow
   editableState: GridEditingController<T>['state']
   editInput: GridEditingController<T>['input']
@@ -382,7 +385,8 @@ export class GridPainter<T extends Record<string, any> = any> {
 
     for (let itemIndex = virtualRange.startIndex; itemIndex <= virtualRange.endIndex; itemIndex++) {
       const item = snapshot.visibleItems[itemIndex]!
-      const rowY = bodyY + itemIndex * viewport.rowHeight - viewport.scrollY
+      const rowHeight = viewport.rowHeightAt(itemIndex)
+      const rowY = bodyY + viewport.rowOffset(itemIndex) - viewport.scrollY
       if (item.kind === 'group') {
         this.paintGroupRow(dl, x, viewWidth, rowY, itemIndex, item, snapshot)
         continue
@@ -405,7 +409,7 @@ export class GridPainter<T extends Record<string, any> = any> {
         resolveRowStyle: snapshot.resolveRowStyle,
       })
       if (rowPresentation.backgroundColor) {
-        dl.fillRect(x, rowY, viewWidth, viewport.rowHeight, rowPresentation.backgroundColor, 0)
+        dl.fillRect(x, rowY, viewWidth, rowHeight, rowPresentation.backgroundColor, 0)
       }
 
       if (rowPresentation.borderColor) {
@@ -413,7 +417,7 @@ export class GridPainter<T extends Record<string, any> = any> {
           x + 1,
           rowY + 1,
           viewWidth - 2,
-          viewport.rowHeight - 2,
+          rowHeight - 2,
           rowPresentation.borderColor,
           1,
           0,
@@ -453,22 +457,23 @@ export class GridPainter<T extends Record<string, any> = any> {
         })
         const clipX = visibleCell.x
         const clipW = visibleCell.w
-        dl.strokeRect(clipX, rowY, clipW, viewport.rowHeight, tokens.separator, 0.5, 0)
-        dl.pushClip(clipX + 1, rowY, Math.max(0, clipW - 2), viewport.rowHeight)
+        dl.strokeRect(clipX, rowY, clipW, rowHeight, tokens.separator, 0.5, 0)
+        dl.pushClip(clipX + 1, rowY, Math.max(0, clipW - 2), rowHeight)
         if (isCellSelected && !isEditing) {
-          dl.fillRect(columnX + 1, rowY + 1, columnWidth - 2, viewport.rowHeight - 2, tokens.selectionBg, 0)
+          dl.fillRect(columnX + 1, rowY + 1, columnWidth - 2, rowHeight - 2, tokens.selectionBg, 0)
         }
         if (isEditing) {
-          this.paintEditCell(context, dl, column, columnX, rowY, columnWidth, snapshot, cellPresentation)
+          const editorBounds = viewport.editorRowBounds(rowY, rowHeight, bodyY)
+          this.paintEditCell(context, dl, column, columnX, editorBounds.y, columnWidth, editorBounds.h, snapshot, cellPresentation)
         } else {
-          this.paintReadCell(dl, column, columnX, rowY, columnWidth, snapshot, cellPresentation)
+          this.paintReadCell(dl, column, columnX, rowY, columnWidth, rowHeight, snapshot, cellPresentation)
         }
         if (editPolicy?.state === 'disabled') {
           dl.fillRect(
             columnX + 1,
             rowY + 1,
             columnWidth - 2,
-            viewport.rowHeight - 2,
+            rowHeight - 2,
             tokens.disabledOverlay,
             0,
           )
@@ -481,7 +486,7 @@ export class GridPainter<T extends Record<string, any> = any> {
             borderX,
             rowY + 1,
             borderW,
-            viewport.rowHeight - 2,
+            rowHeight - 2,
             cellPresentation.borderColor,
             isEditing ? 1.5 : 1,
             0,
@@ -492,7 +497,7 @@ export class GridPainter<T extends Record<string, any> = any> {
             borderX,
             rowY + 1,
             borderW,
-            viewport.rowHeight - 2,
+            rowHeight - 2,
             tokens.focusedRowBorder,
             1.5,
             0,
@@ -503,7 +508,7 @@ export class GridPainter<T extends Record<string, any> = any> {
             borderX,
             rowY + 1,
             borderW,
-            viewport.rowHeight - 2,
+            rowHeight - 2,
             tokens.cellErrorBorder,
             1.5,
             0,
@@ -511,7 +516,7 @@ export class GridPainter<T extends Record<string, any> = any> {
         }
       }
 
-      dl.line(x, rowY + viewport.rowHeight, x + viewWidth, rowY + viewport.rowHeight, tokens.rowSeparator, 0.5)
+      dl.line(x, rowY + rowHeight, x + viewWidth, rowY + rowHeight, tokens.rowSeparator, 0.5)
     }
     this.paintMergedCells(dl, x, bodyY, virtualRange.startIndex, virtualRange.endIndex, snapshot)
   }
@@ -538,8 +543,8 @@ export class GridPainter<T extends Record<string, any> = any> {
       for (const run of snapshot.rowMerges.intersecting(first, last, column.key)) {
         const item = snapshot.visibleItems[run.startItemIndex]
         if (!item || item.kind !== 'data') continue
-        const startY = bodyY + run.startItemIndex * viewport.rowHeight - viewport.scrollY
-        const endY = bodyY + (run.endItemIndex + 1) * viewport.rowHeight - viewport.scrollY
+        const startY = bodyY + viewport.rowOffset(run.startItemIndex) - viewport.scrollY
+        const endY = bodyY + viewport.rowOffset(run.endItemIndex + 1) - viewport.scrollY
         const top = Math.max(bodyY, startY)
         const bottom = Math.min(bodyBottom, endY)
         if (bottom <= top) continue
@@ -574,14 +579,13 @@ export class GridPainter<T extends Record<string, any> = any> {
           dl.strokeRect(boxX, boxY, boxSize, boxSize, tokens.checkboxBorder, 1, tokens.frameRounding)
           if (cellPresentation.args.value) dl.drawCheckmark(boxX, boxY, boxSize, tokens.checkMark, 2)
         } else {
-          const align = cellPresentation.align
-          const textX = align === 'center' ? columnX + columnWidth / 2
-            : align === 'right' ? columnX + columnWidth - tokens.paddingH : columnX + tokens.paddingH
-          const paintText = this.resolvePaintText(cellPresentation.displayText,
-            this.resolveCellTextOverflow(column, snapshot), Math.max(0, columnWidth - tokens.paddingH * 2),
-            cellPresentation.fontSize, cellPresentation.fontFamily, snapshot)
-          dl.fillText(paintText, textX, centerY, cellPresentation.textColor,
-            cellPresentation.fontSize, cellPresentation.fontFamily, align, 'middle')
+          const textBox = gridColumnWraps(column, snapshot.autoRowHeight ?? false)
+            ? layoutGridMergedCellText(cellPresentation, columnWidth, {
+              top: startY, bottom: endY, viewportTop: bodyY, viewportHeight: viewport.viewHeight,
+            }, tokens.paddingH, this.resolveCellTextOverflow(column, snapshot), snapshot.measureText)
+            : { y: top, height: bottom - top, layout: undefined }
+          this.paintReadCell(dl, column, columnX, textBox.y, columnWidth, textBox.height,
+            snapshot, cellPresentation, false, textBox.layout)
         }
         if (snapshot.getCellEditPolicy?.(run.anchorDataRowIndex, colIndex).state === 'disabled') {
           dl.fillRect(columnX + 1, top, columnWidth - 2, bottom - top, tokens.disabledOverlay, 0)
@@ -668,15 +672,15 @@ export class GridPainter<T extends Record<string, any> = any> {
     const isHovered = snapshot.hoveredItemIndex === itemIndex
     const isFocused = snapshot.focusedItemIndex === itemIndex && !snapshot.editableState
     const state = isFocused ? 'focused' : isHovered ? 'hovered' : 'normal'
-    dl.fillRect(x, rowY, viewWidth, viewport.rowHeight, resolveBgColor(tokens.groupRowBgState, state), 0)
-    dl.strokeRect(x, rowY, viewWidth, viewport.rowHeight, tokens.separator, 0.5, 0)
+    dl.fillRect(x, rowY, viewWidth, viewport.rowHeightAt(itemIndex), resolveBgColor(tokens.groupRowBgState, state), 0)
+    dl.strokeRect(x, rowY, viewWidth, viewport.rowHeightAt(itemIndex), tokens.separator, 0.5, 0)
 
     if (isFocused) {
       dl.strokeRect(
         x + 1,
         rowY + 1,
         viewWidth - 2,
-        viewport.rowHeight - 2,
+        viewport.rowHeightAt(itemIndex) - 2,
         resolveBgColor(tokens.groupRowBorderState, 'focused'),
         1,
         0,
@@ -700,20 +704,20 @@ export class GridPainter<T extends Record<string, any> = any> {
     }) ?? defaultDisplayText
     const metrics = this.groupRowMetrics(x, item.depth, tokens)
 
-    if (item.expanded) this.drawDisclosureArrow(dl, metrics.arrowCenterX, rowY + viewport.rowHeight / 2, 'down', resolveTextColor(tokens.groupArrowText, state))
-    else this.drawDisclosureArrow(dl, metrics.arrowCenterX, rowY + viewport.rowHeight / 2, 'right', resolveTextColor(tokens.groupArrowText, state))
+    if (item.expanded) this.drawDisclosureArrow(dl, metrics.arrowCenterX, rowY + viewport.rowHeightAt(itemIndex) / 2, 'down', resolveTextColor(tokens.groupArrowText, state))
+    else this.drawDisclosureArrow(dl, metrics.arrowCenterX, rowY + viewport.rowHeightAt(itemIndex) / 2, 'right', resolveTextColor(tokens.groupArrowText, state))
 
     const labelMaxWidth = Math.max(0, x + viewWidth - metrics.labelX - tokens.paddingH)
     paintSingleLineText(dl, {
       text: label,
       x: metrics.labelX,
-      y: rowY + viewport.rowHeight / 2,
+      y: rowY + viewport.rowHeightAt(itemIndex) / 2,
       maxWidth: labelMaxWidth,
       color: resolveTextColor(tokens.groupRowTextState, state),
       fontSize: tokens.fontSize,
       fontFamily: tokens.fontFamily,
     })
-    dl.line(x, rowY + viewport.rowHeight, x + viewWidth, rowY + viewport.rowHeight, tokens.rowSeparator, 0.5)
+    dl.line(x, rowY + viewport.rowHeightAt(itemIndex), x + viewWidth, rowY + viewport.rowHeightAt(itemIndex), tokens.rowSeparator, 0.5)
   }
 
   private paintReadCell(
@@ -722,8 +726,11 @@ export class GridPainter<T extends Record<string, any> = any> {
     columnX: number,
     rowY: number,
     columnWidth: number,
+    rowHeight: number,
     snapshot: GridPainterSnapshot<T>,
     presentation: GridResolvedCellPresentation<T>,
+    paintBackground = true,
+    textLayout?: ReturnType<typeof layoutGridCellText>,
   ): void {
     const value = presentation.args.value
     const tokens = snapshot.gridTokens
@@ -731,20 +738,29 @@ export class GridPainter<T extends Record<string, any> = any> {
     let textX = columnX + tokens.paddingH
     if (align === 'center') textX = columnX + columnWidth / 2
     else if (align === 'right') textX = columnX + columnWidth - tokens.paddingH
-    if (presentation.backgroundColor) {
-      dl.fillRect(columnX + 1, rowY + 1, columnWidth - 2, snapshot.viewport.rowHeight - 2, presentation.backgroundColor, 0)
+    if (paintBackground && presentation.backgroundColor) {
+      dl.fillRect(columnX + 1, rowY + 1, columnWidth - 2, rowHeight - 2, presentation.backgroundColor, 0)
     }
 
     if (column.type === 'checkbox') {
       const boxSize = tokens.fontSize
       const boxX = columnX + (columnWidth - boxSize) / 2
-      const boxY = rowY + (snapshot.viewport.rowHeight - boxSize) / 2
+      const boxY = rowY + (rowHeight - boxSize) / 2
       dl.fillRect(boxX, boxY, boxSize, boxSize, tokens.checkboxBg, tokens.frameRounding)
       dl.strokeRect(boxX, boxY, boxSize, boxSize, tokens.checkboxBorder, 1, tokens.frameRounding)
       if (value) dl.drawCheckmark(boxX, boxY, boxSize, tokens.checkMark, 2)
       return
     }
 
+    if (gridColumnWraps(column, snapshot.autoRowHeight ?? false)) {
+      const layout = textLayout ?? layoutGridCellText(presentation, columnWidth, rowHeight, tokens.paddingH,
+        this.resolveCellTextOverflow(column, snapshot), snapshot.measureText)
+      for (const line of layout.paintLines) {
+        dl.fillText(line.text, columnX + tokens.paddingH + line.x, rowY + 4 + line.y,
+          presentation.textColor, layout.paintFontSize, presentation.fontFamily, align, 'middle')
+      }
+      return
+    }
     const paintText = this.resolvePaintText(
       presentation.displayText,
       this.resolveCellTextOverflow(column, snapshot),
@@ -756,7 +772,7 @@ export class GridPainter<T extends Record<string, any> = any> {
     dl.fillText(
       paintText,
       textX,
-      rowY + snapshot.viewport.rowHeight / 2,
+      rowY + rowHeight / 2,
       presentation.textColor,
       presentation.fontSize,
       presentation.fontFamily,
@@ -772,6 +788,7 @@ export class GridPainter<T extends Record<string, any> = any> {
     columnX: number,
     rowY: number,
     columnWidth: number,
+    rowHeight: number,
     snapshot: GridPainterSnapshot<T>,
     presentation: GridResolvedCellPresentation<T>,
   ): void {
@@ -786,7 +803,7 @@ export class GridPainter<T extends Record<string, any> = any> {
         columnX + 1,
         rowY + 1,
         columnWidth - 2,
-        snapshot.viewport.rowHeight - 2,
+        rowHeight - 2,
         presentation.backgroundColor,
         0,
       )
@@ -817,7 +834,7 @@ export class GridPainter<T extends Record<string, any> = any> {
           columnX + 1,
           rowY + 1,
           Math.max(0, columnWidth - stepperWidth - 2),
-          snapshot.viewport.rowHeight - 2,
+          rowHeight - 2,
         )
       }
       paintSingleLineEditableText({
@@ -828,9 +845,9 @@ export class GridPainter<T extends Record<string, any> = any> {
         fontSize: presentation.fontSize,
         fontFamily: presentation.fontFamily,
         textX,
-        textY: rowY + snapshot.viewport.rowHeight / 2,
-        lineTop: rowY + 4,
-        lineBottom: rowY + snapshot.viewport.rowHeight - 4,
+        textY: rowY + rowHeight / 2,
+        lineTop: rowY + Math.max(4, (rowHeight - presentation.fontSize * 1.4) / 2),
+        lineBottom: rowY + rowHeight - Math.max(4, (rowHeight - presentation.fontSize * 1.4) / 2),
         textColor: presentation.textColor,
         selectionBg: tokens.selectionBg,
         caretColor: presentation.textColor,
@@ -844,7 +861,7 @@ export class GridPainter<T extends Record<string, any> = any> {
             x: columnX + columnWidth - stepperWidth,
             y: rowY,
             w: stepperWidth,
-            h: snapshot.viewport.rowHeight,
+            h: rowHeight,
           },
           tokens: tokens.numberStepper,
           hovered: edit.numberStepperHovered,
@@ -869,7 +886,7 @@ export class GridPainter<T extends Record<string, any> = any> {
     dl.fillText(
       paintText,
       textX,
-      rowY + snapshot.viewport.rowHeight / 2,
+      rowY + rowHeight / 2,
       presentation.textColor,
       presentation.fontSize,
       presentation.fontFamily,
@@ -881,7 +898,7 @@ export class GridPainter<T extends Record<string, any> = any> {
     paintIconGlyph(context, {
       name: 'chevron-down',
       x: arrowX - iconSize / 2,
-      y: rowY + (snapshot.viewport.rowHeight - iconSize) / 2,
+      y: rowY + (rowHeight - iconSize) / 2,
       size: iconSize,
       color: resolveTextColor(tokens.dropdownArrowText, 'normal'),
     })

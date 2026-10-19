@@ -47,3 +47,8 @@ Solid and dashed horizontal/vertical lines use the scale perpendicular to the st
 `DrawList.strokeSegments(segments, color, lineWidth)` accepts `{ x1, y1, x2, y2 }` records (`DrawLineSegment`) and strokes independent subpaths in one Canvas operation using the current transform. Empty batches and invalid line widths do not draw; segments with non-finite coordinates are skipped without connecting neighboring paths.
 
 A batch follows native Canvas single-path rasterization, which can differ slightly from repeated strokes at fractional scales even for separate segments. Overlapping segment coverage is composited as one stroke. For translucent lines that must accumulate opacity at intersections, keep separate `line()` calls instead. Existing individual line APIs are unchanged.
+
+
+## Stable sizing and automatic row height
+
+Default controls, tabs and fixed-height data rows retain their height when interaction colors change. DataGrid columns that explicitly enable `autoRowHeight` follow their content, column width and font metrics, while preserving the scroll anchor. Color-only hover and selection styles do not change row height. See [DataGrid automatic row height](components/data/data-grid.md#自动行高与换行) for the sizing contract.

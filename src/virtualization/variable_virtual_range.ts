@@ -211,6 +211,9 @@ export class VariableVirtualizer<K> {
       nextOffset = itemStart - (opts.viewportSize - itemSize) / 2
     } else if (align === 'end') {
       nextOffset = itemEnd - opts.viewportSize
+    } else if (itemSize > opts.viewportSize) {
+      if (itemEnd <= currentOffset) nextOffset = itemEnd - opts.viewportSize
+      else if (itemStart >= viewportEnd) nextOffset = itemStart
     } else if (itemStart < currentOffset) {
       nextOffset = itemStart
     } else if (itemEnd > viewportEnd) {

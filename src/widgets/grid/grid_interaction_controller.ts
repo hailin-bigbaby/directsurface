@@ -22,7 +22,7 @@ export interface GridInteractionControllerOptions<T extends Record<string, any>>
   structureEditing: GridStructureEditController<T>
   editable: () => boolean
   getColumns: () => GridColumnDef<T>[]
-  getPageStep: () => number
+  getPageStep: (index: number, direction: number) => number
   onMarkNeedsPaint: () => void
   onScrollToItem: (itemIndex: number) => void
   onRevealCell: (rowIndex: number, colIndex: number) => void
@@ -770,10 +770,10 @@ export class GridInteractionController<T extends Record<string, any> = any> {
       event.preventDefault()
       if (visibleItems.length === 0) return true
       const direction = event.key === 'PageUp' ? -1 : 1
-      const pageStep = Math.max(1, Math.floor(this._getPageStep()))
       const base = this.focusedItemIndex < 0
         ? direction > 0 ? 0 : visibleItems.length - 1
         : this.focusedItemIndex
+      const pageStep = Math.max(1, Math.floor(this._getPageStep(base, direction)))
       const nextItemIndex = Math.max(0, Math.min(visibleItems.length - 1, base + direction * pageStep))
       this._moveFocusToItemIndex(nextItemIndex, {
         shiftKey: event.shiftKey,

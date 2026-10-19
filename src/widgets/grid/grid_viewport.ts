@@ -13,6 +13,7 @@ import {
   type ScrollbarStyleTokens,
 } from '../../theme/component_styles'
 import { calcFixedVirtualRange, scrollToFixedIndex } from '../../virtualization/fixed_virtual_range'
+import { VariableVirtualizer } from '../../virtualization/variable_virtual_range'
 import { ScrollController } from '../../virtualization/scroll_controller'
 import { ImGuiDarkTheme } from '../../theme/default_theme'
 import { clampRectToPopupViewport, type PopupViewport } from '../../core/popup_manager'
@@ -51,6 +52,7 @@ export class GridViewport<T extends Record<string, any> = any> {
   dragColStartX = 0
   dropTargetCol = -1
 
+  private _variableRows?: VariableVirtualizer<unknown>
   private readonly _scroll = new ScrollController()
   private _colWidths: number[] = []
   private _size = { width: 600, height: 400 }
@@ -203,8 +205,74 @@ export class GridViewport<T extends Record<string, any> = any> {
     this._colWidths = this.applyStretchColumnWidths(columns, nextWidths, stretchColumns, totalWidth)
   }
 
+  /** All body geometry, including group rows, uses display-item indices. */
+  rowHeightAt(index: number): number {
+    return this._variableRows?.getSize(index) ?? this.rowHeight
+  }
+
+  rowOffset(index: number): number {
+    return this._variableRows?.prefixIndex.offsetOf(index) ?? index * this.rowHeight
+  }
+
+  rowIndexAtOffset(offset: number, count: number): number {
+    if (offset < 0 || offset >= this.totalContentHeight(count)) return -1
+    return this._variableRows?.prefixIndex.findIndexAtOffset(offset) ?? Math.floor(offset / this.rowHeight)
+  }
+
+  setRowSizes(keys: readonly unknown[], heights: readonly number[]): void {
+    const rows = this._variableRows ?? new VariableVirtualizer<unknown>({ estimatedItemSize: this.rowHeight })
+    const fixedIndex = Math.floor(this.scrollY / this.rowHeight)
+    const anchor = this.scrollY <= 0 ? null : this._variableRows ? rows.captureAnchor(this.scrollY)
+      : keys[fixedIndex] === undefined ? null
+      : { key: keys[fixedIndex], index: fixedIndex, offsetWithinItem: this.scrollY - fixedIndex * this.rowHeight }
+    if (keys.length !== rows.keys.length || keys.some((key, i) => key !== rows.keys[i])) {
+      const retained = new Set(keys)
+      for (const key of rows.keys) if (!retained.has(key)) rows.sizeCache.invalidateKey(key)
+      rows.syncItems(keys)
+    }
+    for (let i = 0; i < heights.length; i++) rows.setMeasuredSizeAt(i, heights[i]!)
+    this._variableRows = rows
+    this._lastVisibleRowCount = keys.length
+    if (anchor) {
+      const index = rows.sizeCache.getIndex(anchor.key) ?? Math.min(anchor.index, keys.length - 1)
+      anchor.offsetWithinItem = Math.min(anchor.offsetWithinItem, Math.max(0, rows.getSize(index) - 1))
+    }
+    this.setScrollY(keys.length, anchor ? rows.preserveAnchor(anchor, this.viewHeight) : this.scrollY)
+  }
+
+  updateRowSizes(updates: ReadonlyMap<number, number>): void {
+    const rows = this._variableRows
+    if (!rows) return
+    const anchor = this.scrollY > 0 ? rows.captureAnchor(this.scrollY) : null
+    let changed = false
+    for (const [index, height] of updates) {
+      if (rows.setMeasuredSizeAt(index, height)) changed = true
+    }
+    if (!changed) return
+    if (anchor) {
+      const index = rows.sizeCache.getIndex(anchor.key) ?? anchor.index
+      anchor.offsetWithinItem = Math.min(anchor.offsetWithinItem, Math.max(0, rows.getSize(index) - 1))
+    }
+    this.setScrollY(rows.itemCount, anchor ? rows.preserveAnchor(anchor, this.viewHeight) : this.scrollY)
+  }
+
+  clearRowSizes(): void {
+    if (!this._variableRows) return
+    const anchor = this._variableRows.captureAnchor(this.scrollY)
+    this._variableRows = undefined
+    if (anchor) this.setScrollY(this._lastVisibleRowCount,
+      anchor.index * this.rowHeight + Math.min(anchor.offsetWithinItem, Math.max(0, this.rowHeight - 1)))
+  }
+
+  pageStep(index: number, direction: number, count: number): number {
+    if (!this._variableRows) return Math.max(1, Math.floor(this.viewHeight / this.rowHeight) - 1)
+    const offset = Math.max(0, Math.min(this.totalContentHeight(count) - 1,
+      this.rowOffset(index) + direction * Math.max(1, this.viewHeight - this.rowHeightAt(index))))
+    return Math.max(1, Math.abs(this.rowIndexAtOffset(offset, count) - index))
+  }
+
   totalContentHeight(visibleRowCount: number): number {
-    return visibleRowCount * this.rowHeight
+    return this._variableRows?.totalSize ?? visibleRowCount * this.rowHeight
   }
 
   totalContentWidth(): number {
@@ -349,10 +417,17 @@ export class GridViewport<T extends Record<string, any> = any> {
   ): { x: number; y: number; w: number; h: number } {
     return {
       x: this.cellX(columns, globalOffset.x, colIndex),
-      y: globalOffset.y + this.headerSectionHeight + rowIndex * this.rowHeight - this.scrollY,
+      y: globalOffset.y + this.headerSectionHeight + this.rowOffset(rowIndex) - this.scrollY,
       w: this._colWidths[colIndex] ?? 0,
-      h: this.rowHeight,
+      h: this.rowHeightAt(rowIndex),
     }
+  }
+
+  editorRowBounds(y: number, height: number, bodyY: number): { y: number; h: number } {
+    if (height <= this.viewHeight) return { y, h: height }
+    const top = Math.max(bodyY, y)
+    const bottom = Math.min(bodyY + this.viewHeight, y + height)
+    return { y: top, h: Math.max(0, bottom - top) }
   }
 
   setScrollX(columns: GridColumnDef<T>[], scrollX: number): void {
@@ -386,7 +461,7 @@ export class GridViewport<T extends Record<string, any> = any> {
     const bodyY = globalOffset.y + this.headerSectionHeight
     if (globalY < bodyY || globalY >= bodyY + this.viewHeight) return -1
     const relativeY = globalY - bodyY + this.scrollY
-    const rowIndex = Math.floor(relativeY / this.rowHeight)
+    const rowIndex = this.rowIndexAtOffset(relativeY, visibleRowCount)
     return rowIndex < visibleRowCount ? rowIndex : -1
   }
 
@@ -615,7 +690,9 @@ export class GridViewport<T extends Record<string, any> = any> {
     this._lastVisibleRowCount = visibleRowCount
     this.setScrollY(
       visibleRowCount,
-      scrollToFixedIndex({
+      this._variableRows ? this._variableRows.scrollToIndex({
+        index: rowIndex, viewportSize: this.viewHeight, currentOffset: this.scrollY, align: 'nearest',
+      }) : scrollToFixedIndex({
         itemCount: visibleRowCount,
         itemSize: this.rowHeight,
         viewportSize: this.viewHeight,
@@ -688,6 +765,9 @@ export class GridViewport<T extends Record<string, any> = any> {
 
   visibleVirtualRange(visibleRowCount: number) {
     this._lastVisibleRowCount = visibleRowCount
+    if (this._variableRows) return this._variableRows.calcRange({
+      viewportSize: this.viewHeight, scrollOffset: this.scrollY, overscan: 1,
+    })
     return calcFixedVirtualRange({
       itemCount: visibleRowCount,
       itemSize: this.rowHeight,

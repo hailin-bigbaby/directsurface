@@ -126,7 +126,7 @@ export class GridEditingController<T extends Record<string, any> = any> {
       if (!this._edit) return { x: 0, y: 0 }
       const rect = this._getCellGlobalRect(this._edit.row, this._edit.col)
       const metrics = this._getEditTextMetrics(this._edit.row, this._edit.col)
-      return { x: this.activeTextOriginX(), y: rect.y + metrics.paddingH }
+      return { x: this.activeTextOriginX(), y: rect.y + Math.max(metrics.paddingH, (rect.h - metrics.fontSize * 1.4) / 2) }
     },
   })
   readonly session = new TextEditSession({
