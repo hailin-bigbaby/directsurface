@@ -329,7 +329,7 @@ export {
 } from './layout/render_command_scope'
 
 export { PaintContext } from './rendering/paint_context'
-export { DrawList, type DrawListStats } from './rendering/draw_list'
+export { DrawList, type DrawListStats, type DrawLineSegment } from './rendering/draw_list'
 
 
 

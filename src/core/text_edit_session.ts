@@ -36,8 +36,8 @@ export interface TextEditSessionStartOptions {
     syncComposer?: boolean
   }
   focusComposer?: boolean
-  readOnly?: boolean
   syncComposerOnStart?: boolean
+  readOnly?: boolean
   refreshOnStart?: boolean | TextEditRefreshOptions
   onInput?: (value: string, session: TextEditSessionApi) => void
   onCompositionStart?: (session: TextEditSessionApi) => void
@@ -70,7 +70,10 @@ export class TextEditSession {
       onCompositionEnd: value => opts.onCompositionEnd?.(value, this._api),
       onKeyDown: event => opts.onKeyDown?.(event, this._api),
       onPaste: event => opts.onPaste?.(event, this._api),
-    }, opts.initialValue, { focus: opts.focusComposer !== false, readOnly: opts.readOnly })
+    }, opts.initialValue, {
+      focus: opts.focusComposer !== false,
+      readOnly: opts.readOnly,
+    })
 
     if (opts.initialSelection) {
       controller.setSelection(opts.initialSelection.start, opts.initialSelection.end, {

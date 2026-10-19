@@ -1,4 +1,6 @@
 import type { BoxConstraints, LayoutContext, Offset, Rect, RenderObject } from '../core/render_object'
+import type { DrawableImage, ImageRequest } from '../core/image_loader'
+import { resolveImageLoader } from '../core/image_loader_binding'
 import { RenderBox, type RenderBoxOptions } from '../layout/render_box'
 import { DrawList } from '../rendering/draw_list'
 import type { PaintContext } from '../rendering/paint_context'
@@ -184,7 +186,7 @@ interface MarkdownImageRun {
   alt: string
   title?: string
   state: MarkdownImageLoadState
-  image: HTMLImageElement | null
+  image: CanvasImageSource | null
 }
 
 interface MarkdownLayoutBlock {
@@ -253,7 +255,9 @@ type MarkdownImageLoadState = 'loading' | 'loaded' | 'error'
 
 interface MarkdownImageCacheEntry {
   src: string
-  image: HTMLImageElement | null
+  image: CanvasImageSource | null
+  use?: DrawableImage
+  request?: ImageRequest
   state: MarkdownImageLoadState
   naturalWidth: number
   naturalHeight: number
@@ -1344,37 +1348,37 @@ export class RenderMarkdownViewer extends RenderBox implements InteractiveRender
       generation: this._imageLoadToken,
     }
     this._imageCache.set(src, entry)
-    if (typeof Image === 'undefined') {
-      entry.state = 'error'
-      return entry
-    }
     const generation = this._imageLoadToken
-    const image = new Image()
-    entry.image = image
-    image.onload = () => {
-      if (generation !== this._imageLoadToken || this._imageCache.get(src) !== entry) return
-      entry.image = image
-      entry.state = 'loaded'
-      entry.naturalWidth = image.naturalWidth || image.width || markdownImageDefaultWidth
-      entry.naturalHeight = image.naturalHeight || image.height || markdownImageDefaultHeight
-      this.markNeedsLayout()
-    }
-    image.onerror = () => {
-      if (generation !== this._imageLoadToken || this._imageCache.get(src) !== entry) return
-      entry.image = null
-      entry.state = 'error'
-      this.markNeedsPaint()
-    }
-    image.src = src
+    let completed = false
+    const request = resolveImageLoader().load(src, {}, result => {
+      completed = true
+      if (generation !== this._imageLoadToken || this._imageCache.get(src) !== entry) { result.image?.release(); return }
+      entry.request = undefined
+      if (result.image) {
+        entry.use = result.image
+        entry.image = result.image.source
+        entry.state = 'loaded'
+        entry.naturalWidth = result.image.width || markdownImageDefaultWidth
+        entry.naturalHeight = result.image.height || markdownImageDefaultHeight
+        this.markNeedsLayout()
+      } else {
+        entry.image = null
+        entry.state = 'error'
+        this.markNeedsPaint()
+      }
+    })
+    if (!completed) entry.request = request
     return entry
   }
 
   private _clearImageCache(): void {
     this._imageLoadToken += 1
     for (const entry of this._imageCache.values()) {
-      if (!entry.image) continue
-      entry.image.onload = null
-      entry.image.onerror = null
+      entry.request?.cancel()
+      entry.use?.release()
+      entry.request = undefined
+      entry.use = undefined
+      entry.image = null
     }
     this._imageCache.clear()
   }

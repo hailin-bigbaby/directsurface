@@ -141,3 +141,17 @@ type UploadHandler<TResult> = (
 - [ButtonEdit](button-edit.md)
 - [ProgressBar](../basic/progress-bar.md)
 - [Loading](../overlay/loading.md)
+
+
+## 直接调用文件选择器
+
+公开的 `browserFilePicker.pickFiles()` 和 `BrowserFilePickerBridge.pickFiles()` 接受可选 `signal: AbortSignal`。取消后 Promise 拒绝并移除临时文件输入框；用户在原生选择器中取消则返回空数组。`RenderUpload` 现有的上传取消行为与文件选择取消是独立的。
+
+```ts
+import { browserFilePicker } from 'directsurface'
+
+const controller = new AbortController()
+const selection = browserFilePicker.pickFiles({ accept: 'image/*', signal: controller.signal })
+// 需要取消本次等待时调用 controller.abort()，并由调用方处理 Promise 拒绝。
+const files = await selection
+```

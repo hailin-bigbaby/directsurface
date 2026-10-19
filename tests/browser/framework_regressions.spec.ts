@@ -904,3 +904,175 @@ test('text and circles match device-aligned native Canvas across DPR and transfo
     expect(result.differences, JSON.stringify(result)).toBe(0)
   }
 })
+
+
+test('batched segments match native combined-path rendering across transforms', async ({ page }) => {
+  const results = await page.evaluate(() => {
+    const { DrawList, PaintContext } = renderingUnderTest
+    const results = []
+    for (const scale of [0.5, 0.75, 1, 1.25, 1.5, 2]) {
+      for (const alpha of [0.35, 1]) {
+        const render = (batch: boolean) => {
+          const canvas = document.createElement('canvas'); canvas.width = canvas.height = 180
+          const ctx = canvas.getContext('2d')!
+          ctx.setTransform(scale, 0, 0, scale, 0.25, 0.5)
+          const dl = new DrawList(new PaintContext(ctx))
+          const lines = Array.from({ length: 5 }, (_, i) => ({ x1: 4, y1: 5 + i * 12, x2: 65, y2: 5 + i * 12 }))
+          const color = { r: 12, g: 66, b: 120, a: alpha }
+          if (batch) dl.strokeSegments(lines, color, 1)
+          else {
+            ctx.strokeStyle = `rgba(12,66,120,${alpha})`; ctx.lineWidth = 1
+            ctx.beginPath()
+            const phase = scale <= 1 || Math.round(scale) % 2 === 1 ? 0.5 : 0
+            for (const line of lines) {
+              const x1 = (Math.round(line.x1 * scale + 0.25) - 0.25) / scale
+              const x2 = (Math.round(line.x2 * scale + 0.25) - 0.25) / scale
+              const y = (Math.round(line.y1 * scale + 0.5 - phase) + phase - 0.5) / scale
+              ctx.moveTo(x1, y); ctx.lineTo(x2, y)
+            }
+            ctx.stroke()
+          }
+          return ctx.getImageData(0, 0, 180, 180).data
+        }
+        const reference = render(false), batched = render(true)
+        results.push({ scale, alpha, ink: batched.some(value => value !== 0),
+          differences: reference.filter((value, i) => value !== batched[i]).length })
+      }
+    }
+    return results
+  })
+  for (const result of results) {
+    expect(result.ink).toBe(true)
+    expect(result.differences, JSON.stringify(result)).toBe(0)
+  }
+})
+
+test('performance overlay partial updates match full repaint without changing outside pixels', async ({ page }) => {
+  const results = await page.evaluate(() => {
+    const { RuntimeHost } = renderingUnderTest
+    const results: Array<{ dpr: number; label: string; mismatches: number; outsideChanges: number; area: number; screen: number; partial: boolean }> = []
+    for (const dpr of [1, 1.25, 2]) {
+      const canvas = document.createElement('canvas')
+      document.body.append(canvas)
+      let size = { width: 800, height: 480 }
+      const host = new RuntimeHost({ canvas, dpr, enablePerformanceOverlay: true,
+        onFrame: () => {}, getViewportSize: () => size })
+      host.performanceMonitor.position = 'top-left'
+      host.registerLayer({ layer: 'main', paint: ({ context }) => {
+        context.ctx.fillStyle = '#eadfcc'
+        context.ctx.fillRect(0, 0, size.width, size.height)
+        context.ctx.fillStyle = '#c6dcec'
+        context.ctx.fillRect(0, size.height / 2, size.width, size.height / 2)
+      } })
+      host.performanceMonitor.recordFrame({ seq: 1, totalMs: 10, paintMs: 3, layoutMs: 2,
+        compositeMs: 1, rootCount: 0, layerCount: 7, layoutNeeded: false })
+      host.performanceMonitor.recordFrame = () => {}
+      host.renderFrame()
+      const ctx = canvas.getContext('2d')!
+      const clear = ctx.clearRect.bind(ctx)
+      let cleared: Array<{ x: number; y: number; w: number; h: number }> = []
+      ctx.clearRect = (x, y, w, h) => { cleared.push({ x, y, w, h }); clear(x, y, w, h) }
+      const pixels = () => ctx.getImageData(0, 0, canvas.width, canvas.height).data
+      const check = (label: string, partial = true) => {
+        const before = pixels()
+        cleared = []
+        host.renderFrame()
+        const actual = pixels()
+        const damage = cleared.slice()
+        host.markLayerDirty('performance-overlay')
+        host.renderFrame()
+        const reference = pixels()
+        let mismatches = 0
+        let outsideChanges = 0
+        for (let i = 0; i < actual.length; i++) {
+          if (actual[i] !== reference[i]) mismatches++
+          if (actual[i] === before[i]) continue
+          const pixel = Math.floor(i / 4)
+          const x = pixel % canvas.width
+          const y = Math.floor(pixel / canvas.width)
+          if (!damage.some(r => x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h)) outsideChanges++
+        }
+        results.push({ dpr, label, mismatches, outsideChanges, area: damage.reduce((sum, r) => sum + r.w * r.h, 0),
+          screen: canvas.width * canvas.height, partial })
+      }
+      check('update')
+      const header = host.performanceMonitor.debugState().headerRect
+      host.performanceMonitor.onPointerDown({ type: 'down', pointerId: 1, button: 0,
+        position: { x: header.x + 10, y: header.y + 14 } })
+      host.performanceMonitor.onPointerMove({ type: 'move', pointerId: 1,
+        position: { x: header.x + 90, y: header.y + 54 } })
+      host.performanceMonitor.onPointerUp({ type: 'up', pointerId: 1, position: { x: 0, y: 0 } })
+      check('move')
+      host.performanceMonitor.minimized = true
+      check('minimize')
+      check('minimized update')
+      host.performanceMonitor.minimized = false
+      check('restore')
+      host.setPerformanceOverlayVisible(false)
+      check('hide')
+      check('hidden idle')
+      host.setPerformanceOverlayVisible(true)
+      check('show again')
+      host.performanceMonitor.position = 'top-right'
+      host.setPerformanceOverlayVisible(false)
+      check('move and hide before paint')
+      host.setPerformanceOverlayVisible(true)
+      check('show at new position')
+      size = { width: 240, height: 180 }
+      host.resize()
+      check('resize', false)
+      check('update after resize')
+      host.dispose()
+      canvas.remove()
+    }
+    return results
+  })
+  for (const result of results) {
+    expect(result.mismatches, JSON.stringify(result)).toBe(0)
+    expect(result.outsideChanges, JSON.stringify(result)).toBe(0)
+    if (result.partial) expect(result.area, JSON.stringify(result)).toBeLessThan(result.screen)
+    if (result.label === 'hidden idle') expect(result.area).toBe(0)
+  }
+})
+
+
+test('invalid batch coordinates cannot connect unrelated subpaths', async ({ page }) => {
+  const equal = await page.evaluate(() => {
+    const { DrawList, PaintContext } = renderingUnderTest
+    const render = (invalid: boolean) => {
+      const canvas = document.createElement('canvas')
+      const ctx = canvas.getContext('2d')!
+      const dl = new DrawList(new PaintContext(ctx))
+      const segments = [{ x1: 5, y1: 5, x2: 20, y2: 5 }, { x1: 5, y1: 50, x2: 20, y2: 50 }]
+      if (invalid) segments.splice(1, 0, { x1: NaN, y1: NaN, x2: 60, y2: 30 })
+      dl.strokeSegments(segments, { r: 0, g: 0, b: 0, a: 1 })
+      return canvas.toDataURL()
+    }
+    return render(true) === render(false)
+  })
+  expect(equal).toBe(true)
+})
+
+test('encoded image previews decode through the browser loader and retain borrowed sources', async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const { RenderImagePreview, PaintContext } = renderingUnderTest
+    const bytes = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="red"/></svg>')
+    const preview = new RenderImagePreview({ source: { bytes, mediaType: 'image/svg+xml' }, size: 16, fit: 'fill', shape: 'rectangle' })
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 16
+    const ctx = canvas.getContext('2d')!
+    const external = document.createElement('canvas'); external.width = external.height = 8
+    external.getContext('2d')!.fillStyle = 'blue'; external.getContext('2d')!.fillRect(0, 0, 8, 8)
+    const borrowed = new RenderImagePreview({ source: external, size: 16, fit: 'fill', shape: 'rectangle' })
+    try {
+      for (let i = 0; i < 60 && preview.debugState().loadState === 'loading'; i++) await new Promise(requestAnimationFrame)
+      preview.layout({ minWidth: 16, maxWidth: 16, minHeight: 16, maxHeight: 16 })
+      preview.performPaint(new PaintContext(ctx), { x: 0, y: 0 })
+      const loaded = preview.debugState().loadState
+      const red = Array.from(ctx.getImageData(8, 8, 1, 1).data)
+      borrowed.dispose()
+      const blue = Array.from(external.getContext('2d')!.getImageData(4, 4, 1, 1).data)
+      return { loaded, red, blue }
+    } finally { preview.dispose(); borrowed.dispose() }
+  })
+  expect(result).toEqual({ loaded: 'loaded', red: [255, 0, 0, 255], blue: [0, 0, 255, 255] })
+})

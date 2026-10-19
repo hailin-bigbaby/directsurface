@@ -24,7 +24,7 @@ import {
 | API | 类型 | 用途 |
 | --- | --- | --- |
 | `RenderImagePreview` | class | 轻量图片预览控件，加载 URL 或绘制已有 `CanvasImageSource`。 |
-| `ImagePreviewSource` | type | 图片来源：URL、CanvasImageSource、null 或 undefined。 |
+| `ImagePreviewSource` | type | 图片来源：URL、CanvasImageSource、编码图片字节、可借用图片句柄、null 或 undefined。 |
 | `ImagePreviewFit` | type | 图片适配方式：cover、contain、fill、none。 |
 | `ImagePreviewShape` | type | 裁剪形状：rectangle、rounded、circle。 |
 | `ImagePreviewLoadState` | type | 加载状态：empty、loading、loaded、error。 |
@@ -86,7 +86,7 @@ preview.setSource(null)
 
 | 参数 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `source` | `ImagePreviewSource` | `undefined` | 图片来源。可以是 URL、`CanvasImageSource`、`null` 或 `undefined`。 |
+| `source` | `ImagePreviewSource` | `undefined` | 图片来源。可以是 URL、`CanvasImageSource`、编码图片字节、可借用图片句柄、`null` 或 `undefined`。 |
 | `src` | `string` | `undefined` | URL 便捷参数。`source` 为 `null/undefined` 时才使用 `src`。 |
 | `size` | `number` | `undefined` | 同时设置默认宽高，常用于头像和方形缩略图。 |
 | `width` | `number` | `undefined` | 期望宽度。优先级高于 `size`。 |
@@ -254,3 +254,10 @@ URL 图片加载失败时会进入 `error` 状态并显示占位。可以通过 
 - [ListView 列表](../data/list-view.md)
 - [Card / Section / PageHeader](../basic/card-section-page-header.md)
 - [Popup 基础设施](../overlay/popup.md)
+
+
+## 编码图片与资源生命周期
+
+`source` 也接受 `{ bytes: Uint8Array, mediaType: 'image/png' | 'image/jpeg' | 'image/svg+xml' }`，适用于已经取得图片字节的场景。URL 和已有 Canvas 图片对象的用法保持兼容。
+
+浏览器加载器会共享相同 URL 和 `crossOrigin` 的进行中请求。切换来源或销毁一个预览只取消该组件的订阅，不影响其他预览或 Markdown 图片。已过期的加载结果不会写回组件。编码字节对应的临时对象 URL 在完成或取消后释放；外部传入的 Canvas 图片对象采用借用方式，组件不会主动关闭它。

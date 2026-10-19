@@ -2,6 +2,7 @@ export interface FilePickerOptions {
   accept?: string
   multiple?: boolean
   capture?: string
+  signal?: AbortSignal
 }
 
 export interface FilePickerBridge {
@@ -12,6 +13,7 @@ export class BrowserFilePickerBridge implements FilePickerBridge {
   constructor(private readonly documentRef?: Document | null) {}
 
   pickFiles(options: FilePickerOptions = {}): Promise<File[]> {
+    if(options.signal?.aborted)return Promise.reject(options.signal.reason)
     const documentRef = this.documentRef === undefined
       ? typeof document === 'undefined' ? null : document
       : this.documentRef
@@ -28,22 +30,28 @@ export class BrowserFilePickerBridge implements FilePickerBridge {
       if (options.capture) input.setAttribute('capture', options.capture)
 
       let settled = false
+      const abort = () => fail(options.signal?.reason ?? new DOMException('File selection cancelled', 'AbortError'))
       const finish = (files: File[]) => {
         if (settled) return
         settled = true
         input.remove()
+        options.signal?.removeEventListener('abort',abort)
         resolve(files)
       }
       const fail = (error: unknown) => {
         if (settled) return
         settled = true
         input.remove()
+        options.signal?.removeEventListener('abort',abort)
         reject(error)
       }
       input.addEventListener('change', () => finish(Array.from(input.files ?? [])), { once: true })
       input.addEventListener('cancel', () => finish([]), { once: true })
+      options.signal?.addEventListener('abort',abort,{once:true})
+      if(options.signal?.aborted){abort();return}
       try {
         documentRef.body.appendChild(input)
+        if(settled)return
         input.click()
       } catch (error) {
         fail(error)

@@ -69,3 +69,12 @@ Clearing, repaint clipping and screen composition use the same viewport-clamped 
 Runtime and popup transient painting replays retained visible participants when a region is damaged. This restores unchanged content that overlaps the cleared region; partial layer clips prevent opacity from accumulating outside it. Nodes under hidden ancestors are skipped. Requests raised during replay still remain queued for the next frame.
 
 RenderBox includes a margin for standard strokes and antialiasing in `paintBounds`, without enlarging layout or hit-test size. Custom effects extending farther must report their complete painted extent; moving content must invalidate both its old and new extents. After a painter throws, consumed damage and new damage remain available for the next explicit invalidation, while the Canvas state is restored. This does not change DrawList's primitive coordinate-snapping rules.
+
+
+## Browser service lifecycle
+
+The browser input controller uses a session port with explicit session identity and revisions. Ended or stale sessions do not overwrite a newer session. The browser adapter preserves the original keyboard and clipboard events, including `DataTransfer`, cancellation and propagation; TextBox readonly behavior and editable defaults stay unchanged. This service abstraction does not add a desktop-native runtime to the browser package.
+
+`ClipboardController` accepts an optional object with `readText()` and `writeText(text)` methods, while its default behavior continues to use the browser clipboard. `dispose()` prevents further reads/writes and ignores pending results that complete afterward. Dispose controllers owned by your application when their scope ends; do not dispose the framework's shared singleton as a per-control cleanup action.
+
+The visible performance panel repaints the union of its previous and current bounds when updated, moved, minimized or hidden. Hidden idle panels produce no further panel damage. This optimization preserves the same display and interaction behavior.

@@ -598,3 +598,6 @@ DirectSurface UI 是 Canvas 渲染框架，MarkdownViewer 不执行 HTML，避�
 - `RenderCollapsiblePanelGroup`：文档中心左侧折叠分组容器。
 - [DockPanel](../../layouts.md)：文档中心左右布局。
 - [ScrollView](../../layouts.md)：通用滚动容器。MarkdownViewer 自己管理文档滚动，不需要再包一层 ScrollView。
+
+
+Markdown 图片与 ImagePreview 复用浏览器图片加载器。同一 URL 的进行中加载可以共享；替换文档或销毁组件时释放自己的订阅与图片句柄，不影响其他组件仍在使用的图片，也不会接收旧文档的迟到结果。

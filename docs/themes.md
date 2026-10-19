@@ -40,3 +40,10 @@ Stroke primitives ignore zero, negative and non-finite line widths without chang
 DrawList aligns text positions, circle centers and axis-aligned lines in device space using the current Canvas transform, including translation and independent horizontal/vertical scales. This applies to fractional DPR, zoom below one, nonuniform scaling and reflected axes. It reads the current transform for each primitive, so a later transform change takes effect immediately.
 
 Solid and dashed horizontal/vertical lines use the scale perpendicular to the stroke to choose their pixel-center alignment. Diagonal lines and polygon vertices keep their original coordinates; rotation, skew or a singular transform also preserves the original geometry. Text retains its font, alignment and baseline settings. Circle radii and stroke widths are unchanged: center alignment does not remove the normal antialiasing of curved edges or glyphs.
+
+
+## Batched line segments
+
+`DrawList.strokeSegments(segments, color, lineWidth)` accepts `{ x1, y1, x2, y2 }` records (`DrawLineSegment`) and strokes independent subpaths in one Canvas operation using the current transform. Empty batches and invalid line widths do not draw; segments with non-finite coordinates are skipped without connecting neighboring paths.
+
+A batch follows native Canvas single-path rasterization, which can differ slightly from repeated strokes at fractional scales even for separate segments. Overlapping segment coverage is composited as one stroke. For translucent lines that must accumulate opacity at intersections, keep separate `line()` calls instead. Existing individual line APIs are unchanged.

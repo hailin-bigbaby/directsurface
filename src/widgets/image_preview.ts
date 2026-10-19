@@ -5,10 +5,12 @@ import type { PaintContext } from '../rendering/paint_context'
 import { deriveTextStyle } from '../theme/component_styles'
 import { colorToCSS, type Color } from '../theme/theme'
 import { paintIconGlyph, type IconName } from './icon'
+import { isEncodedImage, type DrawableImage, type ImageRequest, type ImageSource } from '../core/image_loader'
+import { resolveImageLoader } from '../core/image_loader_binding'
 
 export type ImagePreviewFit = 'cover' | 'contain' | 'fill' | 'none'
 export type ImagePreviewShape = 'rectangle' | 'rounded' | 'circle'
-export type ImagePreviewSource = string | CanvasImageSource | null | undefined
+export type ImagePreviewSource = ImageSource | null | undefined
 export type ImagePreviewLoadState = 'empty' | 'loading' | 'loaded' | 'error'
 
 interface ImageMetrics {
@@ -56,7 +58,8 @@ export class RenderImagePreview extends RenderBox {
 
   private _source: ImagePreviewSource
   private _image: CanvasImageSource | null = null
-  private _loadingImage: HTMLImageElement | null = null
+  private _imageRequest: ImageRequest | null = null
+  private _imageUse: DrawableImage | null = null
   private _loadState: ImagePreviewLoadState = 'empty'
   private _loadToken = 0
   private _displayRect = { x: 0, y: 0, width: 0, height: 0 }
@@ -160,6 +163,9 @@ export class RenderImagePreview extends RenderBox {
   override dispose(): void {
     this._loadToken += 1
     this._clearLoadingImage()
+    this._imageUse?.release()
+    this._imageUse = null
+    this._image = null
     super.dispose()
   }
 
@@ -167,6 +173,8 @@ export class RenderImagePreview extends RenderBox {
     this._loadToken += 1
     const token = this._loadToken
     this._clearLoadingImage()
+    this._imageUse?.release()
+    this._imageUse = null
     this._image = null
     this._imageSize = null
     if (!this._source) {
@@ -174,44 +182,37 @@ export class RenderImagePreview extends RenderBox {
       this.markNeedsPaint()
       return
     }
-    if (typeof this._source !== 'string') {
-      this._image = this._source
+    const loader = resolveImageLoader()
+    if (typeof this._source !== 'string' && !isEncodedImage(this._source)) {
+      this._imageUse = loader.borrow(this._source)
+      this._image = this._imageUse.source
       this._loadState = 'loaded'
       this.markNeedsPaint()
       return
     }
-    if (typeof Image === 'undefined') {
-      this._loadState = 'error'
-      this.markNeedsPaint()
-      return
-    }
-
-    const image = new Image()
-    this._loadingImage = image
-    if (this.crossOrigin) image.crossOrigin = this.crossOrigin
     this._loadState = 'loading'
-    image.onload = () => {
-      if (this._loadToken !== token) return
-      this._clearLoadingImage()
-      this._image = image
-      this._loadState = 'loaded'
-      this.markNeedsLayout()
-    }
-    image.onerror = () => {
-      if (this._loadToken !== token) return
-      this._clearLoadingImage()
-      this._image = null
-      this._loadState = 'error'
-      this.markNeedsPaint()
-    }
-    image.src = this._source
+    let completed = false
+    const request = loader.load(this._source, { crossOrigin: this.crossOrigin }, result => {
+      completed = true
+      if (this._loadToken !== token) { result.image?.release(); return }
+      this._imageRequest = null
+      if (result.image) {
+        this._imageUse = result.image
+        this._image = result.image.source
+        this._loadState = 'loaded'
+        this.markNeedsLayout()
+      } else {
+        this._image = null
+        this._loadState = 'error'
+        this.markNeedsPaint()
+      }
+    })
+    if (!completed) this._imageRequest = request
   }
 
   private _clearLoadingImage(): void {
-    if (!this._loadingImage) return
-    this._loadingImage.onload = null
-    this._loadingImage.onerror = null
-    this._loadingImage = null
+    this._imageRequest?.cancel()
+    this._imageRequest = null
   }
 
   private _naturalSize(): ImageMetrics | null {

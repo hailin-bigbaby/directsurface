@@ -1,4 +1,5 @@
 import { FocusManager, type Focusable } from '../core/focus_manager'
+import { applicationFiles } from '../runtime/application_file_binding'
 import { RenderBox } from '../layout/render_box'
 import { RenderObject, constrainSize, type BoxConstraints, type LayoutContext, type Offset, type PipelineOwner, type Rect } from '../core/render_object'
 import type { PaintContext } from '../rendering/paint_context'
@@ -1619,56 +1620,22 @@ function isBuiltInPropertyGridEditor(editor: PropertyGridEditorKind | undefined)
 }
 
 function openImageSourceFilePicker(context: PropertyGridEditContext): boolean {
-  if (typeof document === 'undefined' || !document.body || typeof FileReader === 'undefined') {
-    context.setError(`${context.row.group}.${context.row.name} requires a browser file picker.`)
+  const files=applicationFiles()
+  if (!files.pickerAvailable) {
+    context.setError(`${context.row.group}.${context.row.name} requires a file picker.`)
     return false
   }
-  const input = document.createElement('input')
-  input.type = 'file'
-  input.accept = 'image/*'
-  input.style.display = 'none'
-  let cleaned = false
-  const cleanup = () => {
-    if (cleaned) return
-    cleaned = true
-    input.remove()
-  }
-  input.addEventListener('change', () => {
-    const file = input.files?.[0]
-    cleanup()
+  void files.pickFiles({accept:'image/*'}).then(async selected=>{
+    const file = selected[0]
     if (!file) return
-    void readImageFileAsBase64DataUri(file)
-      .then(source => {
-        if (!isImageBase64DataUri(source)) {
-          context.setError(`${context.row.group}.${context.row.name} must be a base64 image data URI.`)
-          return
-        }
-        context.commit(source)
-      })
-      .catch(error => {
-        context.setError(error instanceof Error ? error.message : String(error))
-      })
-  }, { once: true })
-  input.addEventListener('cancel', cleanup, { once: true })
-  document.body.appendChild(input)
-  input.click()
-  return true
-}
-
-function readImageFileAsBase64DataUri(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      const result = reader.result
-      if (typeof result === 'string') {
-        resolve(result)
-        return
-      }
-      reject(new Error('Image source could not be read as a base64 data URI.'))
+    const source=await files.readDataUrl(file)
+    if (!isImageBase64DataUri(source)) {
+      context.setError(`${context.row.group}.${context.row.name} must be a base64 image data URI.`)
+      return
     }
-    reader.onerror = () => reject(new Error('Image source could not be read as a base64 data URI.'))
-    reader.readAsDataURL(file)
-  })
+    context.commit(source)
+  }).catch(error=>context.setError(error instanceof Error?error.message:String(error)))
+  return true
 }
 
 function isImageBase64DataUri(value: string): boolean {

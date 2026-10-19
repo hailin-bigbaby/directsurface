@@ -279,3 +279,40 @@ describe("DrawList primitive pixel alignment", () => {
     expect(ctx.lineTo).toHaveBeenLastCalledWith(8.7, 1.3)
   })
 })
+
+
+describe('batched segments', () => {
+  it('strokes independent segments once using one current transform', () => {
+    const { ctx } = createContext(2)
+    const dl = new DrawList(new PaintContext(ctx))
+    dl.strokeSegments([{ x1: 0, y1: 2, x2: 10, y2: 2 }, { x1: 0, y1: 4, x2: 10, y2: 4 }], rgba(0, 0, 0), 0.5)
+    expect(ctx.stroke).toHaveBeenCalledTimes(1)
+    expect(ctx.getTransform).toHaveBeenCalledTimes(1)
+    expect(ctx.moveTo).toHaveBeenNthCalledWith(1, 0, 2.25)
+    expect(ctx.moveTo).toHaveBeenNthCalledWith(2, 0, 4.25)
+    expect(ctx.lineTo).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not stroke an empty or invalid-width batch', () => {
+    const { ctx } = createContext()
+    const dl = new DrawList(new PaintContext(ctx))
+    dl.strokeSegments([], rgba(0, 0, 0))
+    dl.strokeSegments([{ x1: 0, y1: 0, x2: 10, y2: 0 }], rgba(0, 0, 0), 0)
+    expect(ctx.stroke).not.toHaveBeenCalled()
+    expect(ctx.getTransform).not.toHaveBeenCalled()
+  })
+
+  it('skips non-finite segments rather than connecting them to the preceding path', () => {
+    const { ctx } = createContext()
+    const dl = new DrawList(new PaintContext(ctx))
+    dl.strokeSegments([
+      { x1: 0, y1: 0, x2: 10, y2: 0 },
+      { x1: NaN, y1: 0, x2: 20, y2: 20 },
+      { x1: 0, y1: 0, x2: Infinity, y2: 20 },
+    ], rgba(0, 0, 0))
+    expect(ctx.moveTo).toHaveBeenCalledTimes(1)
+    expect(ctx.lineTo).toHaveBeenCalledTimes(1)
+    expect(ctx.stroke).toHaveBeenCalledTimes(1)
+  })
+
+})

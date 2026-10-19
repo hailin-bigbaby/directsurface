@@ -3,7 +3,9 @@
 import { colorToCSS, type Color } from '../theme/theme'
 import type { PaintContext } from './paint_context'
 import { BoundedCache } from './bounded_cache'
-import { snapLineToPixels, snapPointToPixels, snapRectToPixels, snapStrokeRectToPixels } from './pixel_geometry'
+import { createLinePixelSnapper, snapLineToPixels, snapPointToPixels, snapRectToPixels, snapStrokeRectToPixels } from './pixel_geometry'
+
+export interface DrawLineSegment { x1: number; y1: number; x2: number; y2: number }
 
 export interface DrawListStats {
   fillRect: number
@@ -279,8 +281,8 @@ export class DrawList {
   ): void {
     const c = this.ctx
     this._count('path')
-    this._save()
     const rect = this._snapRect(x, y, w, h)
+    this._save()
     const extent = Math.max(blur * 2 + Math.abs(offsetX), blur * 2 + Math.abs(offsetY), 1)
     c.beginPath()
     c.rect(rect.x - extent, rect.y - extent, rect.w + extent * 2, rect.h + extent * 2)
@@ -345,6 +347,28 @@ export class DrawList {
     c.moveTo(line.x1, line.y1)
     c.lineTo(line.x2, line.y2)
     c.stroke()
+  }
+
+  /** Stroke independent subpaths once. Overlapping coverage is composited as a union. */
+  strokeSegments(segments: readonly DrawLineSegment[], color: Color, lineWidth = 1): void {
+    if (!segments.length || !Number.isFinite(lineWidth) || lineWidth <= 0) return
+    const c = this.ctx
+    this._setStrokeStyle(this._colorToCSS(color))
+    this._setLineWidth(lineWidth)
+    const snap = createLinePixelSnapper(c, lineWidth)
+    c.beginPath()
+    let hasSegments = false
+    for (const segment of segments) {
+      // An ignored moveTo(NaN, ...) would otherwise continue the previous subpath.
+      if (!Number.isFinite(segment.x1) || !Number.isFinite(segment.y1)
+        || !Number.isFinite(segment.x2) || !Number.isFinite(segment.y2)) continue
+      const line = snap(segment.x1, segment.y1, segment.x2, segment.y2)
+      hasSegments = true
+      this._count('line')
+      c.moveTo(line.x1, line.y1)
+      c.lineTo(line.x2, line.y2)
+    }
+    if (hasSegments) c.stroke()
   }
 
   lineDashed(x1: number, y1: number, x2: number, y2: number, color: Color, lineWidth = 1, dash: readonly number[] = [4, 3]): void {

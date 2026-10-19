@@ -331,6 +331,7 @@ export class RuntimeHost {
   private _themeSource: RuntimeThemeSource = 'main-window'
   private _mainLayerRemove?: () => void
   private _performanceLayerRemove?: () => void
+  private _performanceOverlayPaintBounds?: Rect
   private _onMainWindowClose?: () => void
   private _disposed = false
   private _renderingFrame = false
@@ -363,7 +364,7 @@ export class RuntimeHost {
       enabled: opts.enablePerformanceMonitoring === true || opts.enablePerformanceOverlay === true,
       visible: opts.enablePerformanceOverlay ?? false,
       onInvalidate: () => {
-        this.markLayerDirty('performance-overlay')
+        this._invalidatePerformanceOverlay()
         this.scheduleFrame('performance-overlay')
       },
     })
@@ -990,7 +991,7 @@ export class RuntimeHost {
       this._ensurePerformanceOverlayLayer()
     }
     this.performanceMonitor.visible = visible
-    this.markLayerDirty('performance-overlay')
+    this._invalidatePerformanceOverlay()
     this.scheduleFrame('performance-overlay-visible')
   }
 
@@ -1069,7 +1070,7 @@ export class RuntimeHost {
         if (measurePerformance) layoutMs = now() - layoutStart
       }
 
-      if (this.performanceMonitor.visible) this.markLayerDirty('performance-overlay')
+      if (this.performanceMonitor.visible || this._performanceOverlayPaintBounds) this._invalidatePerformanceOverlay()
       const paintStart = measurePerformance ? now() : 0
       const layerPaintTimings = this.paintLayers()
       if (measurePerformance) {
@@ -1236,12 +1237,39 @@ export class RuntimeHost {
       layer: 'performance-overlay',
       paint: ({ context }) => {
         context.setTheme?.(this.pipelineOwner.theme)
-        this.performanceMonitor.paint(context, this._contentViewport())
+        const bounds = this._performanceOverlayBounds()
+        if (bounds) {
+          // Keep the first/full paint inside the same extent used by partial repaints.
+          context.ctx.save()
+          try {
+            context.clipRect(bounds.x, bounds.y, bounds.width, bounds.height)
+            this.performanceMonitor.paint(context, this._contentViewport())
+          } finally {
+            context.ctx.restore()
+          }
+        }
+        this._performanceOverlayPaintBounds = bounds
       },
-      shouldPaint: () =>
-        this.performanceMonitor.visible &&
-        this.isLayerDirty('performance-overlay'),
+      // Hiding must also consume the dirty region and forget its previous painted extent.
+      shouldPaint: () => this.isLayerDirty('performance-overlay'),
     }))
+  }
+
+  private _performanceOverlayBounds(): Rect | undefined {
+    if (!this.performanceMonitor.visible) return undefined
+    this.performanceMonitor.setViewport(this._contentViewport())
+    const bounds = this.performanceMonitor.debugState().bounds
+    const padding = 1 + 1 / this.dpr
+    return { x: bounds.x - padding, y: bounds.y - padding,
+      width: bounds.width + padding * 2, height: bounds.height + padding * 2 }
+  }
+
+  private _invalidatePerformanceOverlay(): void {
+    if (!this._performanceLayerRemove) return
+    const previous = this._performanceOverlayPaintBounds
+    const current = this._performanceOverlayBounds()
+    const damage = previous && current ? unionRect(previous, current) : previous ?? current
+    if (damage) this.markLayerDirtyRect('performance-overlay', damage)
   }
 
   private _configureMainWindow(window: RenderWindow): void {
