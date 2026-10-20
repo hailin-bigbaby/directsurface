@@ -11,6 +11,12 @@ npm run example:dev
 
 Open Workbench to filter, edit, and create tasks; open Canvas workspace to filter a large grid and float or dock the inspector. Changes to sample tasks reset on refresh; the light/dark preference stays on this device. The displayed user is fictional and there is no login or backend. Run `npm run verify:consumer` to typecheck and build the example against the packed library.
 
+## Chart examples
+
+Open **Data & charts** and scroll below Delivery trend. **Actual vs target** combines grouped bars and a line using one Y axis and unit, including a missing value. **Request size vs duration** keeps repeated X observations and an outlier. Click a bar or point to update the selection text; click a legend item to toggle a series. Cards stack on narrow screens and follow the light/dark theme.
+
+See [ComboChart](../../docs/components/visualization/charts/combo-chart.md) and [ScatterChart](../../docs/components/visualization/charts/scatter-chart.md) for options and limits. The examples use static sample data and do not fetch external services.
+
 ## GitHub Pages
 
 Live demo: https://hailin-bigbaby.github.io/directsurface/

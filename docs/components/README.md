@@ -1,6 +1,6 @@
 # Component guides
 
-These 83 detailed component guides are adapted for the public `directsurface` API. One additional page covers framework foundations and diagnostics. A guide can cover several render classes, so the guide count differs from the 117 exported `Render*` values. The original guides are in Chinese; see the [English catalog](../components.md) for the full export list.
+These 85 detailed component guides are adapted for the public `directsurface` API. One additional page covers framework foundations and diagnostics. A guide can cover several render classes, so the guide count differs from the 119 exported `Render*` values. The original guides are in Chinese; see the [English catalog](../components.md) for the full export list.
 
 ## Framework foundations and diagnostics
 
@@ -99,6 +99,8 @@ These 83 detailed component guides are adapted for the public `directsurface` AP
 ## Visualization
 
 - [Barcode / QRCode 条码二维码](visualization/barcode-qrcode.md)
+- [ComboChart 同轴柱线组合图](visualization/charts/combo-chart.md)
+- [ScatterChart 散点图](visualization/charts/scatter-chart.md)
 - [BarChart 柱状图](visualization/charts/bar-chart.md)
 - [DonutChart 环形图](visualization/charts/donut-chart.md)
 - [LineChart 折线图](visualization/charts/line-chart.md)

@@ -1,3 +1,5 @@
+export { RenderComboChart, type RenderComboChartOptions, type ComboChartDebugState } from './combo_chart'
+export { RenderScatterChart, type RenderScatterChartOptions, type ScatterChartDebugState } from './scatter_chart'
 export {
   RenderSparkline,
   type RenderSparklineOptions,
@@ -33,6 +35,13 @@ export {
   type RenderDonutChartOptions,
 } from './donut_chart'
 export {
+  type CartesianChartOptions,
+  type CartesianChartDebugState,
+  type ComboChartSeries,
+  type ComboChartItem,
+  type ScatterChartPoint,
+  type ScatterChartSeries,
+  type ScatterPointLayout,
   type ChartAnnotation,
   type ChartAnnotationAxis,
   type ChartAnnotationBase,

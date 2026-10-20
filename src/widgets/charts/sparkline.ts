@@ -84,6 +84,7 @@ export class RenderSparkline extends RenderBox implements InteractiveRenderObjec
       width,
       height: this.height ?? 48,
     })
+    if (_context.pass === 'measure') return
     this._computePoints()
   }
 
@@ -288,6 +289,7 @@ export class RenderSparkline extends RenderBox implements InteractiveRenderObjec
     index: number,
   ): ChartTooltipDebugState | null {
     return layoutChartTooltip({
+      theme: this.currentTheme,
       title: `#${index + 1}`,
       items: [{
         label: 'Value',

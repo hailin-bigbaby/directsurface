@@ -1,3 +1,4 @@
+import { fitChartText } from './chart_text_layout'
 import { DrawList } from '../../rendering/draw_list'
 import type { Color, ResolvedTheme } from '../../theme/theme'
 import type { ChartPlotRect } from './chart_types'
@@ -7,6 +8,7 @@ export interface CartesianFrameOptions {
   dl: DrawList
   theme: ResolvedTheme
   plot: ChartPlotRect
+  labelLeft?: number
   yTicks: readonly number[]
   yToPixel(value: number): number
   yTickLabel?: (value: number, index: number) => string
@@ -46,7 +48,7 @@ export function paintCartesianFrame(options: CartesianFrameOptions): void {
     const y = yToPixel(tick)
     if (showGrid) dl.line(plot.x, y, plot.x + plot.width, y, gridColor, 1)
     if (showYLabels) {
-      dl.fillText(yTickLabel ? yTickLabel(tick, index) : formatChartNumber(tick), plot.x - 8, y, textColor, fontSize, fontFamily, 'right', 'middle')
+      dl.fillText(fitChartText(yTickLabel ? yTickLabel(tick, index) : formatChartNumber(tick), plot.x - (options.labelLeft ?? 0) - 8, theme), plot.x - 8, y, textColor, fontSize, fontFamily, 'right', 'middle')
     }
   }
 

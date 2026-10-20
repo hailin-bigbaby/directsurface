@@ -102,3 +102,7 @@ RangeSlider 和 LineChart 是独立控件。推荐双向同步：
 - [LineChart 折线图](./line-chart.md)
 - [Charts 总览和公共类型](./overview.md)
 - [Slider 输入滑块](../../input/slider.md)
+
+## 小数范围与联动精度
+
+`minSpan`、`maxSpan` 与折线图使用同一范围约束规则，支持小于 `1` 的跨度。未设置 `minSpan` 时默认采用全域跨度的万分之一，并保留浮点可表示的最小跨度；非有限或非正的跨度配置按未配置处理。联动比较使用相对跨度容差，小于 `0.000001` 的范围变化不会再被固定容差吞掉。

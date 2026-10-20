@@ -99,7 +99,7 @@ export function decimateBreakAwareDatums<T extends ChartDecimationDatum & { brea
   const indexes = new Map<T, number>()
   const buckets = new Map<number, { min: T; max: T }>()
   const safeBucketCount = Math.max(1, Math.floor(bucketCount))
-  const span = Math.max(Number.EPSILON, domain.max - domain.min)
+  const span = Math.max(Number.MIN_VALUE, domain.max - domain.min)
   let before: T | undefined
   let after: T | undefined
   for (let index = 0; index < datums.length; index += 1) {
@@ -171,7 +171,7 @@ export function decimateMinMaxDatums<T extends ChartDecimationDatum>(
   options: { includeEdgeNeighbors?: boolean } = {},
 ): T[] {
   const inside = datums.filter(datum => datum.xValue >= domain.min && datum.xValue <= domain.max)
-  const span = Math.max(1, domain.max - domain.min)
+  const span = Math.max(Number.MIN_VALUE, domain.max - domain.min)
   const buckets = new Map<number, { min?: T; max?: T }>()
   const safeBucketCount = Math.max(1, bucketCount)
   for (const datum of inside) {

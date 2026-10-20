@@ -1,3 +1,5 @@
+import { paintChartLegend } from './chart_legend'
+import { layoutCartesianChart, fitChartText, fitHorizontalChartLabels } from './chart_text_layout'
 import { RenderObject, constrainSize, type BoxConstraints, type LayoutContext, type Offset } from '../../core/render_object'
 import type { InteractiveRenderObject, PointerEvent } from '../../gestures/recognizers'
 import { isPrimaryPointerButton } from '../../gestures/hit_test'
@@ -210,18 +212,12 @@ export class RenderBarChart extends RenderBox implements InteractiveRenderObject
   performLayout(constraints: BoxConstraints, _context: LayoutContext): void {
     const width = constraints.maxWidth === Infinity ? 360 : constraints.maxWidth
     this.size = constrainSize(constraints, { width, height: this.height ?? 220 })
-    const top = this.showLegend ? 28 : 14
-    this._plot = {
-      x: this.orientation === 'vertical' ? 46 : 68,
-      y: top,
-      width: Math.max(20, this.size.width - (this.orientation === 'vertical' ? 60 : 84)),
-      height: Math.max(20, this.size.height - top - 30),
-    }
+    if (_context.pass === 'measure') return
     this._computeLayout()
-    this._legendItems = this._layoutLegendItems()
   }
 
   performPaint(context: PaintContext, offset: Offset): void {
+    if (this.size.width < 36 || this.size.height < 40) return
     const dl = new DrawList(context)
     if (this.orientation === 'vertical') this._paintVerticalFrame(dl, context, offset)
     else this._paintHorizontalFrame(dl, context, offset)
@@ -243,6 +239,7 @@ export class RenderBarChart extends RenderBox implements InteractiveRenderObject
   }
 
   onPointerMove(event: PointerEvent): void {
+    if (this.size.width < 36 || this.size.height < 40) return
     const legendHover = this._hitLegendItem(event.position)
     if (legendHover >= 0) {
       let changed = this._setHoverLegendIndex(legendHover)
@@ -284,6 +281,7 @@ export class RenderBarChart extends RenderBox implements InteractiveRenderObject
   }
 
   onPointerDown(event: PointerEvent): void {
+    if (this.size.width < 36 || this.size.height < 40) return
     if (!isPrimaryPointerButton(event)) return
     const legendIndex = this._hitLegendItem(event.position)
     if (legendIndex >= 0) {
@@ -329,12 +327,22 @@ export class RenderBarChart extends RenderBox implements InteractiveRenderObject
       paddingRatio: this.stackMode === 'percent' ? 0 : 0.04,
     })
     this._valueDomain = resolveChartAxisDomain(this._valueDomain, this.valueAxis)
+    this._valueTicks = this._computeValueTicks()
+    const vertical = this.orientation === 'vertical'
+    const sideLabels = vertical
+      ? (chartAxisLabelsVisible(this.valueAxis) ? this._valueTicks.map(tick => tick.label) : [])
+      : (chartAxisLabelsVisible(this.categoryAxis) ? this.categories.map((label, index) =>
+        truncateChartAxisLabel(this._formatCategoryAxisLabel(index, label), this.categoryAxis.maxLabelLength)) : [])
+    const frame = layoutCartesianChart(this.size.width, this.size.height, this.currentTheme,
+      sideLabels, this.showLegend ? this.series.map(entry => entry.name) : [], vertical ? 46 : 68)
+    this._plot = frame.plot
+    this._legendItems = frame.legend
     this._bars = this.orientation === 'vertical'
       ? this._computeVerticalBars()
       : this._computeHorizontalBars()
     this._annotationLayouts = this._layoutAnnotations()
-    this._valueTicks = this._computeValueTicks()
     this._categoryLabels = this._computeCategoryLabels()
+    if (vertical) this._categoryLabels = fitHorizontalChartLabels(this._categoryLabels, this.size.width, this.currentTheme)
     if (this._hover) {
       this._hover = this._bars.find(bar => sameBar(bar, this._hover)) ?? null
     }
@@ -466,6 +474,7 @@ export class RenderBarChart extends RenderBox implements InteractiveRenderObject
       dl,
       theme: context.theme,
       plot,
+      labelLeft: offset.x + 4,
       yTicks: this._valueTicks.map(tick => tick.value),
       yToPixel: value => plot.y + this._plot.height - ((value - this._valueDomain.min) / (this._valueDomain.max - this._valueDomain.min)) * this._plot.height,
       yTickLabel: (_value, index) => this._valueTicks[index]?.label ?? '',
@@ -481,44 +490,26 @@ export class RenderBarChart extends RenderBox implements InteractiveRenderObject
     const xScale = createLinearScale(this._valueDomain.min, this._valueDomain.max, plot.x, plot.x + plot.width)
     const showValueLabels = chartAxisLabelsVisible(this.valueAxis)
     const showCategoryLabels = chartAxisLabelsVisible(this.categoryAxis)
-    for (const tick of this._valueTicks) {
+    const labels = fitHorizontalChartLabels(this._valueTicks.map(tick => ({ ...tick, x: xScale.map(tick.value) - offset.x })), this.size.width, context.theme)
+    for (const tick of labels) {
       const x = xScale.map(tick.value)
       if (this.showGrid) dl.line(x, plot.y, x, plot.y + plot.height, context.theme.borderData, 1)
       if (showValueLabels) {
-        dl.fillText(tick.label, x, plot.y + plot.height + 16, context.theme.textSecondary, Math.max(10, context.theme.fontSize - 2), context.theme.fontFamily, 'center', 'middle')
+        dl.fillText(tick.label, offset.x + tick.x, plot.y + plot.height + 16, context.theme.textSecondary, Math.max(10, context.theme.fontSize - 2), context.theme.fontFamily, 'center', 'middle')
       }
     }
     dl.line(plot.x, plot.y, plot.x, plot.y + plot.height, context.theme.borderSubtle, 1)
     dl.line(plot.x, plot.y + plot.height, plot.x + plot.width, plot.y + plot.height, context.theme.borderSubtle, 1)
     if (showCategoryLabels) {
       for (const label of this._categoryLabels) {
-        dl.fillText(label.label, offset.x + label.x, offset.y + label.y, context.theme.textSecondary, Math.max(10, context.theme.fontSize - 2), context.theme.fontFamily, 'right', 'middle')
+        dl.fillText(fitChartText(label.label, this._plot.x - 12, context.theme), offset.x + label.x, offset.y + label.y, context.theme.textSecondary, Math.max(10, context.theme.fontSize - 2), context.theme.fontFamily, 'right', 'middle')
       }
     }
   }
 
   private _paintLegend(dl: DrawList, context: PaintContext, offset: Offset): void {
-    const fontSize = Math.max(10, context.theme.fontSize - 2)
-    const visibleSeries = this.getVisibleSeries()
-    for (const item of this._legendItems) {
-      const entry = this.series[item.index]!
-      const visible = visibleSeries.includes(item.index)
-      const color = chartColor(context.theme, item.index, entry.color)
-      if (this.legendMode === 'toggle' && item.index === this._hoverLegendIndex) {
-        dl.fillRect(offset.x + item.x, offset.y + item.y, item.width - 4, item.height, context.theme.stateHoverOverlay, 4)
-      }
-      dl.fillRect(offset.x + item.x, offset.y + item.y + item.height / 2 - 4, 8, 8, visible ? color : withAlpha(color, 0.28))
-      dl.fillText(
-        entry.name,
-        offset.x + item.x + 12,
-        offset.y + item.y + item.height / 2,
-        visible ? context.theme.textSecondary : context.theme.textDisabled,
-        fontSize,
-        context.theme.fontFamily,
-        'left',
-        'middle',
-      )
-    }
+    paintChartLegend(dl, context, offset, this._legendItems, this.series, this.getVisibleSeries(),
+      this.legendMode === 'toggle' ? this._hoverLegendIndex : -1)
   }
 
   private _paintTooltip(dl: DrawList, context: PaintContext, offset: Offset): void {
@@ -532,6 +523,7 @@ export class RenderBarChart extends RenderBox implements InteractiveRenderObject
       const bars = this._barsForCategory(this._hoverCategoryIndex)
       const anchor = this._categoryTooltipAnchor(bars)
       return layoutChartTooltip({
+        theme: this.currentTheme,
         title: this.categories[this._hoverCategoryIndex] ?? '',
         items: this._categoryTooltipItems(this._hoverCategoryIndex),
         anchorX: offset.x + anchor.x,
@@ -546,6 +538,7 @@ export class RenderBarChart extends RenderBox implements InteractiveRenderObject
 
     if (!this._hover) return null
     return layoutChartTooltip({
+      theme: this.currentTheme,
       title: this._hover.category,
       items: this._barTooltipItems(this._hover),
       anchorX: offset.x + this._hover.x + this._hover.width / 2,
@@ -747,7 +740,7 @@ export class RenderBarChart extends RenderBox implements InteractiveRenderObject
     const fallbackCount = Math.max(1, Math.floor(axisLength / (this.orientation === 'vertical' ? 48 : 24)))
     const maxCount = Math.min(this.categories.length, chartAxisTickCount(this.categoryAxis, fallbackCount))
     const indexes = categoryLabelIndexes(this.categories.length, maxCount)
-    const maxLabelLength = this.categoryAxis.maxLabelLength ?? Math.max(3, Math.floor((this.orientation === 'vertical' ? step : this._plot.x - 12) / 7))
+    const maxLabelLength = this.categoryAxis.maxLabelLength
     return indexes.map(index => {
       const label = this.categories[index]!
       const formatted = truncateChartAxisLabel(this._formatCategoryAxisLabel(index, label), maxLabelLength)
@@ -839,23 +832,6 @@ export class RenderBarChart extends RenderBox implements InteractiveRenderObject
 
   private _resolveAnnotationValue(value: unknown): number | null {
     return typeof value === 'number' && Number.isFinite(value) ? value : null
-  }
-
-  private _layoutLegendItems(): ChartLegendItemLayout[] {
-    if (!this.showLegend) return []
-    let x = this._plot.x
-    return this.series.map((entry, index) => {
-      const width = Math.max(62, entry.name.length * 7 + 24)
-      const item = {
-        index,
-        x,
-        y: 2,
-        width,
-        height: 20,
-      }
-      x += width
-      return item
-    })
   }
 
   private _hitLegendItem(position: Offset): number {

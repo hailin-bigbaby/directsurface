@@ -1,3 +1,5 @@
+import { paintChartLegend } from './chart_legend'
+import { layoutCartesianChart, fitHorizontalChartLabels } from './chart_text_layout'
 import { RenderObject, constrainSize, type BoxConstraints, type LayoutContext, type Offset } from '../../core/render_object'
 import type { GestureArenaMember } from '../../gestures/gesture_arena'
 import { PendingPointerGesture } from '../../gestures/pending_pointer_gesture'
@@ -12,6 +14,7 @@ import { paintCartesianFrame } from './chart_axis'
 import {
   chartXValue,
   clampChartDomain,
+  sameChartDomain as sameDomain,
   createLinearScale,
   formatChartNumber,
   formatChartTime,
@@ -199,6 +202,9 @@ export class RenderLineChart extends RenderBox implements InteractiveRenderObjec
 
   private _plot: ChartPlotRect = { x: 0, y: 0, width: 0, height: 0 }
   private _points: ChartPointLayout[] = []
+  private _axisPoints: ChartPointLayout[] = []
+  private _axisGroups = new Map<number, ChartPointLayout[]>()
+  private _pointKeys = new Map<ChartPointLayout, { xValue: number; occurrence: number }>()
   private _annotationLayouts: ChartAnnotationLayout[] = []
   private _legendItems: ChartLegendItemLayout[] = []
   private _visibleSeries?: number[]
@@ -322,24 +328,19 @@ export class RenderLineChart extends RenderBox implements InteractiveRenderObjec
   performLayout(constraints: BoxConstraints, _context: LayoutContext): void {
     const width = constraints.maxWidth === Infinity ? 360 : constraints.maxWidth
     this.size = constrainSize(constraints, { width, height: this.height ?? 220 })
-    const top = this.showLegend ? 28 : 14
-    this._plot = {
-      x: 46,
-      y: top,
-      width: Math.max(20, this.size.width - 60),
-      height: Math.max(20, this.size.height - top - 30),
-    }
+    if (_context.pass === 'measure') return
     this._computeLayout()
-    this._legendItems = this._layoutLegendItems()
   }
 
   performPaint(context: PaintContext, offset: Offset): void {
+    if (this.size.width < 36 || this.size.height < 40) return
     const dl = new DrawList(context)
     const plot = this._offsetPlot(offset)
     paintCartesianFrame({
       dl,
       theme: context.theme,
       plot,
+      labelLeft: offset.x + 4,
       yTicks: this._yTicks.map(tick => tick.value),
       yToPixel: value => plot.y + this._plot.height - ((value - this._yDomain.min) / (this._yDomain.max - this._yDomain.min)) * this._plot.height,
       yTickLabel: (_value, index) => this._yTicks[index]?.label ?? '',
@@ -361,6 +362,7 @@ export class RenderLineChart extends RenderBox implements InteractiveRenderObjec
   }
 
   onPointerMove(event: PointerEvent): void {
+    if (this.size.width < 36 || this.size.height < 40) return
     if (this._pendingGesture.hasOwner && !this._pendingGesture.owns(event)) return
     if (this._pendingGesture.isPending && !this._panning) {
       this._panLast = event.position
@@ -425,6 +427,7 @@ export class RenderLineChart extends RenderBox implements InteractiveRenderObjec
   }
 
   onPointerDown(event: PointerEvent): void {
+    if (this.size.width < 36 || this.size.height < 40) return
     if (this._pendingGesture.hasOwner && !this._pendingGesture.owns(event)) return
     if (!isPrimaryPointerButton(event)) return
     const legendIndex = this._hitLegendItem(event.position)
@@ -455,7 +458,7 @@ export class RenderLineChart extends RenderBox implements InteractiveRenderObjec
       'rejected',
       () => this._clearPanState(),
       () => {
-        if (!wasPanning && clickPoint) this.onPointClick?.({ ...clickPoint })
+        if (!wasPanning && clickPoint && this.size.width >= 36 && this.size.height >= 40) this.onPointClick?.({ ...clickPoint })
       },
     )
   }
@@ -469,6 +472,7 @@ export class RenderLineChart extends RenderBox implements InteractiveRenderObjec
   }
 
   onWheel(event: WheelPointerEvent): boolean {
+    if (this.size.width < 36 || this.size.height < 40) return false
     if (!isChartReady(this._chartState())) return false
     if (!this.enableWheelZoom || !this._isInPlot(event.position)) return false
     if (!this._matchesWheelModifier(event)) return false
@@ -553,10 +557,6 @@ export class RenderLineChart extends RenderBox implements InteractiveRenderObjec
       ? this._stackDatumsBySeries(datumsBySeries, visibleSeries)
       : datumsBySeries
     const visibleBySeries = new Map<number, LineChartDatum[]>()
-    for (const [seriesIndex, datums] of layoutDatumsBySeries) {
-      const visible = includeViewportNeighbors(datums, this._activeXViewport)
-      visibleBySeries.set(seriesIndex, this._decimateDatums(visible))
-    }
 
     const annotationYValues = collectChartAnnotationValues(this.annotations, ['y', 'value'])
     const yValues = this._valuesForYDomain(layoutDatumsBySeries)
@@ -565,40 +565,60 @@ export class RenderLineChart extends RenderBox implements InteractiveRenderObjec
       { paddingRatio: this.stackMode === 'percent' ? 0 : 0.08 },
     )
     this._yDomain = resolveChartAxisDomain(this._yDomain, this.yAxis)
+    this._yTicks = this._computeYTicks()
+    const frame = layoutCartesianChart(this.size.width, this.size.height, this.currentTheme,
+      chartAxisLabelsVisible(this.yAxis) ? this._yTicks.map(tick => tick.label) : [],
+      this.showLegend ? this.series.map(entry => entry.name) : [])
+    this._plot = frame.plot
+    this._legendItems = frame.legend
+    // Sampling depends on the final measured plot width.
+    for (const [seriesIndex, datums] of layoutDatumsBySeries) {
+      visibleBySeries.set(seriesIndex, this._decimateDatums(includeViewportNeighbors(datums, this._activeXViewport)))
+    }
     const xScale = createLinearScale(this._activeXViewport.min, this._activeXViewport.max, this._plot.x, this._plot.x + this._plot.width)
     const yScale = createLinearScale(this._yDomain.min, this._yDomain.max, this._plot.y + this._plot.height, this._plot.y)
     const xSpan = this._activeXViewport.max - this._activeXViewport.min
-    this._points = []
-    for (const datums of visibleBySeries.values()) {
+    const layoutPoint = (datum: LineChartDatum): ChartPointLayout => ({
+      seriesIndex: datum.seriesIndex,
+      pointIndex: datum.pointIndex,
+      x: xScale.map(datum.xValue),
+      y: yScale.map(datum.stackValue ?? datum.yValue),
+      breakBefore: datum.breakBefore,
+      value: datum.yValue,
+      stackBase: datum.stackBase,
+      stackValue: datum.stackValue,
+      stackTotal: datum.stackTotal,
+      stackRatio: datum.stackRatio,
+      label: this._formatXAxisLabel(
+        datum.xValue,
+        this._resolvedAxisType === 'time' ? formatChartTime(datum.xValue, xSpan) : datum.label,
+        datum.pointIndex,
+      ),
+      seriesName: datum.seriesName,
+    })
+    this._points = [...visibleBySeries.values()].flatMap(datums => datums.map(layoutPoint))
+    this._axisPoints = []
+    this._axisGroups.clear()
+    this._pointKeys.clear()
+    for (const datums of layoutDatumsBySeries.values()) {
       for (const datum of datums) {
-        this._points.push({
-          seriesIndex: datum.seriesIndex,
-          pointIndex: datum.pointIndex,
-          x: xScale.map(datum.xValue),
-          y: yScale.map(datum.stackValue ?? datum.yValue),
-          breakBefore: datum.breakBefore,
-          value: datum.yValue,
-          stackBase: datum.stackBase,
-          stackValue: datum.stackValue,
-          stackTotal: datum.stackTotal,
-          stackRatio: datum.stackRatio,
-          label: this._formatXAxisLabel(
-            datum.xValue,
-            this._resolvedAxisType === 'time' ? formatChartTime(datum.xValue, xSpan) : datum.label,
-            datum.pointIndex,
-          ),
-          seriesName: datum.seriesName,
-        })
+        if (datum.xValue < this._activeXViewport.min || datum.xValue > this._activeXViewport.max) continue
+        const point = layoutPoint(datum)
+        if (!this._isPointInPlot(point)) continue
+        this._axisPoints.push(point)
+        this._pointKeys.set(point, { xValue: datum.xValue, occurrence: datum.occurrenceIndex })
+        const group = this._axisGroups.get(datum.xValue) ?? []
+        group.push(point)
+        this._axisGroups.set(datum.xValue, group)
       }
     }
-    this._xLabels = this._computeXLabels()
-    this._yTicks = this._computeYTicks()
+    this._xLabels = fitHorizontalChartLabels(this._computeXLabels(), this.size.width, this.currentTheme)
     const previousHover = this._hover
     const previousAxisHover = this._axisHover
     this._hover = previousHover ? this._findRenderedPoint(previousHover) : null
     if (this._hover && !this._isPointInPlot(this._hover)) this._hover = null
     if (previousAxisHover) {
-      const primary = this._findRenderedPoint(previousAxisHover.primary)
+      const primary = this._axisPoints.find(point => samePoint(point, previousAxisHover.primary)) ?? null
       this._axisHover = primary && this._isPointInPlot(primary)
         ? this._axisHoverFromPoint(primary)
         : null
@@ -699,28 +719,8 @@ export class RenderLineChart extends RenderBox implements InteractiveRenderObjec
   }
 
   private _paintLegend(dl: DrawList, context: PaintContext, offset: Offset): void {
-    const fontSize = Math.max(10, context.theme.fontSize - 2)
-    const visibleSeries = this.getVisibleSeries()
-    for (const item of this._legendItems) {
-      const entry = this.series[item.index]!
-      const visible = visibleSeries.includes(item.index)
-      const color = chartColor(context.theme, item.index, entry.color)
-      const swatch = visible ? color : withAlpha(color, 0.28)
-      if (this.legendMode === 'toggle' && item.index === this._hoverLegendIndex) {
-        dl.fillRect(offset.x + item.x, offset.y + item.y, item.width - 4, item.height, context.theme.stateHoverOverlay, 4)
-      }
-      dl.fillRect(offset.x + item.x, offset.y + item.y + item.height / 2 - 4, 8, 8, swatch)
-      dl.fillText(
-        entry.name,
-        offset.x + item.x + 12,
-        offset.y + item.y + item.height / 2,
-        visible ? context.theme.textSecondary : context.theme.textDisabled,
-        fontSize,
-        context.theme.fontFamily,
-        'left',
-        'middle',
-      )
-    }
+    paintChartLegend(dl, context, offset, this._legendItems, this.series, this.getVisibleSeries(),
+      this.legendMode === 'toggle' ? this._hoverLegendIndex : -1)
   }
 
   private _paintHoverState(dl: DrawList, context: PaintContext, offset: Offset): void {
@@ -795,8 +795,7 @@ export class RenderLineChart extends RenderBox implements InteractiveRenderObjec
       .filter(item => item.xValue >= this._activeXViewport.min && item.xValue <= this._activeXViewport.max)
     if (items.length === 0) return []
     const indexes = categoryLabelIndexes(items.length, labelCount)
-    const step = this._plot.width / Math.max(1, Math.min(items.length, labelCount))
-    const maxLabelLength = this.xAxis.maxLabelLength ?? Math.max(3, Math.floor(step / 7) - 1)
+    const maxLabelLength = this.xAxis.maxLabelLength
     return indexes.map(index => ({
       label: truncateChartAxisLabel(
         this._formatXAxisLabel(items[index]!.xValue, items[index]!.label, items[index]!.index),
@@ -850,7 +849,7 @@ export class RenderLineChart extends RenderBox implements InteractiveRenderObjec
     const local = this._toLocal(position)
     let best: ChartPointLayout | null = null
     let bestDistance = Infinity
-    for (const point of this._points) {
+    for (const point of this._axisPoints) {
       if (!this._isPointInPlot(point)) continue
       const distance = Math.abs(point.x - local.x)
       if (distance < bestDistance) {
@@ -862,15 +861,18 @@ export class RenderLineChart extends RenderBox implements InteractiveRenderObjec
   }
 
   private _axisHoverFromPoint(point: ChartPointLayout, localY?: number): LineChartAxisHover | null {
-    const points = this._points
-      .filter(candidate => this._isPointInPlot(candidate) && Math.abs(candidate.x - point.x) <= 0.5)
-      .sort((a, b) => a.seriesIndex - b.seriesIndex)
+    const xValue = this._pointKeys.get(point)?.xValue
+    let points = xValue === undefined ? [] : this._axisGroups.get(xValue) ?? []
     if (points.length === 0) return null
     const primary = localY === undefined
       ? points.find(candidate => samePoint(candidate, point)) ?? points[0]!
       : points.reduce((best, candidate) => (
         Math.abs(candidate.y - localY) < Math.abs(best.y - localY) ? candidate : best
       ), points[0]!)
+    if (this._isStacked()) {
+      const occurrence = this._pointKeys.get(primary)?.occurrence
+      points = points.filter(candidate => this._pointKeys.get(candidate)?.occurrence === occurrence)
+    }
     return {
       x: point.x,
       label: primary.label,
@@ -898,6 +900,7 @@ export class RenderLineChart extends RenderBox implements InteractiveRenderObjec
 
   private _axisTooltipLayout(offset: Offset, hover: LineChartAxisHover): ChartTooltipDebugState | null {
     return layoutChartTooltip({
+      theme: this.currentTheme,
       title: hover.label,
       items: this._axisTooltipItems(hover),
       anchorX: offset.x + hover.x,
@@ -912,6 +915,7 @@ export class RenderLineChart extends RenderBox implements InteractiveRenderObjec
 
   private _itemTooltipLayout(offset: Offset, hover: ChartPointLayout): ChartTooltipDebugState | null {
     return layoutChartTooltip({
+      theme: this.currentTheme,
       title: hover.label,
       items: this._pointTooltipItems(hover),
       anchorX: offset.x + hover.x,
@@ -954,23 +958,6 @@ export class RenderLineChart extends RenderBox implements InteractiveRenderObjec
       return this._axisTooltipLayout(offset, this._axisHover)
     }
     return this._hover ? this._itemTooltipLayout(offset, this._hover) : null
-  }
-
-  private _layoutLegendItems(): ChartLegendItemLayout[] {
-    if (!this.showLegend) return []
-    let x = this._plot.x
-    return this.series.map((entry, index) => {
-      const width = Math.max(62, entry.name.length * 7 + 24)
-      const item = {
-        index,
-        x,
-        y: 2,
-        width,
-        height: 20,
-      }
-      x += width
-      return item
-    })
   }
 
   private _layoutAnnotations(): ChartAnnotationLayout[] {
@@ -1401,9 +1388,6 @@ function sameAxisHover(a: LineChartAxisHover | null, b: LineChartAxisHover | nul
   return Math.abs(a.x - b.x) < 1e-6 && samePoint(a.primary, b.primary)
 }
 
-function sameDomain(a: ChartDomain, b: ChartDomain): boolean {
-  return Math.abs(a.min - b.min) < 1e-6 && Math.abs(a.max - b.max) < 1e-6
-}
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value))

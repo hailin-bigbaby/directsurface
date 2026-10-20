@@ -1,3 +1,5 @@
+import { fitSingleLineText } from '../../rendering/text_painter'
+import { chartFontSize, fitChartText, measureChartText } from './chart_text_layout'
 import { RenderObject, constrainSize, type BoxConstraints, type LayoutContext, type Offset } from '../../core/render_object'
 import type { InteractiveRenderObject, PointerEvent } from '../../gestures/recognizers'
 import { isPrimaryPointerButton } from '../../gestures/hit_test'
@@ -141,6 +143,7 @@ export class RenderDonutChart extends RenderBox implements InteractiveRenderObje
   performLayout(constraints: BoxConstraints, context: LayoutContext): void {
     const width = constraints.maxWidth === Infinity ? 280 : constraints.maxWidth
     this.size = constrainSize(constraints, { width, height: this.height ?? 220 })
+    if (context.pass === 'measure') return
     const legend = this._legendLayout()
     this._chartRect = {
       x: 0,
@@ -158,6 +161,7 @@ export class RenderDonutChart extends RenderBox implements InteractiveRenderObje
   }
 
   performPaint(context: PaintContext, offset: Offset): void {
+    if (this.size.width < 36 || this.size.height < 40) return
     const dl = new DrawList(context)
     const state = this._chartState()
     if (!isChartReady(state)) {
@@ -177,6 +181,7 @@ export class RenderDonutChart extends RenderBox implements InteractiveRenderObje
   }
 
   onPointerMove(event: PointerEvent): void {
+    if (this.size.width < 36 || this.size.height < 40) return
     const legendHover = this._hitLegendItem(event.position)
     if (legendHover >= 0) {
       let changed = this._setHoverLegendIndex(legendHover)
@@ -213,6 +218,7 @@ export class RenderDonutChart extends RenderBox implements InteractiveRenderObje
   }
 
   onPointerDown(event: PointerEvent): void {
+    if (this.size.width < 36 || this.size.height < 40) return
     if (!isPrimaryPointerButton(event)) return
     const legendIndex = this._hitLegendItem(event.position)
     if (legendIndex >= 0) {
@@ -295,9 +301,16 @@ export class RenderDonutChart extends RenderBox implements InteractiveRenderObje
   private _paintCenter(dl: DrawList, context: PaintContext, offset: Offset): void {
     const cx = offset.x + this._center.x
     const cy = offset.y + this._center.y
-    dl.fillCircle(cx, cy, this._radius * this._innerRatio(), context.theme.surfacePanel)
-    dl.fillText(formatChartNumber(this._total), cx, cy - 5, context.theme.textPrimary, context.theme.fontSize + 4, context.theme.fontFamily, 'center', 'middle', 600)
-    dl.fillText('总计', cx, cy + 15, context.theme.textSecondary, Math.max(10, context.theme.fontSize - 2), context.theme.fontFamily, 'center', 'middle')
+    const radius = this._radius * this._innerRatio()
+    dl.fillCircle(cx, cy, radius, context.theme.surfacePanel)
+    if (radius < 10) return
+    const valueSize = Math.min(context.theme.fontSize + 4, radius * 0.7)
+    const labelSize = Math.min(Math.max(10, context.theme.fontSize - 2), radius * 0.5)
+    const width = radius * 1.5
+    const value = fitSingleLineText(formatChartNumber(this._total), width, valueSize, context.theme.fontFamily, 600).text
+    const label = fitSingleLineText('总计', width, labelSize, context.theme.fontFamily).text
+    dl.fillText(value, cx, cy - labelSize * 0.7, context.theme.textPrimary, valueSize, context.theme.fontFamily, 'center', 'middle', 600)
+    dl.fillText(label, cx, cy + valueSize * 0.7, context.theme.textSecondary, labelSize, context.theme.fontFamily, 'center', 'middle')
   }
 
   private _paintLegend(dl: DrawList, context: PaintContext, offset: Offset): void {
@@ -314,7 +327,7 @@ export class RenderDonutChart extends RenderBox implements InteractiveRenderObje
       }
       dl.fillRect(offset.x + item.x, centerY - 4, 8, 8, visible ? color : withAlpha(color, 0.28))
       dl.fillText(
-        segment.label,
+        fitChartText(segment.label, item.width - 24 - (item.width >= 72 ? measureChartText(layout ? `${Math.round(layout.ratio * 100)}%` : '隐藏', context.theme) + 8 : 0), context.theme),
         offset.x + item.x + 12,
         centerY,
         visible ? context.theme.textSecondary : context.theme.textDisabled,
@@ -357,6 +370,7 @@ export class RenderDonutChart extends RenderBox implements InteractiveRenderObje
     const anchorX = offset.x + this._center.x + Math.cos(mid) * this._radius
     const anchorY = offset.y + this._center.y + Math.sin(mid) * this._radius
     return layoutChartTooltip({
+      theme: this.currentTheme,
       title: segment.label,
       items: [{
         label: 'Value',
@@ -397,6 +411,7 @@ export class RenderDonutChart extends RenderBox implements InteractiveRenderObje
   }
 
   private _legendLayout(): DonutLegendLayout {
+    const rowHeight = Math.max(20, chartFontSize(this.currentTheme) * 1.4 + 4)
     if (!this.showLegend) {
       return {
         right: false,
@@ -437,7 +452,7 @@ export class RenderDonutChart extends RenderBox implements InteractiveRenderObje
     const availableWidth = Math.max(40, this.size.width - 16)
     const columns = Math.max(1, Math.floor(availableWidth / 92))
     const rows = Math.ceil(count / columns)
-    const bottomHeight = Math.min(rows * 20 + 10, Math.max(0, this.size.height - 60))
+    const bottomHeight = Math.min(rows * rowHeight + 10, Math.max(0, this.size.height - 60))
     return {
       right: false,
       rightWidth: 0,
@@ -454,21 +469,24 @@ export class RenderDonutChart extends RenderBox implements InteractiveRenderObje
   }
 
   private _layoutLegendItems(): ChartLegendItemLayout[] {
+    const rowHeight = Math.max(20, chartFontSize(this.currentTheme) * 1.4 + 4)
     if (!this.showLegend) return []
     const legend = this._legendLayout()
-    const indexes = this._legendSegmentIndexes()
+    const indexes = this._legendSegmentIndexes().slice(0, legend.right
+      ? Math.max(0, Math.floor((this.size.height - 8) / rowHeight))
+      : Math.max(0, Math.floor((this.size.height - legend.chartHeight - 8) / rowHeight)) * legend.columns)
     if (legend.right) {
       const x = this.size.width - legend.rightWidth + 6
-      let y = Math.max(14, this._center.y - indexes.length * 11)
+      let y = Math.max(14, this._center.y - indexes.length * rowHeight / 2 + rowHeight / 2)
       return indexes.map(index => {
         const item = {
           index,
           x,
-          y: y - 10,
+          y: y - rowHeight / 2,
           width: legend.rightWidth - 12,
-          height: 20,
+          height: rowHeight,
         }
-        y += 22
+        y += rowHeight
         return item
       })
     }
@@ -481,9 +499,9 @@ export class RenderDonutChart extends RenderBox implements InteractiveRenderObje
       return {
         index,
         x: startX + column * legend.itemWidth,
-        y: startY + row * 20 - 10,
+        y: startY + row * rowHeight - rowHeight / 2,
         width: legend.itemWidth,
-        height: 20,
+        height: rowHeight,
       }
     })
   }

@@ -1608,7 +1608,7 @@ describe('chart widgets', () => {
     })
     chart.layout({ minWidth: 0, maxWidth: 300, minHeight: 0, maxHeight: 240 })
 
-    chart.onPointerDown(pointer('down', 198, 88))
+    chart.onPointerDown(pointer('down', 198, chart.debugState().center.y - 10))
     chart.layout({ minWidth: 0, maxWidth: 300, minHeight: 0, maxHeight: 240 })
 
     expect(chart.getVisibleSegments()).toEqual([1])
@@ -1627,7 +1627,7 @@ describe('chart widgets', () => {
     expect(chart.debugState().total).toBe(0)
     expect(chart.debugState().segments).toHaveLength(0)
 
-    chart.onPointerDown(pointer('down', 198, 88))
+    chart.onPointerDown(pointer('down', 198, chart.debugState().center.y - 10))
     chart.layout({ minWidth: 0, maxWidth: 300, minHeight: 0, maxHeight: 240 })
     expect(chart.getVisibleSegments()).toEqual([0])
     expect(chart.debugState().total).toBe(60)

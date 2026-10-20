@@ -12,6 +12,7 @@ import { chartColor, withAlpha } from './chart_palette'
 import { isChartReady, paintChartState, resolveChartState } from './chart_state'
 import {
   clampChartDomain,
+  sameChartDomain as sameDomain,
   chartXValue,
   collectYValues,
   createLinearScale,
@@ -170,6 +171,7 @@ export class RenderChartRangeSlider extends FocusableControl implements Interact
   performLayout(constraints: BoxConstraints, _context: LayoutContext): void {
     const width = constraints.maxWidth === Infinity ? 260 : constraints.maxWidth
     this.size = constrainSize(constraints, { width, height: this.height ?? 64 })
+    if (_context.pass === 'measure') return
     const insetX = this.size.width < 48 ? 4 : 10
     const insetY = this.size.height < 34 ? 6 : 10
     this._track = {
@@ -646,9 +648,6 @@ export class RenderChartRangeSlider extends FocusableControl implements Interact
 
 }
 
-function sameDomain(a: ChartDomain, b: ChartDomain): boolean {
-  return Math.abs(a.min - b.min) < 1e-6 && Math.abs(a.max - b.max) < 1e-6
-}
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value))

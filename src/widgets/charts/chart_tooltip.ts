@@ -1,9 +1,12 @@
+import type { ResolvedTheme } from '../../theme/theme'
+import { chartFontSize, fitChartText, measureChartText } from './chart_text_layout'
 import { DrawList } from '../../rendering/draw_list'
 import type { PaintContext } from '../../rendering/paint_context'
 import type { ChartTooltipDebugState, ChartTooltipItem } from './chart_types'
 import { withAlpha } from './chart_palette'
 
 export interface ChartTooltipLayoutOptions {
+  theme: ResolvedTheme
   title?: string
   items: readonly ChartTooltipItem[]
   anchorX: number
@@ -20,33 +23,33 @@ const HORIZONTAL_PADDING = 8
 const ROW_HEIGHT = 20
 const TITLE_HEIGHT = 22
 const VERTICAL_PADDING = 6
-const TEXT_WIDTH = 7
+function rowHeight(theme: ResolvedTheme): number { return Math.max(ROW_HEIGHT, chartFontSize(theme) * 1.4 + 4) }
+function titleHeight(theme: ResolvedTheme): number { return Math.max(TITLE_HEIGHT, chartFontSize(theme) * 1.4 + 4) }
 
 export function layoutChartTooltip(options: ChartTooltipLayoutOptions): ChartTooltipDebugState | null {
   if (options.items.length === 0) return null
-  const availableHeight = Math.max(
-    VERTICAL_PADDING * 2 + ROW_HEIGHT,
-    options.boundsHeight - 8,
-  )
+  const row = rowHeight(options.theme)
+  const availableHeight = Math.max(0, options.boundsHeight - 8)
+  if (availableHeight < VERTICAL_PADDING * 2 + row || options.boundsWidth < 36) return null
   let title = options.title
-  let titleHeight = title ? TITLE_HEIGHT : 0
-  let maxRows = Math.floor((availableHeight - VERTICAL_PADDING * 2 - titleHeight) / ROW_HEIGHT)
+  let headingHeight = title ? titleHeight(options.theme) : 0
+  let maxRows = Math.floor((availableHeight - VERTICAL_PADDING * 2 - headingHeight) / row)
   if (maxRows < 1 && title) {
     title = undefined
-    titleHeight = 0
-    maxRows = Math.floor((availableHeight - VERTICAL_PADDING * 2) / ROW_HEIGHT)
+    headingHeight = 0
+    maxRows = Math.floor((availableHeight - VERTICAL_PADDING * 2) / row)
   }
   const itemLimit = Math.max(1, Math.min(options.maxItems ?? options.items.length, maxRows || 1))
   const items = fitItems(options.items, itemLimit)
   const contentWidth = Math.max(
-    estimateTextWidth(title ?? ''),
-    ...items.map(item => estimateTextWidth(item.label) + estimateTextWidth(item.value) + 34),
+    measureChartText(title ?? '', options.theme, 600),
+    ...items.map(item => measureChartText(item.label, options.theme) + measureChartText(item.value, options.theme) + 34),
   )
-  const maxWidth = Math.max(48, options.boundsWidth - 12)
+  const maxWidth = Math.max(0, options.boundsWidth - 12)
   const width = Math.min(Math.max(options.minWidth ?? 96, contentWidth + HORIZONTAL_PADDING * 2), maxWidth)
   const height = VERTICAL_PADDING * 2 +
-    titleHeight +
-    items.length * ROW_HEIGHT
+    headingHeight +
+    items.length * row
   const minX = options.boundsX + 6
   const maxX = Math.max(minX, options.boundsX + options.boundsWidth - width - 6)
   const x = Math.min(maxX, Math.max(minX, options.anchorX - width / 2))
@@ -71,13 +74,15 @@ export function paintChartTooltip(dl: DrawList, context: PaintContext, layout: C
   dl.fillRect(layout.x, layout.y, layout.width, layout.height, withAlpha(context.theme.surfacePopup, 0.96), 5)
   dl.strokeRect(layout.x, layout.y, layout.width, layout.height, context.theme.borderSubtle, 1, 5)
 
-  const fontSize = Math.max(10, context.theme.fontSize - 2)
+  const fontSize = chartFontSize(context.theme)
+  const row = rowHeight(context.theme)
+  const headingHeight = titleHeight(context.theme)
   let y = layout.y + VERTICAL_PADDING
   if (layout.title) {
     dl.fillText(
-      fitText(layout.title, layout.width - HORIZONTAL_PADDING * 2),
+      fitChartText(layout.title, layout.width - HORIZONTAL_PADDING * 2, context.theme, 600),
       layout.x + HORIZONTAL_PADDING,
-      y + TITLE_HEIGHT / 2,
+      y + headingHeight / 2,
       context.theme.textPrimary,
       fontSize,
       context.theme.fontFamily,
@@ -85,21 +90,22 @@ export function paintChartTooltip(dl: DrawList, context: PaintContext, layout: C
       'middle',
       600,
     )
-    y += TITLE_HEIGHT
+    y += headingHeight
   }
 
   for (const item of layout.items) {
-    const centerY = y + ROW_HEIGHT / 2
+    const centerY = y + row / 2
     const colorX = layout.x + HORIZONTAL_PADDING
     let labelX = colorX
     if (item.color) {
       dl.fillRect(colorX, centerY - 4, 8, 8, item.color, 2)
       labelX += 14
     }
-    const valueWidth = estimateTextWidth(item.value)
+    const value = fitChartText(item.value, Math.max(0, layout.width - (labelX - layout.x) - HORIZONTAL_PADDING), context.theme)
+    const valueWidth = measureChartText(value, context.theme)
     const labelWidth = Math.max(0, layout.width - (labelX - layout.x) - valueWidth - HORIZONTAL_PADDING - 8)
     dl.fillText(
-      fitText(item.label, labelWidth),
+      fitChartText(item.label, labelWidth, context.theme),
       labelX,
       centerY,
       context.theme.textSecondary,
@@ -109,7 +115,7 @@ export function paintChartTooltip(dl: DrawList, context: PaintContext, layout: C
       'middle',
     )
     dl.fillText(
-      fitText(item.value, Math.max(18, layout.width - HORIZONTAL_PADDING * 2)),
+      value,
       layout.x + layout.width - HORIZONTAL_PADDING,
       centerY,
       context.theme.textPrimary,
@@ -118,12 +124,8 @@ export function paintChartTooltip(dl: DrawList, context: PaintContext, layout: C
       'right',
       'middle',
     )
-    y += ROW_HEIGHT
+    y += row
   }
-}
-
-function estimateTextWidth(text: string): number {
-  return text.length * TEXT_WIDTH
 }
 
 function fitItems(items: readonly ChartTooltipItem[], maxItems: number): ChartTooltipItem[] {
@@ -134,11 +136,4 @@ function fitItems(items: readonly ChartTooltipItem[], maxItems: number): ChartTo
     ...items.slice(0, visibleCount).map(item => ({ ...item })),
     { label: `+${items.length - visibleCount}`, value: '' },
   ]
-}
-
-function fitText(text: string, maxWidth: number): string {
-  if (estimateTextWidth(text) <= maxWidth) return text
-  const maxChars = Math.max(1, Math.floor(maxWidth / TEXT_WIDTH))
-  if (maxChars <= 3) return '.'.repeat(maxChars)
-  return `${text.slice(0, maxChars - 3)}...`
 }

@@ -5,6 +5,8 @@
 本页说明 DirectSurface UI 图表组件共享的数据结构、状态层、图例、tooltip、性能边界和使用规则。具体组件参数见：
 
 - [LineChart 折线图](./line-chart.md)
+- [ComboChart 同轴柱线组合图](./combo-chart.md)
+- [ScatterChart 散点图](./scatter-chart.md)
 - [BarChart 柱状图](./bar-chart.md)
 - [DonutChart 环形图](./donut-chart.md)
 - [Sparkline 迷你趋势](./sparkline.md)
@@ -16,6 +18,8 @@
 ```ts
 import {
   RenderBarChart,
+  RenderComboChart,
+  RenderScatterChart,
   RenderChartRangeSlider,
   RenderDonutChart,
   RenderLineChart,
@@ -40,7 +44,7 @@ import {
 
 | API | 类型 | 用途 |
 | --- | --- | --- |
-| `RenderLineChart` / `RenderBarChart` / `RenderDonutChart` | class | 主要图表组件。 |
+| `RenderLineChart` / `RenderBarChart` / `RenderDonutChart` / `RenderComboChart` / `RenderScatterChart` | class | 主要图表组件。 |
 | `RenderSparkline` | class | KPI 卡片中的迷你趋势图。 |
 | `RenderChartRangeSlider` | class | 时间序列范围选择器。 |
 | `ChartSeries` / `BarChartSeries` / `DonutChartSegment` | type | 折线/范围、柱图、环形图的数据结构。 |
@@ -51,6 +55,8 @@ import {
 | `resolveFramePerformanceTimelineChartState()` | function | 性能时间线状态解析函数。 |
 
 最小装配顺序是：选择具体图表组件，准备对应 series/segments/categories，显式处理 `dataState`，并在数据替换、viewport 或显隐变化后使用组件提供的方法或触发布局/重绘。
+
+父布局调用 `measure()` 进行预测量时，图表只返回所需尺寸，不改写已布局的绘图区、hover、viewport 或数据点缓存；新几何在正式 `layout()` 时更新。
 
 ## 公共数据结构
 
@@ -110,6 +116,13 @@ interface DonutChartSegment {
 | `'time'` | 时间轴，`Date` 或可解析的日期时间字符串会转换为时间戳。自动识别字符串时要求所有字符串均为 `YYYY-MM-DD` 开头的有效日期；混合分类标签应显式指定轴类型。 |
 | `'category'` | 分类轴。 |
 
+### 精度和范围边界
+
+- 数值轴刻度按数据量级处理精度，并限制生成数量；大基数、窄区间或极小数值不会通过无限累加生成刻度。`tickCount` 是期望值，实际数量受浮点精度和生成预算约束。
+- 小于 `0.1` 的非零数值默认保留有效数字，避免统一显示为 `0`；业务需要固定小数位或完整精度时，使用 `labelFormatter`。
+- 时间刻度严格落在当前范围内，短区间支持秒和毫秒标签。默认使用运行环境本地时间；较长区间仍采用固定时长步进，不承诺自然月/自然年边界对齐。
+- x viewport 的最小跨度不再固定为 `1`。未指定时采用全域跨度的万分之一，并受浮点可表示精度约束；非有限或非正的 min/max span 配置按未配置处理。
+
 ## 数据状态
 
 `ChartDataState` 用于所有图表的状态层：
@@ -142,7 +155,9 @@ const loadingChart = new RenderBarChart({
 - 柱图通过 `onBarClick` 响应柱子点击。
 - 环形图通过 `onSegmentClick` 响应片段点击。
 
-图例 toggle 适合少量序列。序列很多时，应使用外部筛选器或列表，不要依赖图例承担复杂筛选。
+图例 toggle 适合少量序列。折线图和柱图的图例按实际字体测量并自动换行；图例区域最多使用组件高度的 40%，空间不足时省略后续图例项。环形图保留右侧或底部排列，长标签按可用宽度省略。序列很多或需要访问全部隐藏项时，应使用外部筛选器或列表，不要依赖图例承担复杂筛选。
+
+坐标轴留白、图例和 tooltip 文本复用框架文字测量，随字体调整；轴标签在空间不足时省略，tooltip 按可用高度限制条目并显示剩余数量。折线图、柱图、环形图在宽度小于 36 或高度小于 40 的极小布局中暂停绘制和数据激活；tooltip 无法容纳一行时不显示。
 
 折线数据可用 `y: null` 表示缺测。缺测位置保留在分类轴上，线和面积在该处断开；非有限的 y 值也会归一化为 `null`。无效数字或无效 `Date` 的 x 值不参与数据域和绘制。数值轴和时间轴按 x 从小到大绘制，同一 x 的重复观测会保留；堆叠时按各序列在该 x 的出现次序配对，缺测也占据一次序。更新序列或片段时，图例显隐优先按可选 `id` 保持；未提供 `id` 时按名称及其出现顺序匹配。稳定业务标识建议填写 `id`。
 

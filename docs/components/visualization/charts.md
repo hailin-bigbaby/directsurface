@@ -11,6 +11,8 @@ DirectSurface UI 内置一组轻量 Canvas 图表控件，面向业务看板、�
 ```ts
 import {
   RenderBarChart,
+  RenderComboChart,
+  RenderScatterChart,
   RenderChartRangeSlider,
   RenderDonutChart,
   RenderLineChart,
@@ -27,6 +29,8 @@ import {
 | API | 类型 | 用途 |
 | --- | --- | --- |
 | `RenderLineChart` | class | 折线图、面积图、时间序列和 viewport。 |
+| `RenderComboChart` | class | 同轴分类柱线组合。 |
+| `RenderScatterChart` | class | 双数值坐标散点关系。 |
 | `RenderBarChart` | class | 分类柱图、条形图、堆叠和百分比堆叠。 |
 | `RenderDonutChart` | class | 少量分类占比。 |
 | `RenderSparkline` | class | 卡片内迷你趋势。 |
@@ -40,6 +44,8 @@ import {
 | 组件 / helper | 用途 | 文档 |
 | --- | --- | --- |
 | `RenderLineChart` | 折线图、面积图、时间序列、堆叠趋势、可平移缩放 viewport。 | [LineChart 折线图](./charts/line-chart.md) |
+| `RenderComboChart` | 实际与目标等同单位对比。 | [ComboChart 同轴柱线组合图](./charts/combo-chart.md) |
+| `RenderScatterChart` | 关系分析、离群点。 | [ScatterChart 散点图](./charts/scatter-chart.md) |
 | `RenderBarChart` | 纵向柱图、横向条形图、堆叠柱图、百分比堆叠柱图。 | [BarChart 柱状图](./charts/bar-chart.md) |
 | `RenderDonutChart` | 少量分类的环形占比。 | [DonutChart 环形图](./charts/donut-chart.md) |
 | `RenderSparkline` | KPI 卡片中的迷你趋势线、面积线、小柱图。 | [Sparkline 迷你趋势](./charts/sparkline.md) |

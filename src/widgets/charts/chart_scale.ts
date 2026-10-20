@@ -60,12 +60,14 @@ export function clampChartDomain(
   options: { minSpan?: number; maxSpan?: number } = {},
 ): ChartDomain {
   const full = sanitizeChartDomain(fullDomain, { min: 0, max: 1 })
-  const fullSpan = Math.max(Number.EPSILON, full.max - full.min)
-  const minSpan = Math.min(fullSpan, Math.max(Number.EPSILON, options.minSpan ?? fullSpan / 10000, 1))
-  const maxSpan = Math.min(fullSpan, Math.max(minSpan, options.maxSpan ?? fullSpan))
+  const fullSpan = full.max - full.min
+  const precision = Math.max(Number.MIN_VALUE, Math.max(Math.abs(full.min), Math.abs(full.max)) * Number.EPSILON)
+  const requestedMin = Number.isFinite(options.minSpan) && options.minSpan! > 0 ? options.minSpan! : fullSpan / 10000
+  const minSpan = Math.min(fullSpan, Math.max(precision, requestedMin))
+  const maxSpan = Math.min(fullSpan, Math.max(minSpan, Number.isFinite(options.maxSpan) && options.maxSpan! > 0 ? options.maxSpan! : fullSpan))
   let next = sanitizeChartDomain(domain, full)
   let span = next.max - next.min
-  const center = (next.min + next.max) / 2
+  const center = next.min + (next.max - next.min) / 2
   if (span < minSpan) {
     span = minSpan
     next = { min: center - span / 2, max: center + span / 2 }
@@ -139,19 +141,40 @@ export function collectYValues(series: readonly { data: readonly ChartPoint[] }[
   ))
 }
 
+// Bound work independently of caller tickCount and never advance by repeated floating-point addition.
+const MAX_TICKS = 1000
+
 export function niceTicks(min: number, max: number, count = 4): number[] {
-  if (!Number.isFinite(min) || !Number.isFinite(max) || count <= 0) return []
+  if (!Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(count) || count <= 0 || min > max) return []
   if (min === max) return [min]
-  const step = niceNumber((max - min) / Math.max(1, count), true)
-  const niceMin = Math.floor(min / step) * step
-  const niceMax = Math.ceil(max / step) * step
+  const limit = Math.min(MAX_TICKS - 2, Math.max(1, Math.floor(count)))
+  const precision = Math.max(Number.MIN_VALUE, Math.max(Math.abs(min), Math.abs(max)) * Number.EPSILON)
+  const span = max - min
+  // A rounded nice step can require more ticks than the work budget; increase it
+  // rather than truncating the right-hand portion of the domain.
+  let step = Math.max(precision, niceNumber(span / limit, true))
+  if (span / step > MAX_TICKS - 2) step = Math.max(precision, niceNumber(span / (MAX_TICKS - 2), false))
+  if (!Number.isFinite(step) || step <= 0) return [min, max]
+  // Start one step below when division rounds up at an exact decimal boundary.
+  const first = Math.floor(min / step) * step
+  const decimals = Math.max(0, -Math.floor(Math.log10(step)))
   const ticks: number[] = []
-  const epsilon = step * 1e-6
-  for (let value = niceMin; value <= niceMax + step * 0.5; value += step) {
-    const tick = roundTick(value)
-    if (tick >= min - epsilon && tick <= max + epsilon) ticks.push(tick)
+  for (let index = 0; index < MAX_TICKS; index += 1) {
+    const value = first + index * step
+    if (!Number.isFinite(value)) break
+    const tick = decimals <= 100 ? Number(value.toFixed(decimals)) : Number(value.toPrecision(15))
+    if (tick > max) break
+    if (tick >= min && (ticks.length === 0 || tick > ticks[ticks.length - 1]!)) ticks.push(tick)
+    if (index > 0 && value <= first + (index - 1) * step) break
   }
-  return ticks.length > 0 ? ticks : [roundTick(min), roundTick(max)]
+  return ticks.length > 0 ? ticks : [min, max]
+}
+
+/** Relative comparison keeps sub-unit viewports distinct while tolerating arithmetic noise. */
+export function sameChartDomain(a: ChartDomain, b: ChartDomain): boolean {
+  const tolerance = Math.max(Number.MIN_VALUE,
+    Math.abs(a.max - a.min) * 1e-12, Math.abs(b.max - b.min) * 1e-12)
+  return Math.abs(a.min - b.min) <= tolerance && Math.abs(a.max - b.max) <= tolerance
 }
 
 export function formatChartNumber(value: number): string {
@@ -159,21 +182,24 @@ export function formatChartNumber(value: number): string {
   if (abs >= 1000000) return `${trimNumber(value / 1000000)}M`
   if (abs >= 1000) return `${trimNumber(value / 1000)}k`
   if (abs >= 100 || Number.isInteger(value)) return String(Math.round(value))
-  return trimNumber(value)
+  return abs > 0 && abs < 0.1 ? String(Number(value.toPrecision(6))) : trimNumber(value)
 }
 
 export function niceTimeTicks(min: number, max: number, count = 4): TimeTick[] {
-  if (!Number.isFinite(min) || !Number.isFinite(max) || count <= 0) return []
+  if (!Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(count) || count <= 0 || min > max) return []
   const domain = sanitizeChartDomain({ min, max }, { min: 0, max: 1 })
   const span = Math.max(1, domain.max - domain.min)
-  const targetStep = span / Math.max(1, count)
-  const step = TIME_STEPS.find(candidate => candidate >= targetStep) ?? TIME_STEPS[TIME_STEPS.length - 1]!
+  const limit = Math.min(MAX_TICKS - 2, Math.max(1, Math.floor(count)))
+  const targetStep = span / limit
+  const step = TIME_STEPS.find(candidate => candidate >= targetStep) ?? Math.ceil(targetStep / YEAR_MS) * YEAR_MS
   const start = Math.ceil(domain.min / step) * step
+  const labelSpan = Math.min(span, step < 1000 ? 999 : step < MINUTE_MS ? MINUTE_MS : span)
   const ticks: TimeTick[] = []
-  for (let value = start; value <= domain.max + step * 0.1; value += step) {
-    if (value < domain.min - step * 0.1) continue
-    ticks.push({ value, label: formatChartTime(value, span) })
-    if (ticks.length > count + 2) break
+  for (let index = 0; index < MAX_TICKS; index += 1) {
+    const value = start + index * step
+    if (!Number.isFinite(value) || value > domain.max) break
+    if (value < domain.min) continue
+    ticks.push({ value, label: formatChartTime(value, labelSpan) })
   }
   if (ticks.length > 0) return ticks
   return [
@@ -189,6 +215,9 @@ export function formatChartTime(value: number, span = 0): string {
   const day = pad2(date.getDate())
   const hour = pad2(date.getHours())
   const minute = pad2(date.getMinutes())
+  const second = pad2(date.getSeconds())
+  if (span > 0 && span < 1000) return `${hour}:${minute}:${second}.${String(date.getMilliseconds()).padStart(3, '0')}`
+  if (span > 0 && span <= MINUTE_MS) return `${hour}:${minute}:${second}`
   if (span > 0 && span <= DAY_MS) return `${hour}:${minute}`
   if (span > 0 && span <= YEAR_MS) return `${month}-${day}`
   if (span > YEAR_MS) return `${year}-${month}`
@@ -200,6 +229,8 @@ const HOUR_MS = 60 * MINUTE_MS
 const DAY_MS = 24 * HOUR_MS
 const YEAR_MS = 365 * DAY_MS
 const TIME_STEPS = [
+  1, 5, 10, 50, 100, 250, 500,
+  1000, 2000, 5000, 10000, 15000, 30000,
   MINUTE_MS,
   5 * MINUTE_MS,
   15 * MINUTE_MS,
@@ -230,10 +261,6 @@ function niceNumber(range: number, round: boolean): number {
   else if (fraction <= 5) niceFraction = 5
   else niceFraction = 10
   return niceFraction * Math.pow(10, exponent)
-}
-
-function roundTick(value: number): number {
-  return Math.abs(value) < 1e-9 ? 0 : Math.round(value * 1000000) / 1000000
 }
 
 function trimNumber(value: number): string {

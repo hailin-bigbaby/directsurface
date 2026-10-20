@@ -80,7 +80,7 @@ const chart = new RenderLineChart({
 | `loadingMessage` | `string` | `加载中` | 加载中文案。 |
 | `errorMessage` | `string` | `数据加载失败` | 错误文案。 |
 | `showTooltip` | `boolean` | `true` | 是否显示 tooltip。 |
-| `tooltipMode` | `ChartTooltipMode` | `'axis'` | `'axis'` 聚合同一 x；`'item'` 只显示单点。 |
+| `tooltipMode` | `ChartTooltipMode` | `'axis'` | `'axis'` 从未抽稀数据聚合实际相同 x；`'item'` 按绘制点半径命中单点。 |
 | `showCrosshair` | `boolean` | 与 `showTooltip` 相同 | 是否显示十字/辅助线。 |
 | `height` | `number` | `220` | 期望高度。宽度由父约束决定，无限宽时回退到 `360`。 |
 | `xAxisType` | `ChartAxisType` | `'auto'` | `'auto'`、`'linear'`、`'time'`、`'category'`。 |
@@ -89,7 +89,7 @@ const chart = new RenderLineChart({
 | `enableWheelZoom` | `boolean` | `false` | 是否允许滚轮缩放 x viewport。 |
 | `wheelZoomModifier` | `ChartWheelZoomModifier` | `'ctrlOrMeta'` | 触发滚轮缩放需要的修饰键。 |
 | `wheelZoomSpeed` | `number` | `0.12` | 滚轮缩放速度。 |
-| `minXSpan` | `number` | `undefined` | x viewport 最小跨度。 |
+| `minXSpan` | `number` | 全域跨度的万分之一 | x viewport 最小跨度，支持小数，受浮点精度约束。 |
 | `maxXSpan` | `number` | `undefined` | x viewport 最大跨度。 |
 | `decimation` | `ChartDecimationMode` | `'minMax'` | 点位抽稀模式。`'minMax'` 适合大序列。 |
 | `onViewportChange` | `(event) => void` | `undefined` | viewport 改变回调。 |
@@ -131,6 +131,14 @@ const chart = new RenderLineChart({
 - `'rangeJump'`
 
 与范围选择器联动见 [ChartRangeSlider 范围选择器](./range-slider.md)。
+
+## Tooltip 与抽稀
+
+`decimation` 只改变绘制采样，`tooltipMode: 'axis'` 独立查询当前可视范围内未抽稀的可见序列数据，选择距离指针最近的实际 x，避免因为像素距离接近而混入其他时刻。数值/时间轴按数值或时间戳精确匹配，分类轴仍按原始下标匹配；不插值，也不借用相邻时刻补齐缺测序列。固定 y 域外的数据仍不参与 hover。
+
+非堆叠图保留该 x 的重复观测。堆叠图按最接近指针 y 的观测确定出现次序，只聚合各序列相同次序的观测，与堆叠布局规则一致；缺测仍占据次序。这样 tooltip 中的原始值、百分比和总计属于同一组观测。
+
+`debugState().points` 继续表示用于绘制的采样点，因此轴 hover 返回的原始点不一定出现在其中。聚合查询会保留可视原始点的信息，数据量大时仍应通过 viewport 限制范围。
 
 ## 标注
 

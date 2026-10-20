@@ -30,6 +30,7 @@ import {
   type AppHost,
   type RenderBox,
 } from 'directsurface'
+import { createChartExamples } from './chart_examples'
 import { createWorkbenchPage } from './workbench_page'
 import { createCanvasWorkspacePage } from './canvas_workspace_page'
 import { WorkbenchStore } from './workbench_model'
@@ -222,6 +223,7 @@ function dataPage(): RenderStackPanel {
       description: 'A responsive line chart with hover details.',
       child: chart,
     }),
+    createChartExamples().root,
   ])
 }
 

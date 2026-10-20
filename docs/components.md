@@ -20,7 +20,7 @@ These are the `Render*` values exported from the `directsurface` package entry. 
 
 ## Data and charts
 
-`RenderTable`, `RenderDataGrid`, `RenderTreeGrid`, `RenderBarChart`, `RenderChartRangeSlider`, `RenderDonutChart`, `RenderLineChart`, `RenderSparkline`.
+`RenderTable`, `RenderDataGrid`, `RenderTreeGrid`, `RenderBarChart`, `RenderComboChart`, `RenderScatterChart`, `RenderChartRangeSlider`, `RenderDonutChart`, `RenderLineChart`, `RenderSparkline`.
 
 ## Workspaces and overlays
 

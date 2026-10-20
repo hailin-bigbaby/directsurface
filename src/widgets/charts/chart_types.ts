@@ -1,3 +1,4 @@
+import type { RenderBoxOptions } from '../../layout/render_box'
 import type { Color } from '../../theme/theme'
 
 export type ChartX = number | string | Date
@@ -232,3 +233,61 @@ export interface DonutSegmentLayout {
 
 export type SparklineVariant = 'line' | 'area' | 'bar'
 export type BarChartOrientation = 'vertical' | 'horizontal'
+
+/** Common configuration for single-coordinate-system combo and scatter charts. */
+export interface CartesianChartOptions extends RenderBoxOptions, ChartStateOptions {
+  xAxis?: ChartAxisOptions
+  yAxis?: ChartAxisOptions
+  showGrid?: boolean
+  showLegend?: boolean
+  legendMode?: ChartLegendMode
+  visibleSeries?: number[]
+  showTooltip?: boolean
+  onSeriesVisibilityChange?: (event: ChartSeriesVisibilityChangeEvent) => void
+}
+
+export interface CartesianChartDebugState {
+  plot: ChartPlotRect
+  xDomain: ChartDomain
+  yDomain: ChartDomain
+  xLabels: Array<{ x: number; label: string }>
+  yTicks: Array<{ value: number; label: string }>
+  legend: Array<{ index: number; x: number; y: number; width: number; height: number }>
+  visibleSeries: number[]
+  hiddenSeries: number[]
+  state: ChartStateDebugState
+  tooltip: ChartTooltipDebugState | null
+}
+
+export interface ComboChartSeries {
+  id?: string
+  name: string
+  type: 'bar' | 'line'
+  data: Array<number | null>
+  color?: Color
+}
+
+export interface ComboChartItem extends ChartPointLayout {
+  kind: 'bar' | 'line'
+  categoryIndex: number
+}
+
+export interface ScatterChartPoint {
+  id?: string
+  label?: string
+  x: number
+  y: number
+}
+
+export interface ScatterChartSeries {
+  id?: string
+  name: string
+  data: ScatterChartPoint[]
+  color?: Color
+}
+
+export interface ScatterPointLayout extends ChartPointLayout {
+  id?: string
+  xValue: number
+  yValue: number
+}
