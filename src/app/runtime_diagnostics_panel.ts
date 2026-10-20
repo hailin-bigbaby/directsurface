@@ -1,10 +1,14 @@
+import { RenderScrollViewer } from '../widgets/scroll_view'
+import type { BoxConstraints, LayoutContext } from '../core/render_object'
+import { RenderWrapPanel } from '../layout/render_wrap'
+import { RenderComboBox } from '../widgets/dropdown'
+import { RenderTabs } from '../widgets/tabs'
 import { RenderGridPanel, gridAuto, gridFr } from '../layout/render_grid_panel'
-import { RenderStackPanel } from '../layout/render_flex'
 import { RenderButton } from '../widgets/button'
 import { RenderCheckbox } from '../widgets/checkbox'
 import { RenderListView, type ListViewItem } from '../widgets/list_view'
 import { RenderObjectInspector } from '../widgets/object_inspector'
-import { RenderParagraph, RenderText } from '../widgets/basic'
+import { RenderText } from '../widgets/basic'
 import { RenderSearchBox } from '../widgets/search_box'
 import { RenderSegmentedControl } from '../widgets/segmented_control'
 import { RenderWindow } from '../widgets/window'
@@ -16,6 +20,8 @@ export interface RuntimeDiagnosticsState {
 }
 
 export interface RuntimeDiagnosticsPanelDebugState {
+  compact: boolean
+  activePane: 'requests' | 'detail'
   requestCount: number
   filteredRequestCount: number
   aggregateCount: number
@@ -76,18 +82,24 @@ export type RuntimeDiagnosticsViewMode = 'requests' | 'hotspots'
 
 export class RenderRuntimeDiagnosticsView extends RenderGridPanel {
   static override debugTypeName = 'RenderRuntimeDiagnosticsView'
-  private readonly _toolbar: RenderStackPanel
+  private readonly _toolbar: RenderWrapPanel
   private readonly _filterBar: RenderGridPanel
-  private readonly _summary = new RenderParagraph('')
+  private readonly _summary = new RenderText('', { role: 'secondary', size: 'small', overflow: 'ellipsis' })
+  private _summaryText = ''
+  private readonly _body = new RenderGridPanel({ columns: [gridFr(0.4), gridFr(0.6)], rows: [gridFr()], columnGap: 10, rowGap: 8 })
+  private readonly _bodyTabs: RenderTabs
+  private _compact: boolean | undefined
+  private _activePane: 'requests' | 'detail' = 'requests'
   private readonly _list: RenderListView<RuntimeDiagnosticsListData>
   private readonly _detailInspector: RenderObjectInspector
+  private readonly _detailBox: RenderScrollViewer
   private readonly _stackCheckbox: RenderCheckbox
   private readonly _refreshButton: RenderButton
   private readonly _clearButton: RenderButton
   private readonly _exportButton: RenderButton
   private readonly _viewMode: RenderSegmentedControl
-  private readonly _kindFilter: RenderSegmentedControl
-  private readonly _sourceFilter: RenderSegmentedControl
+  private readonly _kindFilter: RenderComboBox
+  private readonly _sourceFilter: RenderComboBox
   private readonly _queryFilter: RenderSearchBox
   private _state: RuntimeDiagnosticsState
   private _stateSignature: string
@@ -107,6 +119,7 @@ export class RenderRuntimeDiagnosticsView extends RenderGridPanel {
       columns: [gridFr()],
       rows: [gridAuto(), gridAuto(), gridAuto(), gridAuto(), gridFr()],
       rowGap: 8,
+      padding: 10,
     })
     this._state = normalizeState(options.state)
     this._stateSignature = stateSignature(this._state)
@@ -114,11 +127,7 @@ export class RenderRuntimeDiagnosticsView extends RenderGridPanel {
     this._onTogglePaintRequestDebug = options.onTogglePaintRequestDebug
     this._onClearPaintRequestHistory = options.onClearPaintRequestHistory
     this._onExportDiagnosticsSnapshot = options.onExportDiagnosticsSnapshot
-    this._toolbar = new RenderStackPanel({
-      orientation: 'horizontal',
-      spacing: 8,
-      crossAxisAlignment: 'center',
-    })
+    this._toolbar = new RenderWrapPanel({ spacing: 8, runSpacing: 6, crossAxisAlignment: 'center' })
     this._stackCheckbox = new RenderCheckbox({
       checked: this._state.paintRequestDebugEnabled,
       label: 'Stack 日志',
@@ -145,6 +154,7 @@ export class RenderRuntimeDiagnosticsView extends RenderGridPanel {
         const snapshot = this._onExportDiagnosticsSnapshot?.()
         if (!snapshot) return
         this._detailInspector.setValue(snapshot, 'runtime.snapshot')
+        if (this._compact) this._activatePane('detail')
       },
     })
     this._viewMode = new RenderSegmentedControl({
@@ -160,19 +170,21 @@ export class RenderRuntimeDiagnosticsView extends RenderGridPanel {
     this._toolbar.addChild(this._refreshButton)
     this._toolbar.addChild(this._clearButton)
     this._toolbar.addChild(this._exportButton)
-    this._kindFilter = new RenderSegmentedControl({
+    this._kindFilter = new RenderComboBox({
+      clearable: false,
       value: this._kindFilterValue,
       options: [
-        { value: 'all', label: 'All' },
+        { value: 'all', label: 'All kinds' },
         { value: 'layout', label: 'Layout' },
         { value: 'frame', label: 'Frame' },
       ],
       onChange: value => this.setKindFilter(value as RuntimeDiagnosticsKindFilter),
     })
-    this._sourceFilter = new RenderSegmentedControl({
+    this._sourceFilter = new RenderComboBox({
+      clearable: false,
       value: this._sourceFilterValue,
       options: [
-        { value: 'all', label: 'All' },
+        { value: 'all', label: 'All sources' },
         { value: 'pipeline', label: 'Pipe' },
         { value: 'overlay', label: 'Overlay' },
         { value: 'runtime', label: 'Runtime' },
@@ -196,36 +208,70 @@ export class RenderRuntimeDiagnosticsView extends RenderGridPanel {
     this._filterBar.addChild(this._queryFilter, { row: 0, column: 2 })
     this._list = new RenderListView<RuntimeDiagnosticsListData>({
       items: [],
-      minHeight: 120,
+      minHeight: 0,
       onSelect: item => {
         this._selectListItem(item)
         this._syncDetail()
+        if (this._compact) this._activatePane('detail')
       },
       onActivate: item => {
         this._selectListItem(item)
         this._syncDetail()
+        if (this._compact) this._activatePane('detail')
       },
       copyText: item => item.data ? formatListItemCopyText(item.data) : item.label,
     })
     this._detailInspector = new RenderObjectInspector({
       value: null,
       label: 'runtime.request',
-      adaptiveTreeHeight: true,
+      treeHeight: 180,
       includePrototype: false,
     })
-    const body = new RenderGridPanel({
-      columns: [gridFr(0.4, { min: 180, max: 320 }), gridFr(0.6, { min: 220 })],
-      rows: [gridFr()],
-      columnGap: 10,
-    })
-    body.addChild(this._list, { row: 0, column: 0 })
-    body.addChild(this._detailInspector, { row: 0, column: 1 })
+    this._detailBox = new RenderScrollViewer({ direction: 'vertical', child: this._detailInspector })
+    this._bodyTabs = new RenderTabs({ tabs: [{ key: 'requests', label: 'Requests / Hotspots' }, { key: 'detail', label: 'Detail' }],
+      activeKey: 'requests', onTabChange: key => this._activatePane(key === 'detail' ? 'detail' : 'requests') })
+    this._body.addChild(this._bodyTabs)
+    this._body.addChild(this._list)
+    this._body.addChild(this._detailBox)
     this.addChild(new RenderText('Paint / Layout Requests', { role: 'title', weight: 'semibold' }), { row: 0, column: 0 })
     this.addChild(this._toolbar, { row: 1, column: 0 })
     this.addChild(this._filterBar, { row: 2, column: 0 })
     this.addChild(this._summary, { row: 3, column: 0 })
-    this.addChild(body, { row: 4, column: 0 })
+    this.addChild(this._body, { row: 4, column: 0 })
+    this._configureResponsive(false)
     this._syncFromState()
+  }
+
+  override performLayout(constraints: BoxConstraints, context: LayoutContext): void {
+    if (context.pass !== 'measure') this._configureResponsive(constraints.maxWidth < 760)
+    super.performLayout(constraints, context)
+  }
+
+  private _activatePane(pane: 'requests' | 'detail'): void {
+    this._activePane = pane
+    this._bodyTabs.activeKey = pane
+    this._configureResponsive(this._compact ?? false, true)
+  }
+
+  private _configureResponsive(compact: boolean, force = false): void {
+    if (this._compact === compact && !force) return
+    this._compact = compact
+    this._bodyTabs.visible = compact
+    this._list.visible = !compact || this._activePane === 'requests'
+    this._detailBox.visible = !compact || this._activePane === 'detail'
+    this._body.columns = compact ? [gridFr()] : [gridFr(0.4), gridFr(0.6)]
+    this._body.rows = compact ? [gridAuto(), gridFr()] : [gridFr()]
+    this._body.childData.set(this._bodyTabs, { row: 0, column: 0 })
+    this._body.childData.set(this._list, { row: compact ? 1 : 0, column: 0 })
+    this._body.childData.set(this._detailBox, { row: compact ? 1 : 0, column: compact ? 0 : 1 })
+    this._filterBar.columns = compact ? [gridFr(), gridFr()] : [gridFr(0.22), gridFr(0.28), gridFr(0.5)]
+    this._filterBar.rows = compact ? [gridAuto(), gridAuto()] : [gridAuto()]
+    this._filterBar.childData.set(this._kindFilter, { row: 0, column: 0 })
+    this._filterBar.childData.set(this._sourceFilter, { row: 0, column: 1 })
+    this._filterBar.childData.set(this._queryFilter, { row: compact ? 1 : 0, column: compact ? 0 : 2, columnSpan: compact ? 2 : 1 })
+    this._filterBar.markNeedsLayout()
+    this._body.markNeedsLayout()
+    this.markNeedsLayout()
   }
 
   setDiagnosticsState(state: RuntimeDiagnosticsState): void {
@@ -274,6 +320,8 @@ export class RenderRuntimeDiagnosticsView extends RenderGridPanel {
 
   debugState(): RuntimeDiagnosticsPanelDebugState {
     return {
+      compact: this._compact ?? false,
+      activePane: this._activePane,
       requestCount: this._state.paintRequests.length,
       filteredRequestCount: this._filteredRequests().length,
       aggregateCount: aggregateRequests(this._filteredRequests()).length,
@@ -286,7 +334,7 @@ export class RenderRuntimeDiagnosticsView extends RenderGridPanel {
       queryFilter: this._queryFilterValue,
       listLabels: this._list.items.map(item => item.label),
       detailRoots: this._detailInspector.debugState().roots.map(root => root.path),
-      summaryText: this._summary.text,
+      summaryText: this._summaryText,
     }
   }
 
@@ -343,7 +391,9 @@ export class RenderRuntimeDiagnosticsView extends RenderGridPanel {
     this._list.selectedItem = this._selectedListItem(items, selectedRequest, selectedAggregate)
     this._stackCheckbox.checked = this._state.paintRequestDebugEnabled
     this._viewMode.value = this._viewModeValue
-    this._summary.text = formatSummary(this._state, filteredRequests, aggregates, selectedRequest, selectedAggregate)
+    this._summaryText = formatSummary(this._state, filteredRequests, aggregates, selectedRequest, selectedAggregate)
+    this._summary.text = this._summaryText.split('\n')[0]!
+    this._summary.tooltip = this._summaryText
     this._syncDetail()
     this.markNeedsLayout()
     this.markNeedsPaint()

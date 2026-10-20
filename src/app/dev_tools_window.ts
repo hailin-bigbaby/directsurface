@@ -62,7 +62,7 @@ export class RenderDevToolsWindow extends RenderWindow {
       y: 64,
       width: 920,
       height: 620,
-      minWidth: 620,
+      minWidth: 360,
       minHeight: 420,
       contentPadding: 0,
       contentSpacing: 0,

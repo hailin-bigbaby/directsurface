@@ -1,3 +1,4 @@
+import { sanitizeDiagnosticValue } from './diagnostic_value'
 import { HitTestResult, type HitTestTarget } from '../gestures/hit_test'
 import type { EventDispatcher } from '../gestures/recognizers'
 import {
@@ -22,6 +23,7 @@ export interface LayoutInspectorDebugState {
   hoverPathInfo: RenderDebugInfo[]
   selectedPathInfo: RenderDebugInfo[]
   selectedAppContext?: LayoutInspectorAppContextEntry[]
+  selectedAppContextRevision?: string
   renderTree?: LayoutInspectorTreeNode
   hover?: RenderDebugInfo
   selected?: RenderDebugInfo
@@ -186,6 +188,7 @@ export class LayoutInspectorService {
 
   debugState(): LayoutInspectorDebugState {
     this._discardStalePaths({ requestPaint: true })
+    const selectedAppContext = this._appContextEntriesForPath(this.selectedPath, this._selectedPathIndex)
     return {
       enabled: this.enabled,
       overlayVisible: this.overlayVisible,
@@ -194,7 +197,8 @@ export class LayoutInspectorService {
       selectedPathIndex: this._selectedPathIndex,
       hoverPathInfo: this._debugInfoListForPath(this.hoverPath),
       selectedPathInfo: this._debugInfoListForPath(this.selectedPath),
-      selectedAppContext: this._appContextEntriesForPath(this.selectedPath, this._selectedPathIndex),
+      selectedAppContext,
+      selectedAppContextRevision: selectedAppContext.length ? this._selectedAppContextRevision : undefined,
       renderTree: this._debugTreeForSelectedRoot(),
       hover: this._debugInfoForPath(this.hoverPath),
       selected: this._debugInfoForPath(this.selectedPath, this._selectedPathIndex),
@@ -410,7 +414,8 @@ export class LayoutInspectorService {
         if (!seen.has(child)) children.push(visit(child))
       })
       return {
-        info: node.debugInfo(),
+        // Cache topology, but read geometry/state at access time. Exporters copy the info.
+        get info() { return node.debugInfo() },
         children,
       }
     }
@@ -490,44 +495,15 @@ function contextId(context: AppContextRegistry): number {
 }
 
 function formatContextValue(value: unknown): string {
-  if (value === null) return 'null'
-  if (value === undefined) return 'undefined'
-  if (typeof value === 'string') return limitText(JSON.stringify(value))
-  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value)
-  if (typeof value === 'symbol') return value.description ? `Symbol(${value.description})` : 'Symbol()'
-  if (typeof value === 'function') return `[Function ${(value as Function).name || 'anonymous'}]`
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? 'Invalid Date' : value.toISOString()
-  if (value instanceof Map) return limitText(`Map(${value.size}) ${stringifyContextValue([...value.entries()])}`, CONTEXT_VALUE_MAX_LENGTH)
-  if (value instanceof Set) return limitText(`Set(${value.size}) ${stringifyContextValue([...value.values()])}`, CONTEXT_VALUE_MAX_LENGTH)
-  if (Array.isArray(value)) return limitText(`Array(${value.length}) ${stringifyContextValue(value)}`, CONTEXT_VALUE_MAX_LENGTH)
-  if (typeof value === 'object') {
-    const name = value.constructor?.name
-    const serialized = stringifyContextValue(value)
-    return limitText(name && name !== 'Object' ? `${name} ${serialized}` : serialized, CONTEXT_VALUE_MAX_LENGTH)
+  const safe = sanitizeDiagnosticValue(value)
+  let arrayPrefix = ''
+  if (Array.isArray(safe)) {
+    try { arrayPrefix = `Array(${Object.getOwnPropertyDescriptor(value, 'length')?.value ?? safe.length}) ` }
+    catch { arrayPrefix = 'Array(?) ' }
   }
-  return limitText(String(value))
-}
-
-function stringifyContextValue(value: unknown): string {
-  const seen = new WeakSet<object>()
-  const depths = new WeakMap<object, number>()
-  try {
-    const text = JSON.stringify(value, function (this: unknown, _key, next) {
-      if (typeof next === 'bigint') return `${next}n`
-      if (typeof next === 'function') return `[Function ${next.name || 'anonymous'}]`
-      if (!next || typeof next !== 'object') return next
-      const parentDepth = typeof this === 'object' && this ? depths.get(this) ?? 0 : 0
-      const depth = parentDepth + 1
-      if (seen.has(next)) return '[Circular]'
-      if (depth > 3) return Array.isArray(next) ? `[Array(${next.length})]` : `[${next.constructor?.name || 'Object'}]`
-      seen.add(next)
-      depths.set(next, depth)
-      return next
-    })
-    return text ?? String(value)
-  } catch (error) {
-    return error instanceof Error ? `<unserializable: ${error.message}>` : String(value)
-  }
+  const text = typeof safe === 'string' && typeof value !== 'string'
+    ? safe : JSON.stringify(safe) ?? String(safe)
+  return limitText(arrayPrefix + text, CONTEXT_VALUE_MAX_LENGTH)
 }
 
 function limitText(text: string, maxLength = 120): string {

@@ -1,3 +1,4 @@
+import { sanitizeDiagnosticValue as sanitizePaintRequestDetail } from './diagnostic_value'
 import { DisposableBag } from '../core/disposable'
 import { FocusManager } from '../core/focus_manager'
 import { InputComposer } from '../core/input_composer'
@@ -1965,41 +1966,6 @@ function clonePaintRequestRecord(record: RuntimePaintRequestRecord): RuntimePain
   }
 }
 
-function sanitizePaintRequestDetail(value: unknown, depth = 0, seen = new WeakSet<object>()): unknown {
-  if (value === null || value === undefined) return value
-  const valueType = typeof value
-  if (valueType === 'string' || valueType === 'number' || valueType === 'boolean') return value
-  if (valueType === 'bigint') return value.toString()
-  if (valueType === 'function') return '[Function]'
-  if (valueType !== 'object') return String(value)
-
-  const objectValue = value as object
-  if (seen.has(objectValue)) return '[Circular]'
-  seen.add(objectValue)
-
-  if (value instanceof Date) return value.toISOString()
-  if (Array.isArray(value)) {
-    if (depth >= 3) return `[Array(${value.length})]`
-    return value.slice(0, 24).map(item => sanitizePaintRequestDetail(item, depth + 1, seen))
-  }
-  if (value instanceof Map) return `[Map(${value.size})]`
-  if (value instanceof Set) return `[Set(${value.size})]`
-
-  const prototype = Object.getPrototypeOf(value)
-  if (prototype !== Object.prototype && prototype !== null) {
-    return `[${value.constructor?.name || 'Object'}]`
-  }
-
-  if (depth >= 3) return '[Object]'
-  const result: Record<string, unknown> = {}
-  const entries = Object.entries(value as Record<string, unknown>).slice(0, 24)
-  for (const [key, entryValue] of entries) {
-    result[key] = sanitizePaintRequestDetail(entryValue, depth + 1, seen)
-  }
-  const keyCount = Object.keys(value as Record<string, unknown>).length
-  if (keyCount > entries.length) result.__truncated__ = keyCount - entries.length
-  return result
-}
 
 function paintRequestStack(): string[] {
   const stack = new Error().stack

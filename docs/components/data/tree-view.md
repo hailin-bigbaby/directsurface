@@ -3,7 +3,7 @@
 > **通用布局能力**：`RenderTreeView` 实例统一支持 `width`、`height`、min/max、`margin` 和槽位对齐；原有独立高度状态已经并入 `RenderBox` 契约。详见[组件通用布局属性](../common-layout-properties.md)。
 
 
-`RenderTreeView` 用于展示单列层级数据，支持展开折叠、单选、复选、半选、虚拟滚动、键盘导航、复制、文本省略和 tooltip。它适合导航树、目录树、分类树、模板树、对象结构浏览等场景。
+`RenderTreeView` 用于展示单列层级数据，支持展开折叠、单选、复选、半选、虚拟滚动、键盘导航、复制、自动双轴滚动和 tooltip。它适合导航树、目录树、分类树、模板树、对象结构浏览等场景。
 
 ## 何时使用
 
@@ -117,7 +117,7 @@ const docTree = new RenderTreeView<DocEntry>({
 | `key` | `string` | 必填 | 节点唯一 key。展开、选中、勾选、定位都依赖它。 |
 | `label` | `string` | 必填 | 主显示文本。 |
 | `labelTokens` | `readonly TreeLabelToken[]` | `undefined` | 分段着色文本。存在时优先按 token 绘制。 |
-| `tooltip` | `string` | `undefined` | 节点 tooltip。未设置时，文本被省略才使用完整 label 作为 tooltip。 |
+| `tooltip` | `string` | `undefined` | 节点 tooltip。未设置时，文本未完全处于可视区时使用完整 label 作为 tooltip。 |
 | `icon` | `string` | `undefined` | 内置 `IconName`、emoji 或单字符图标。内置名称使用统一的 Canvas icon painter。 |
 | `selectable` | `boolean` | `true` | 是否允许单选选中。`false` 的父节点点击时会优先展开折叠。 |
 | `checkable` | `boolean` | `true` | 是否允许复选。`false` 的节点不会作为勾选目标。 |
@@ -189,7 +189,7 @@ const standaloneTree = new RenderTreeView({
 | `getCopyText()` | `string \| null` | 获取当前选中节点或焦点节点的复制文本。整体 disabled 或 `copyable=false` 时返回 null。 |
 | `onContextMenu(position)` | `boolean` | 从全局 Canvas 坐标请求节点菜单；无回调、未命中或回调拒绝时返回 false。 |
 | `debugState()` | `TreeViewDebugState` | 获取滚动、焦点、hover、勾选和真实绘制节点目标。 |
-| `revealSelectedKey()` | `void` | 将当前 `selectedKey` 对应节点滚动到可视区域。 |
+| `revealSelectedKey(options?)` | `void` | 将当前 `selectedKey` 对应节点在两个方向滚动到可视区域；`{ deferUntilLayout: true }` 将定位推迟到下一次有效的正式布局。 |
 | `setRoots(roots)` | `void` | 替换根节点。等价于设置 `roots` 属性。 |
 | `expandAll()` | `void` | 展开所有有子节点的节点。 |
 | `collapseAll()` | `void` | 折叠全部节点。 |
@@ -199,7 +199,10 @@ const standaloneTree = new RenderTreeView({
 
 | 字段 | 说明 |
 | --- | --- |
-| `scrollY` | 当前纵向滚动偏移。 |
+| `scrollX` / `scrollY` | 当前横向/纵向滚动偏移。 |
+| `totalContentW` | 所有已展开节点所需的最大内容宽度，包括缩进、箭头、复选框、图标、完整文本和边距。 |
+| `viewportWidth` / `viewportHeight` | 扣除滚动条后的内容视窗尺寸。 |
+| `showHBar` / `showVBar` | 当前是否需要横向/纵向滚动条。 |
 | `focusedIndex` | 当前键盘焦点行索引。 |
 | `hoveredKey` | 当前 hover 节点 key。 |
 | `totalContentH` | 全部扁平节点总高度。 |
@@ -257,20 +260,25 @@ const standaloneTree = new RenderTreeView({
 - `ContextMenu` / `Shift+F10`：对当前焦点节点请求上下文菜单；成功时才消费按键。
 - 鼠标点击节点行会设置焦点。
 - 鼠标点击展开箭头会展开或折叠。
-- 鼠标滚轮按固定步长滚动，滚到底部或顶部后返回是否仍可滚动，便于外层滚动容器判断是否接管。
-- 拖动垂直滚动条会更新 `scrollY` 并触发重绘。
+- 普通滚轮纵向滚动；触控板横向输入或 `Shift` + 滚轮横向滚动，均按固定步长处理。对应轴存在溢出时，在边界仍消费该轴滚轮；不溢出的轴交给外层容器处理。
+- 拖动横向/纵向滚动条分别更新 `scrollX` / `scrollY`；点击轨道可跳转，滚动条和右下角交汇区不会触发节点选择、勾选或菜单。
+- 键盘导航和 `revealSelectedKey()` 同时处理横向可见性；单行宽于视窗时优先显示该行的缩进起点、展开箭头和文字开头，其余部分通过横向滚动访问。鼠标点击选择保持当前横向位置。
 - 整体 `disabled = true` 时，树不会接收焦点，不响应选择、勾选、展开、激活、滚轮、滚动条拖动或复制。
 
-## 文本省略和 tooltip
+### 延后定位
 
-TreeView 会按可用宽度绘制单行文本：
+在容器尚未完成布局、页面隐藏或正在调整尺寸时，可调用 `revealSelectedKey({ deferUntilLayout: true })`。请求由 TreeView 在取得有效内容视窗后执行；预测量、零尺寸布局和隐藏期间不会消耗请求。执行时使用最新的 `selectedKey`，清空选中项会取消请求。该方法不会自动展开祖先，调用方应先设置展开路径。普通无参数调用在已有有效视窗时保持立即定位行为；尚无有效视窗时会保留请求。
 
-- 文本能完整显示时，不自动设置 tooltip。
-- 文本被省略时，如果节点设置了 `tooltip`，显示 `tooltip`。
-- 文本被省略且未设置 `tooltip` 时，显示完整 `label`。
-- 使用 `labelTokens` 时，tooltip 仍以 `tooltip` 或 `label` 为准。
+## 自动内容滚动和 tooltip
 
-这适合文档目录、对象查看器、模板树等长文本场景。
+TreeView 自身管理内容溢出，默认自动显示需要的滚动条，无需 Inspector、业务页面或外层 ScrollViewer 开启。内容宽于视窗时显示横向滚动条；内容高于视窗时显示纵向滚动条。两条滚动条会互相预留空间，折叠节点、替换数据或扩大容器后重新计算并收敛偏移。
+
+节点文本不再用省略号替代，完整文本随横向内容一起滚动，超出视窗部分由裁剪处理。展开箭头、连接线、复选框、图标和文字使用同一横向偏移；行背景仍覆盖可视内容宽度。
+
+- 文本完全处于视窗内时，不自动显示 tooltip。
+- 文本在左侧或右侧被视窗裁剪时，优先显示节点 `tooltip`，否则显示完整 `label`。
+- 使用 `labelTokens` 时，内容宽度按各 token 实际绘制文字测量，tooltip 文案仍使用 `tooltip` 或 `label`。
+- 展开、折叠、roots 更新、复选模式切换、字体度量失效或主题变化会更新内容尺寸。`measure()` 只预测尺寸，不改写实际滚动状态或已绘制的调试目标。
 
 ## 虚拟滚动和大树
 
@@ -279,6 +287,9 @@ TreeView 会把当前展开状态下的节点扁平化为可视节点列表，�
 性能边界：
 
 - 替换 `roots` 会重建扁平节点、勾选状态和滚动约束。
+- 横向内容宽度覆盖所有已展开节点，包括纵向视窗外的节点；纵向滚动不会因为换了一批可绘制节点而改变横向滚动范围。
+- 内容宽度按树版本、主题、字体度量版本和复选模式缓存；普通滚动复用测量结果。首次展开大量节点或更新字体时仍需要测量这些节点。
+- 外部原地修改 label、labelTokens、icon 或 children 后，调用 `setRoots()`（允许传同一数组）通知组件更新。
 - selection 的有效性按完整 roots 递归检查；节点仅因祖先折叠而离开扁平可视列表时仍保留，真实删除或变为不可选时才清空。
 - `expandAll()` 会一次性展开所有节点，大树上会显著增加扁平节点数量。
 - 大树场景不要在 hover、滚动、输入时反复创建新的 `roots` 数组。

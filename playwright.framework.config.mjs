@@ -2,7 +2,7 @@ import { defineConfig } from 'playwright/test'
 
 export default defineConfig({
   testDir: './tests/browser',
-  testMatch: 'framework_regressions.spec.ts',
+  testMatch: ['framework_regressions.spec.ts', 'devtools.spec.ts', 'tree_scrolling.spec.ts'],
   outputDir: './.runtime/rendering-tests',
   workers: 1,
   retries: 0,

@@ -545,3 +545,7 @@ manager.setWindowHost(hostWindow)
 - Floating Window 指南
 - App Context
 - 命令与权限
+
+## 程序化调整已有分区
+
+`DockWindowManager.setSplitLayout(split, { ratio?, direction? })` 通过 manager 更新当前布局中的 split，并通知工作区重新布局。`split` 可以来自 `manager.root` 的只读视图；`ratio` 为第一块区域比例（0～1），`direction` 为 `'horizontal'` 或 `'vertical'`。无变化时返回 true 且不重复通知；无效数值、已移除的 split、其他 manager 的 split 或已销毁的 manager 返回 false。实际像素尺寸仍受子区域最小尺寸约束。不要直接修改 `manager.root` 的只读对象。

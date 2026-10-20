@@ -3,8 +3,7 @@
 
 import { RenderBox, type RenderBoxOptions } from '../layout/render_box'
 import { DrawList } from '../rendering/draw_list'
-import { hitTestScrollbarGeometry, paintVBar, resolveScrollbarGeometryForState, type ScrollbarGeometry } from '../rendering/scrollbar'
-import { ellipsizeText } from '../core/text_overflow'
+import { hitTestScrollbarGeometry, paintHBar, paintVBar, resolveScrollbarViewport, resolveScrollbarGeometryForState, type ScrollbarGeometry, type ScrollbarViewportState } from '../rendering/scrollbar'
 import { TextMeasurer } from '../core/text_measurer'
 import {
   blendColor,
@@ -81,6 +80,12 @@ export interface TreeVisibleNodeDebugTarget {
 }
 
 export interface TreeViewDebugState {
+  scrollX: number
+  totalContentW: number
+  viewportWidth: number
+  viewportHeight: number
+  showHBar: boolean
+  showVBar: boolean
   scrollY: number
   focusedIndex: number
   hoveredKey: string
@@ -105,6 +110,8 @@ interface TreeVisibleNodePaintSnapshot {
   globalOffset: Offset
   size: { width: number; height: number }
   scrollY: number
+  scrollX: number
+  fontRevision: number
   flatRevision: number
   theme: ResolvedTheme
 }
@@ -127,12 +134,22 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
   private _flatNodes: FlatNode<T>[] = []
   private _hoveredKey = ''
   private _scroll = new ScrollController()
+  private _horizontalScroll = new ScrollController({ axis: 'x' })
+  private _viewport: ScrollbarViewportState = { width: 0, height: 0, showHBar: false, showVBar: false }
+  private _totalW = 0
+  private _rowExtents: Array<{ left: number; right: number; textWidth: number }> = []
+  private _widthRevision = -1
+  private _fontRevision = -1
+  private _widthTheme?: ResolvedTheme
+  private _widthSelectionMode?: TreeSelectionMode
   private _focusedIndex = -1   // 键盘焦点行索引
   private _focused = false
   private _focusRegistered = false
   private _disabled: boolean
   private _appearance: SurfaceAppearance
   private _rowHeight: number
+  private readonly _hScrollbarController = new ScrollbarAxisController('horizontal')
+  private readonly _hScrollbar = this._hScrollbarController.state
   private readonly _vScrollbarController = new ScrollbarAxisController('vertical')
   private readonly _vScrollbar = this._vScrollbarController.state
   private _indentWidth: number
@@ -255,7 +272,7 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
     if (nextKey === this._selectedKey) return
     this._selectedKey = nextKey
     this._revealSelectedOnNextLayout = nextKey.length > 0
-    this.markNeedsPaint()
+    this.markNeedsLayout()
   }
 
   get checkedKeys(): string[] { return [...this._checkedLeafKeys] }
@@ -307,7 +324,8 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
     this._focusedIndex = this._flatNodes.indexOf(flat)
 
     if (flat.node.selectable !== false && this._selectedKey !== flat.node.key) {
-      this.selectedKey = flat.node.key
+      this._selectedKey = flat.node.key
+      this._revealSelectedOnNextLayout = false
       this.onSelect?.(flat.node)
     }
     this.markNeedsPaint()
@@ -325,35 +343,35 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
   }
 
   nodeRect(key: string): Rect | undefined {
+    this._ensureViewport()
     const index = this._flatNodes.findIndex(flat => flat.node.key === key)
     if (index < 0) return undefined
     const y = this.globalOffset.y + index * this._rowHeight - this._scrollY
-    const bottom = this.globalOffset.y + this.size.height
-    if (y + this._rowHeight < this.globalOffset.y || y > bottom) return undefined
-    return {
-      x: this.globalOffset.x,
-      y,
-      width: this._contentWidth(this.currentTheme),
-      height: this._rowHeight,
-    }
+    const bottom = this.globalOffset.y + this._viewH
+    if (y + this._rowHeight <= this.globalOffset.y || y >= bottom) return undefined
+    return intersectTreeRect({ x: this.globalOffset.x, y, width: this._viewW, height: this._rowHeight },
+      { x: this.globalOffset.x, y: this.globalOffset.y, width: this._viewW, height: this._viewH }) ?? undefined
   }
   performLayout(constraints: BoxConstraints, context: LayoutContext): void {
-    this._clearPaintedVisibleNodes()
-    this._syncThemeMetrics(context.theme)
     this.size = constrainSize(constraints, {
       width: constraints.maxWidth === Infinity ? 240 : constraints.maxWidth,
       height: constraints.maxHeight === Infinity ? 300 : constraints.maxHeight,
     })
     if (context.pass === 'measure') return
-    this._clampScrollY()
-    if (this._revealSelectedOnNextLayout) {
-      this.revealSelectedKey()
-      this._revealSelectedOnNextLayout = false
-    }
+    this._clearPaintedVisibleNodes()
+    this._ensureViewport(context.theme)
+    if (this._revealSelectedOnNextLayout) this.revealSelectedKey()
   }
 
   debugState(): TreeViewDebugState {
+    this._ensureViewport()
     return {
+      scrollX: this._scrollX,
+      totalContentW: this._totalW,
+      viewportWidth: this._viewW,
+      viewportHeight: this._viewH,
+      showHBar: this._viewport.showHBar,
+      showVBar: this._viewport.showVBar,
       scrollY: this._scrollY,
       focusedIndex: this._focusedIndex,
       hoveredKey: this._hoveredKey,
@@ -395,6 +413,8 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
       snapshot.size.width !== this.size.width ||
       snapshot.size.height !== this.size.height ||
       snapshot.scrollY !== this._scrollY ||
+      snapshot.scrollX !== this._scrollX ||
+      snapshot.fontRevision !== TextMeasurer.revision ||
       snapshot.flatRevision !== this._flatRevision ||
       snapshot.theme !== this.currentTheme
     ) return []
@@ -427,7 +447,7 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
   private _syncTreeState(): void {
     this._buildFlatNodes()
     this._recomputeCheckState()
-    this._clampScrollY()
+    this._ensureViewport()
     if (this._focusedIndex >= this._flatNodes.length) this._focusedIndex = this._flatNodes.length - 1
     if (this._hoveredKey && !this._containsKey(this._hoveredKey)) this._hoveredKey = ''
     if (this._selectedKey) {
@@ -437,19 +457,47 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
   }
 
   private get _totalH(): number { return this._flatNodes.length * this._rowHeight }
-  private get _viewH(): number { return this.size.height }
+  private get _viewH(): number { return this._viewport.height }
+  private get _viewW(): number { return this._viewport.width }
   private get _scrollY(): number { return this._scroll.offset }
-  private _clampScrollY(): void {
+  private get _scrollX(): number { return this._horizontalScroll.offset }
+
+  private _ensureViewport(theme: ResolvedTheme = this.currentTheme): void {
+    this._syncThemeMetrics(theme)
+    if (this._widthRevision !== this._flatRevision || this._widthTheme !== theme ||
+      this._fontRevision !== TextMeasurer.revision || this._widthSelectionMode !== this._selectionMode) {
+      const style = this._treeTokens(theme)
+      this._totalW = 0
+      this._rowExtents = this._flatNodes.map(flat => {
+        const row = this._rowLayout(flat, 0, 0, theme)
+        const textWidth = flat.node.labelTokens?.length
+          ? flat.node.labelTokens.reduce((width, token) => width + TextMeasurer.measureWidth(token.text, style.fontSize, style.fontFamily), 0)
+          : TextMeasurer.measureWidth(flat.node.label, style.fontSize, style.fontFamily)
+        const right = Math.max(row.textX + textWidth, flat.hasChildren ? row.arrowX + this.indentWidth / 2 : 0) + this._framePadding
+        this._totalW = Math.max(this._totalW, right)
+        return { left: flat.depth * this.indentWidth + this._framePadding, right, textWidth }
+      })
+      this._widthRevision = this._flatRevision
+      this._widthTheme = theme
+      this._fontRevision = TextMeasurer.revision
+      this._widthSelectionMode = this._selectionMode
+      this._clearPaintedVisibleNodes()
+    }
+    this._viewport = resolveScrollbarViewport({ outerWidth: this.size.width, outerHeight: this.size.height,
+      contentWidth: this._totalW, contentHeight: this._totalH, scrollbarSize: this._scrollbarWidth(theme),
+      allowHorizontal: true, allowVertical: true })
     this._scroll.setOffset(this._scrollY, { viewportSize: this._viewH, contentSize: this._totalH })
+    this._horizontalScroll.setOffset(this._scrollX, { viewportSize: this._viewW, contentSize: this._totalW })
   }
 
   performPaint(context: PaintContext, offset: Offset): void {
+    this._ensureViewport(context.theme)
     const dl = new DrawList(context)
     const { x, y } = offset
     const { width: w, height: h } = this.size
     const s = this._treeTokens(context.theme)
     const sb = this._scrollbarTokens(context.theme)
-    const contentW = this._contentWidth(context.theme)
+    const contentW = this._viewW
     const frame = { x, y, width: w, height: h }
     const frameStyle = {
       background: s.panelBg,
@@ -457,16 +505,16 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
       borderRadius: s.borderRadius,
     }
     const paintedVisibleNodes: TreeVisibleNodeDebugTarget[] = []
-    const contentRect: Rect = { x, y, width: contentW, height: h }
+    const contentRect: Rect = { x, y, width: contentW, height: this._viewH }
 
     paintSurfaceBackground(dl, frame, this._appearance, frameStyle)
     pushSurfaceContentClip(dl, frame, this._appearance, frameStyle.borderRadius)
-    dl.pushClip(x, y, contentW, h)
+    dl.pushClip(x, y, contentW, this._viewH)
 
     const virtualRange = calcFixedVirtualRange({
       itemCount: this._flatNodes.length,
       itemSize: this._rowHeight,
-      viewportSize: h,
+      viewportSize: this._viewH,
       scrollOffset: this._scrollY,
       overscan: 1,
     })
@@ -476,7 +524,6 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
       for (let i = virtualRange.startIndex; i <= virtualRange.endIndex; i++) {
         const flat = this._flatNodes[i]!
         const rowY = y + i * this._rowHeight - this._scrollY
-        const indentX = x + flat.depth * this.indentWidth + this._framePadding
 
         // 行背景
         const isSelected = flat.node.key === this._selectedKey
@@ -505,10 +552,10 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
         }
 
         // 展开/折叠箭头
-        const rowLayout = this._rowLayout(flat, x, rowY, context.theme)
+        const rowLayout = this._rowLayout(flat, x - this._scrollX, rowY, context.theme)
         const arrowX = rowLayout.arrowX
         const arrowY = rowY + this._rowHeight / 2
-        this._drawLevelLines(dl, flat, x, rowY, arrowY, rowLayout.arrowX, s)
+        this._drawLevelLines(dl, flat, x - this._scrollX, rowY, arrowY, rowLayout.arrowX, s)
         if (flat.hasChildren) {
           this._drawExpandArrow(dl, arrowX, arrowY, flat.expanded, s)
         }
@@ -580,19 +627,11 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
           }
         }
 
-        const labelClipW = Math.max(0, contentW - (rowLayout.textX - x) - this._framePadding)
-        dl.pushClip(rowLayout.textX, rowY, labelClipW, this._rowHeight)
         if (flat.node.labelTokens?.length) {
           this._drawLabelTokens(dl, flat.node.labelTokens, rowLayout.textX, arrowY, labelColor, isSelectable, rowState, context.theme, s)
         } else {
-          const labelText = ellipsizeText(
-            flat.node.label,
-            labelClipW,
-            text => dl.measureText(text, s.fontSize, s.fontFamily).width,
-          )
-          dl.fillText(labelText, rowLayout.textX, arrowY, labelColor, s.fontSize, s.fontFamily, 'left', 'middle')
+          dl.fillText(flat.node.label, rowLayout.textX, arrowY, labelColor, s.fontSize, s.fontFamily, 'left', 'middle')
         }
-        dl.popClip()
 
         if (!this.disabled) {
           const clipped = intersectTreeRect({
@@ -620,12 +659,15 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
       trackX: x + w - sb.gutterSize,
       trackY: y,
       trackW: sb.gutterSize,
-      trackH: h,
+      trackH: this._viewH,
       viewSize: this._viewH,
       contentSize: this._totalH,
       scrollOffset: this._scrollY,
       state: this._vScrollbar,
     })
+    paintHBar({ dl, style: sb, trackX: x, trackY: y + h - sb.gutterSize,
+      trackW: this._viewW, trackH: sb.gutterSize, viewSize: this._viewW,
+      contentSize: this._totalW, scrollOffset: this._scrollX, state: this._hScrollbar })
     dl.popClip()
     paintSurfaceBorder(dl, frame, this._appearance, frameStyle)
 
@@ -634,6 +676,8 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
       globalOffset: { ...this.globalOffset },
       size: { ...this.size },
       scrollY: this._scrollY,
+      scrollX: this._scrollX,
+      fontRevision: TextMeasurer.revision,
       flatRevision: this._flatRevision,
       theme: context.theme,
     }
@@ -721,63 +765,51 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
   }
 
   private _flatNodeAtPosition(position: Offset): FlatNode<T> | null {
-    if (this.disabled) return null
+    if (this.disabled || !this.visible) return null
+    this._ensureViewport()
     const g = this.globalOffset
-    const inBounds = position.x >= g.x &&
-      position.x <= g.x + this.size.width &&
-      position.y >= g.y &&
-      position.y <= g.y + this.size.height
-    if (!inBounds) return null
-    if (this.size.height > 0 && this._inScrollbar(position)) return null
+    if (position.x < g.x || position.x >= g.x + this._viewW || position.y < g.y || position.y >= g.y + this._viewH) return null
     return this._nodeAtY(position.y)
   }
 
   private _nodeAtY(globalY: number): FlatNode<T> | null {
-    const g = this.globalOffset
-    const relY = globalY - g.y + this._scrollY
-    const i = Math.floor(relY / this._rowHeight)
-    return i >= 0 && i < this._flatNodes.length ? this._flatNodes[i]! : null
+    this._ensureViewport()
+    const localY = globalY - this.globalOffset.y
+    if (localY < 0 || localY >= this._viewH) return null
+    const i = Math.floor((localY + this._scrollY) / this._rowHeight)
+    return this._flatNodes[i] ?? null
   }
 
   private _isArrowClick(globalX: number, flat: FlatNode<T>): boolean {
-    const g = this.globalOffset
-    const arrowX = g.x + flat.depth * this.indentWidth + this._framePadding + this.indentWidth / 2
+    const arrowX = this._rowLayout(flat, this.globalOffset.x - this._scrollX, 0, this.currentTheme).arrowX
     return globalX >= arrowX - this.indentWidth / 2 && globalX <= arrowX + this.indentWidth / 2
   }
 
   private _inScrollbar(p: Offset): boolean {
-    return hitTestScrollbarGeometry(p, this._scrollbarGeometry())
+    return hitTestScrollbarGeometry(p, this._scrollbarGeometry()) || hitTestScrollbarGeometry(p, this._scrollbarGeometry('horizontal'))
   }
 
-  private _scrollbarGeometry(): ScrollbarGeometry {
+  private _scrollbarGeometry(axis: 'vertical' | 'horizontal' = 'vertical'): ScrollbarGeometry {
+    this._ensureViewport()
     const g = this.globalOffset
-    const scrollbarW = this._scrollbarWidth()
-    return resolveScrollbarGeometryForState({
-      axis: 'vertical',
-      trackRect: { x: g.x + this.size.width - scrollbarW, y: g.y, width: scrollbarW, height: this.size.height },
-      viewportSize: this._viewH,
-      contentSize: this._totalH,
-      scrollOffset: this._scrollY,
-      style: deriveScrollbarStyle(this.currentTheme),
-      state: this._vScrollbar,
-    })
-  }
-
-  private _contentWidth(theme: ResolvedTheme = this.currentTheme): number {
-    const scrollbarW = this._scrollbarWidth(theme)
-    return Math.max(0, this.size.width - (this._totalH > this._viewH ? scrollbarW : 0))
+    const size = this._scrollbarWidth()
+    const vertical = axis === 'vertical'
+    return resolveScrollbarGeometryForState({ axis,
+      trackRect: vertical ? { x: g.x + this.size.width - size, y: g.y, width: size, height: this._viewH }
+        : { x: g.x, y: g.y + this.size.height - size, width: this._viewW, height: size },
+      viewportSize: vertical ? this._viewH : this._viewW,
+      contentSize: vertical ? this._totalH : this._totalW,
+      scrollOffset: vertical ? this._scrollY : this._scrollX,
+      style: deriveScrollbarStyle(this.currentTheme), state: vertical ? this._vScrollbar : this._hScrollbar })
   }
 
   private _syncOverflowTooltip(position: Offset): void {
     this.tooltip = undefined
-    if (!this.hitTest(position) || this._inScrollbar(position)) return
-    const flat = this._nodeAtY(position.y)
-    if (!flat || !flat.node.label) return
-    const theme = this.currentTheme
-    const s = this._treeTokens(theme)
-    const rowLayout = this._rowLayout(flat, this.globalOffset.x, 0, theme)
-    const availableWidth = Math.max(0, this._contentWidth(theme) - (rowLayout.textX - this.globalOffset.x) - this._framePadding)
-    if (TextMeasurer.measureWidth(flat.node.label, s.fontSize, s.fontFamily) > availableWidth) {
+    const flat = this._flatNodeAtPosition(position)
+    if (!flat) return
+    const index = this._flatNodes.indexOf(flat)
+    const row = this._rowLayout(flat, this.globalOffset.x - this._scrollX, 0, this.currentTheme)
+    if (row.textX < this.globalOffset.x || row.textX + this._rowExtents[index]!.textWidth > this.globalOffset.x + this._viewW) {
       this.tooltip = flat.node.tooltip ?? flat.node.label
     }
   }
@@ -790,24 +822,22 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
       return
     }
 
-    const scrollbarResult = this._vScrollbarController.beginPointer(
-      e.position,
-      this._scrollbarGeometry(),
-      pointerKey(e),
-    )
-    if (scrollbarResult.handled) {
+    this._ensureViewport()
+    if (this._vScrollbar.dragging || this._hScrollbar.dragging) return
+    for (const controller of [this._vScrollbarController, this._hScrollbarController]) {
+      const result = controller.beginPointer(e.position, this._scrollbarGeometry(controller.axis), pointerKey(e))
+      if (!result.handled) continue
       e.stopPropagation?.()
       e.preventActivation?.()
-      if (scrollbarResult.capturePointer) e.setPointerCapture?.()
-      if (scrollbarResult.scrollOffset !== undefined) {
-        this._scroll.setOffset(scrollbarResult.scrollOffset, {
-          viewportSize: this._viewH,
-          contentSize: this._totalH,
-        })
-      }
+      if (result.capturePointer) e.setPointerCapture?.()
+      if (result.scrollOffset !== undefined) this._setAxisOffset(controller.axis, result.scrollOffset)
+      this._hoveredKey = ''
+      this.tooltip = undefined
       this.markNeedsPaint()
       return
     }
+    // Includes the bottom-right corner occupied by both scrollbar gutters.
+    if (!this._flatNodeAtPosition(e.position)) return
 
     this._focused = true
     if (FocusManager.instance.current !== this) {
@@ -821,9 +851,19 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
     const i = this._flatNodes.indexOf(flat)
     this._focusedIndex = i
 
+    if (flat.hasChildren && this._isArrowClick(e.position.x, flat)) {
+      if (this._expanded.has(flat.node.key)) this._expanded.delete(flat.node.key)
+      else this._expanded.add(flat.node.key)
+      this._buildFlatNodes()
+      this._focusedIndex = this._flatNodes.findIndex(item => item.node.key === flat.node.key)
+      this.onExpand?.(flat.node, this._expanded.has(flat.node.key))
+      this.markNeedsPaint()
+      return
+    }
+
     if (this._selectionMode === 'check') {
       const rowY = this.globalOffset.y + i * this._rowHeight - this._scrollY
-      const checkboxRect = this._rowLayout(flat, this.globalOffset.x, rowY, this.currentTheme).checkboxRect
+      const checkboxRect = this._rowLayout(flat, this.globalOffset.x - this._scrollX, rowY, this.currentTheme).checkboxRect
       if (checkboxRect && pointInRect(e.position, checkboxRect)) {
         this._toggleCheckedNode(flat.node)
         return
@@ -839,18 +879,9 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
       return
     }
 
-    if (flat.hasChildren && this._isArrowClick(e.position.x, flat)) {
-      if (this._expanded.has(flat.node.key)) {
-        this._expanded.delete(flat.node.key)
-      } else {
-        this._expanded.add(flat.node.key)
-      }
-      this._buildFlatNodes()
-      // 重新找 focusedIndex（展开/折叠后 flatNodes 变化）
-      this._focusedIndex = this._flatNodes.findIndex(f => f.node.key === flat.node.key)
-      this.onExpand?.(flat.node, this._expanded.has(flat.node.key))
-    } else if (flat.node.selectable !== false) {
-      this.selectedKey = flat.node.key
+    if (flat.node.selectable !== false) {
+      this._selectedKey = flat.node.key
+      this._revealSelectedOnNextLayout = false
       this.onSelect?.(flat.node)
     } else if (flat.hasChildren) {
       if (this._expanded.has(flat.node.key)) this._expanded.delete(flat.node.key)
@@ -864,88 +895,81 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
 
   onDoubleClick(position: Offset): void {
     if (this.disabled || !this.hitTest(position) || this._inScrollbar(position)) return
-    const flat = this._nodeAtY(position.y)
+    const flat = this._flatNodeAtPosition(position)
     if (!flat || flat.node.selectable === false) return
     if (flat.hasChildren && this._isArrowClick(position.x, flat)) return
     this._focused = true
     this._focusedIndex = this._flatNodes.indexOf(flat)
-    this.selectedKey = flat.node.key
+    this._selectedKey = flat.node.key
+    this._revealSelectedOnNextLayout = false
     this.onActivate?.(flat.node)
     this.markNeedsPaint()
   }
 
+  private _setAxisOffset(axis: 'vertical' | 'horizontal', value: number): void {
+    const before = axis === 'vertical' ? this._scrollY : this._scrollX
+    if (axis === 'vertical') this._scroll.setOffset(value, { viewportSize: this._viewH, contentSize: this._totalH })
+    else this._horizontalScroll.setOffset(value, { viewportSize: this._viewW, contentSize: this._totalW })
+    if (before === (axis === 'vertical' ? this._scrollY : this._scrollX)) return
+    this._clearPaintedVisibleNodes()
+    this.tooltip = undefined
+  }
+
   onPointerMove(e: PointerEvent): void {
     if (this.disabled) return
-    if (this._vScrollbar.dragging) {
-      const result = this._vScrollbarController.updatePointer(
-        e.position,
-        this._scrollbarGeometry(),
-        pointerKey(e),
-      )
+    for (const controller of [this._vScrollbarController, this._hScrollbarController]) {
+      if (!controller.state.dragging) continue
+      const result = controller.updatePointer(e.position, this._scrollbarGeometry(controller.axis), pointerKey(e))
       if (!result.handled) return
       e.stopPropagation?.()
-      this._scroll.setOffset(result.scrollOffset ?? this._scrollY, {
-        viewportSize: this._viewH,
-        contentSize: this._totalH,
-      })
+      if (result.scrollOffset !== undefined) this._setAxisOffset(controller.axis, result.scrollOffset)
       this.markNeedsPaint()
       return
     }
-
-    if (!this.hitTest(e.position)) {
-      const hadState = this._hoveredKey || this._vScrollbarController.clearHover()
-      this._hoveredKey = ''
-      this.tooltip = undefined
-      if (hadState) this.markNeedsPaint()
-      return
+    let changed = false
+    for (const controller of [this._vScrollbarController, this._hScrollbarController]) {
+      changed = (this.hitTest(e.position)
+        ? controller.updateHover(e.position, this._scrollbarGeometry(controller.axis))
+        : controller.clearHover()) || changed
     }
-
-    if (this._vScrollbarController.updateHover(e.position, this._scrollbarGeometry())) this.markNeedsPaint()
-    const hoveredScrollbar = this._vScrollbar.hovered
-    if (hoveredScrollbar) {
-      if (this._hoveredKey) {
-        this._hoveredKey = ''
-        this.markNeedsPaint()
-      }
-      this.tooltip = undefined
-      return
-    }
-
-    const flat = this._nodeAtY(e.position.y)
+    const flat = this._flatNodeAtPosition(e.position)
     const key = flat?.node.key ?? ''
-    if (key !== this._hoveredKey) {
-      this._hoveredKey = key
-      this.markNeedsPaint()
-    }
+    if (key !== this._hoveredKey) { this._hoveredKey = key; changed = true }
     this._syncOverflowTooltip(e.position)
+    if (changed) this.markNeedsPaint()
   }
 
   onPointerUp(e: PointerEvent): void {
     if (!isPrimaryPointerButton(e)) return
     const key = pointerKey(e)
-    if (this._vScrollbar.dragging && !this._vScrollbarController.ownsPointer(key)) return
-    const result = this._vScrollbarController.endPointer(e.position, this._scrollbarGeometry(), key)
-    if (result.dragEnded) {
-      e.stopPropagation?.()
-      e.releasePointerCapture?.()
+    for (const controller of [this._vScrollbarController, this._hScrollbarController]) {
+      if (controller.state.dragging && !controller.ownsPointer(key)) return
     }
-    if (result.stateChanged) this.markNeedsPaint()
+    for (const controller of [this._vScrollbarController, this._hScrollbarController]) {
+      const result = controller.endPointer(e.position, this._scrollbarGeometry(controller.axis), key)
+      if (result.dragEnded) { e.stopPropagation?.(); e.releasePointerCapture?.() }
+      if (result.stateChanged) this.markNeedsPaint()
+    }
   }
 
   onPointerCancel(e: PointerEvent): void {
     const key = pointerKey(e)
-    if (this._vScrollbar.dragging && !this._vScrollbarController.ownsPointer(key)) return
-    if (this._vScrollbar.dragging) {
-      e.stopPropagation?.()
-      e.releasePointerCapture?.()
+    for (const controller of [this._vScrollbarController, this._hScrollbarController]) {
+      if (controller.state.dragging && !controller.ownsPointer(key)) return
     }
-    this._vScrollbarController.cancelPointer(key)
+    for (const controller of [this._vScrollbarController, this._hScrollbarController]) {
+      if (controller.state.dragging) { e.stopPropagation?.(); e.releasePointerCapture?.() }
+      controller.cancelPointer(key)
+    }
     this._hoveredKey = ''
     this.tooltip = undefined
+    this.markNeedsPaint()
   }
 
   onPointerLeave(_e: PointerEvent): void {
-    const hadHover = this._vScrollbarController.clearHover() || !!this._hoveredKey
+    const vChanged = this._vScrollbarController.clearHover()
+    const hChanged = this._hScrollbarController.clearHover()
+    const hadHover = vChanged || hChanged || !!this._hoveredKey
     this._hoveredKey = ''
     this.tooltip = undefined
     if (hadHover) this.markNeedsPaint()
@@ -953,13 +977,15 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
 
   onWheel(e: WheelPointerEvent): boolean {
     if (this.disabled || !this.hitTest(e.position)) return false
-    if (e.deltaY === 0) return false
-    const scrollable = this._totalH > this._viewH
-    const before = this._scroll.offset
-    this._scroll.scrollBy(e.deltaY > 0 ? 60 : -60, { viewportSize: this._viewH, contentSize: this._totalH })
-    if (this._scroll.offset === before) return scrollable
-    this.markNeedsPaint()
-    return true
+    this._ensureViewport()
+    const dx = e.deltaX !== 0 ? e.deltaX : e.shiftKey ? e.deltaY : 0
+    const dy = e.shiftKey ? 0 : e.deltaY
+    const beforeX = this._scrollX
+    const beforeY = this._scrollY
+    if (dx !== 0 && Number.isFinite(dx)) this._setAxisOffset('horizontal', this._scrollX + (dx > 0 ? 60 : -60))
+    if (dy !== 0 && Number.isFinite(dy)) this._setAxisOffset('vertical', this._scrollY + (dy > 0 ? 60 : -60))
+    if (beforeX !== this._scrollX || beforeY !== this._scrollY) this.markNeedsPaint()
+    return (Number.isFinite(dx) && dx !== 0 && this._viewport.showHBar) || (Number.isFinite(dy) && dy !== 0 && this._viewport.showVBar)
   }
 
   private _blur(): void {
@@ -1101,6 +1127,8 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
   }
 
   private _scrollToFocused(): void {
+    this._ensureViewport()
+    this._revealRowX(this._focusedIndex)
     this._scroll.scrollToIndex({
       itemCount: this._flatNodes.length,
       itemSize: this._rowHeight,
@@ -1108,6 +1136,15 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
       index: this._focusedIndex,
       align: 'nearest',
     })
+  }
+
+  private _revealRowX(index: number): void {
+    const extent = this._rowExtents[index]
+    if (!extent || this._viewW <= 0) return
+    let next = this._scrollX
+    if (extent.left < next || extent.right - extent.left > this._viewW) next = Math.max(0, extent.left - this._framePadding)
+    else if (extent.right > next + this._viewW) next = extent.right - this._viewW
+    this._setAxisOffset('horizontal', next)
   }
 
   private _rowLayout(flat: FlatNode<T>, rowX: number, rowY: number, theme: ResolvedTheme): {
@@ -1134,7 +1171,9 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
       cursorX += checkboxSize + Math.max(4, Math.round(treeStyle.paddingH * 0.75))
     }
     const iconX = cursorX
-    const textX = flat.node.icon ? iconX + treeStyle.fontSize + 4 : cursorX
+    const iconWidth = flat.node.icon ? (isIconName(flat.node.icon) ? treeStyle.fontSize
+      : TextMeasurer.measureWidth(flat.node.icon, treeStyle.fontSize, treeStyle.fontFamily)) : 0
+    const textX = flat.node.icon ? iconX + iconWidth + 4 : cursorX
     return {
       arrowX,
       checkboxRect,
@@ -1143,10 +1182,30 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
     }
   }
 
-  revealSelectedKey(): void {
-    if (!this._selectedKey) return
+  revealSelectedKey(options: { deferUntilLayout?: boolean } = {}): void {
+    if (!this._selectedKey) {
+      this._revealSelectedOnNextLayout = false
+      return
+    }
+    if (options.deferUntilLayout) {
+      this._revealSelectedOnNextLayout = true
+      this.markNeedsLayout()
+      return
+    }
+    this._ensureViewport()
+    // A hidden/zero-sized viewport cannot fulfill the request. Keep it for a real layout.
+    if (this._viewW <= 0 || this._viewH <= 0) {
+      this._revealSelectedOnNextLayout = true
+      return
+    }
     const selectedIndex = this._flatNodes.findIndex(flat => flat.node.key === this._selectedKey)
-    if (selectedIndex < 0) return
+    if (selectedIndex < 0) {
+      this._revealSelectedOnNextLayout = false
+      return
+    }
+    const beforeX = this._scrollX
+    const beforeY = this._scrollY
+    this._revealRowX(selectedIndex)
     this._scroll.scrollToIndex({
       itemCount: this._flatNodes.length,
       itemSize: this._rowHeight,
@@ -1154,6 +1213,8 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
       index: selectedIndex,
       align: 'nearest',
     })
+    this._revealSelectedOnNextLayout = false
+    if (beforeX !== this._scrollX || beforeY !== this._scrollY) this.markNeedsPaint()
   }
 
   // 外部更新数据
@@ -1260,7 +1321,7 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
     this.expandedKeys = []
   }
 
-private _syncThemeMetrics(theme: ResolvedTheme): void {
+  private _syncThemeMetrics(theme: ResolvedTheme): void {
     const s = deriveTreeStyle(theme)
     this._rowHeight = s.fontSize + s.paddingH * 1.5
     this._indentWidth = s.fontSize + 4
@@ -1280,6 +1341,9 @@ private _syncThemeMetrics(theme: ResolvedTheme): void {
   }
 
   override detach(): void {
+    this._vScrollbarController.reset()
+    this._hScrollbarController.reset()
+    this.tooltip = undefined
     this._clearPaintedVisibleNodes()
     super.detach()
   }
@@ -1290,9 +1354,12 @@ private _syncThemeMetrics(theme: ResolvedTheme): void {
       this._focusRegistered = false
     }
     this._vScrollbarController.reset()
+    this._hScrollbarController.reset()
     this._hoveredKey = ''
     this._focused = false
     this._focusedIndex = -1
+    this.onSelect = undefined
+    this.onExpand = undefined
     this.onActivate = undefined
     this.onCheck = undefined
     this.onContextMenuRequest = undefined
@@ -1316,6 +1383,7 @@ private _syncThemeMetrics(theme: ResolvedTheme): void {
     this._focusedIndex = -1
     this._suppressNextFocusReveal = false
     this._vScrollbarController.reset()
+    this._hScrollbarController.reset()
     this.tooltip = undefined
   }
 

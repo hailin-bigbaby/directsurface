@@ -1,12 +1,13 @@
-import type { BoxConstraints } from '../core/render_object'
+import { RenderGridPanel, gridAuto, gridFr } from '../layout/render_grid_panel'
+import type { BoxConstraints, LayoutContext } from '../core/render_object'
 import { RenderStackPanel } from '../layout/render_flex'
 import { RenderParagraph, RenderText } from '../widgets/basic'
 import { RenderButton } from '../widgets/button'
 import {
   DockWindowManager,
   RenderDockWorkspace,
+  type DockSplitNode,
   type DockLayoutNode,
-  type DockTabGroupNode,
 } from '../widgets/dock_workspace'
 import { RenderObjectInspector } from '../widgets/object_inspector'
 import { RenderScrollViewer } from '../widgets/scroll_view'
@@ -50,7 +51,7 @@ export class RenderLayoutInspectorView extends RenderStackPanel {
     manager: this._dockManager,
     disposeManagerOnDispose: true,
   })
-  private readonly _summary = new RenderText('No selection', { role: 'title', weight: 'semibold' })
+  private readonly _summary = new RenderText('No selection', { role: 'secondary', weight: 'semibold', overflow: 'ellipsis' })
   private readonly _details = new RenderParagraph('')
   private readonly _pathText = new RenderParagraph('')
   private readonly _contextText = new RenderParagraph('')
@@ -88,26 +89,29 @@ export class RenderLayoutInspectorView extends RenderStackPanel {
     direction: 'vertical',
     child: this._requestText,
   })
-  private readonly _toolbar = new RenderStackPanel({
-    orientation: 'horizontal',
-    spacing: 8,
-    crossAxisAlignment: 'center',
-  })
+  private readonly _toolbar = new RenderGridPanel({ columns: [gridAuto(), gridFr()], rows: [gridAuto()], columnGap: 8 })
   private readonly _inspectButton: RenderButton
   private readonly _onSelectTreeNode?: (debugId: number) => void
   private readonly _onToggleOverlay?: () => LayoutInspectorDebugState | void
   private _state: LayoutInspectorDebugState | null = null
   private _runtimeDebugState: LayoutInspectorRuntimeDebugState | null = null
   private _runtimeDebugSignature = ''
+  private _appContextEntries: NonNullable<LayoutInspectorDebugState['selectedAppContext']> = []
+  private _appContextRevision?: string
   private _appContextInspectorSignature = ''
   private _objectInspectorSignature = ''
   private _renderTreeRef?: LayoutInspectorTreeNode
   private _treeSignature = ''
+  private _selectedTreeKey = ''
+  private _initialDockLayoutApplied = false
+  private _automaticSplit?: { node: DockSplitNode; ratio: number; direction: 'vertical' | 'horizontal'; structure: string }
+  private readonly _unsubscribeDockChanges: () => void
 
   constructor(options: RenderLayoutInspectorPanelOptions = {}) {
     super({
       orientation: 'vertical',
       spacing: 8,
+      padding: 8,
       crossAxisAlignment: 'stretch',
     })
     this._onSelectTreeNode = options.onSelectTreeNode
@@ -124,8 +128,12 @@ export class RenderLayoutInspectorView extends RenderStackPanel {
       onSelect: node => this._onSelectTreeNode?.(node.data!.debugId),
     })
     this._initializeDockWorkspace()
-    this._toolbar.addChild(this._inspectButton)
-    this._toolbar.addChild(this._summary)
+    this._unsubscribeDockChanges = this._dockManager.subscribe(() => {
+      if (this._automaticSplit && !this._matchesAutomaticSplit()) this._automaticSplit = undefined
+    })
+    this._toolbar.addChild(this._inspectButton, { row: 0, column: 0 })
+    this._toolbar.addChild(this._summary, { row: 0, column: 1 })
+    this._summary.verticalAlignment = 'center'
     this.addChild(this._toolbar)
     this.addChild(this._dockWorkspace, 1)
     this.setInspectorState(emptyInspectorState())
@@ -141,25 +149,33 @@ export class RenderLayoutInspectorView extends RenderStackPanel {
     this._summary.text = selected
       ? `${selected.typeName} #${selected.debugId}`
       : 'No selection'
-    this._inspectButton.label = state.overlayVisible ? 'Stop Inspect' : 'Inspect'
-    this._inspectButton.markNeedsLayout()
-    this._inspectButton.markNeedsPaint()
+    const inspectLabel = state.overlayVisible ? 'Stop Inspect' : 'Inspect'
+    if (this._inspectButton.label !== inspectLabel) {
+      this._inspectButton.label = inspectLabel
+      this._inspectButton.markNeedsLayout()
+      this._inspectButton.markNeedsPaint()
+    }
     this._details.text = formatInspectorSummary(state)
     this._pathText.text = formatHitPath(state)
     this._contextText.text = formatAppContext(state)
     const appContextInspectorSignature = formatAppContextInspectorSignature(state)
-    if (appContextInspectorSignature !== this._appContextInspectorSignature) {
+    const contextEntries = state.selectedAppContext ?? []
+    const contextChanged = appContextInspectorSignature !== this._appContextInspectorSignature ||
+      state.selectedAppContextRevision !== this._appContextRevision ||
+      contextEntries.length !== this._appContextEntries.length ||
+      contextEntries.some((entry, index) => !Object.is(entry.rawValue, this._appContextEntries[index]?.rawValue))
+    if (contextChanged) {
+      this._appContextEntries = contextEntries.map(entry => ({ ...entry }))
+      this._appContextRevision = state.selectedAppContextRevision
       this._appContextInspectorSignature = appContextInspectorSignature
       this._appContextInspector.setValue(createAppContextInspectorValue(state), 'layoutInspector.appContext')
     }
     const objectInspectorSignature = formatObjectInspectorSignature(state)
-    if (objectInspectorSignature !== this._objectInspectorSignature) {
+    if (contextChanged || objectInspectorSignature !== this._objectInspectorSignature) {
       this._objectInspectorSignature = objectInspectorSignature
       this._objectInspector.setValue(createSelectedInspectorValue(state), 'layoutInspector.selected')
     }
     this._syncTreeView(state)
-    this.markNeedsLayout()
-    this.markNeedsPaint()
   }
 
   setRuntimeDebugState(state: LayoutInspectorRuntimeDebugState | null): void {
@@ -247,26 +263,88 @@ export class RenderLayoutInspectorView extends RenderStackPanel {
       closable: false,
     })
 
-    const root = this._dockManager.root
-    if (root.type !== 'tabs') return
-    const objectRecord = this._dockManager.getDocument('object-inspector')
-    if (objectRecord) this._dockManager.dockWindow(objectRecord.window, root, 'right')
-
-    const leftGroup = firstTabGroup(this._dockManager.root)
-    const hitPathRecord = this._dockManager.getDocument('hit-path')
-    if (leftGroup && hitPathRecord) this._dockManager.dockWindow(hitPathRecord.window, leftGroup, 'bottom')
     this._dockManager.activateDocument('render-tree')
   }
 
+  override performLayout(constraints: BoxConstraints, context: LayoutContext): void {
+    // Adapt the default split to the dock width until the user changes it.
+    if (context.pass !== 'measure' && !this._initialDockLayoutApplied) {
+      this._initialDockLayoutApplied = true
+      const root = this._dockManager.root
+      const objectRecord = this._dockManager.getDocument('object-inspector')
+      if (root.type === 'tabs' && objectRecord) {
+        this._dockManager.dockWindow(objectRecord.window, root, constraints.maxWidth < 760 ? 'bottom' : 'right')
+        const split = this._dockManager.root
+        if (split.type === 'split') this._automaticSplit = { node: split, ratio: split.ratio, direction: split.direction, structure: this._dockStructureSignature() }
+        this._dockManager.activateDocument('render-tree')
+      }
+    }
+    if (context.pass !== 'measure' && this._automaticSplit) {
+      const previous = this._automaticSplit
+      if (!this._matchesAutomaticSplit()) {
+        this._automaticSplit = undefined
+      } else {
+        const compact = constraints.maxWidth < 760
+        const direction = compact ? 'vertical' : 'horizontal'
+        const ratio = compact ? 0.45 : 0.42
+        // Record the programmatic layout before notifications; later user changes must win.
+        this._automaticSplit = { ...previous, direction, ratio }
+        this._dockManager.setSplitLayout(previous.node, { direction, ratio })
+      }
+    }
+    super.performLayout(constraints, context)
+  }
+
+  private _dockStructureSignature(): string {
+    const ids = new Map(this._dockManager.documents.map(record => [record.window, record.tabId]))
+    const describe = (node: DockLayoutNode): unknown => node.type === 'tabs'
+      ? [node.id, node.windows.map(window => ids.get(window))]
+      : [node.id, describe(node.first), describe(node.second)]
+    // Active tabs and captions do not change the user's pane arrangement.
+    return JSON.stringify(describe(this._dockManager.root))
+  }
+
+  private _matchesAutomaticSplit(): boolean {
+    const previous = this._automaticSplit
+    const split = this._dockManager.root
+    return !!previous && split.type === 'split' && split === previous.node &&
+      split.ratio === previous.ratio && split.direction === previous.direction &&
+      this._dockStructureSignature() === previous.structure
+  }
+
+  override dispose(): void {
+    this._unsubscribeDockChanges()
+    this._automaticSplit = undefined
+    super.dispose()
+  }
+
   private _syncTreeView(state: LayoutInspectorDebugState): void {
+    const nextKey = state.selected ? treeKey(state.selected.debugId) : ''
+    const selectionChanged = nextKey !== this._selectedTreeKey
+    let structureChanged = false
     if (state.renderTree !== this._renderTreeRef) {
       this._renderTreeRef = state.renderTree
-      this._treeSignature = formatTreeSignature(state.renderTree)
-      this._treeView.roots = state.renderTree ? [toTreeNode(state.renderTree)] : []
-      this._treeView.expandedKeys = collectSelectedPathKeys(state)
+      const signature = formatTreeSignature(state.renderTree)
+      structureChanged = signature !== this._treeSignature
+      this._treeSignature = signature
+      if (structureChanged) {
+        const expanded = this._treeView.expandedKeys
+        const roots = state.renderTree ? [toTreeNode(state.renderTree)] : []
+        const keys = new Set<string>()
+        const visit = (nodes: TreeNode<InspectorTreeData>[]) => nodes.forEach(node => { keys.add(node.key); visit(node.children ?? []) })
+        visit(roots)
+        this._treeView.roots = roots
+        this._treeView.expandedKeys = expanded.filter(key => keys.has(key))
+      }
     }
-    this._treeView.selectedKey = state.selected ? treeKey(state.selected.debugId) : ''
+    if (selectionChanged || structureChanged) {
+      this._treeView.expandedKeys = [...new Set([...this._treeView.expandedKeys, ...collectSelectedPathKeys(state)])]
+    }
+    this._selectedTreeKey = nextKey
+    this._treeView.selectedKey = nextKey
+    if (selectionChanged || structureChanged) this._treeView.revealSelectedKey({ deferUntilLayout: true })
   }
+
 }
 
 export class RenderLayoutInspectorPanel extends RenderWindow {
@@ -325,11 +403,6 @@ export class RenderLayoutInspectorPanel extends RenderWindow {
   }
 }
 
-function firstTabGroup(node: DockLayoutNode): DockTabGroupNode | null {
-  if (node.type === 'tabs') return node
-  return firstTabGroup(node.first)
-}
-
 interface InspectorTreeData {
   debugId: number
 }
@@ -368,7 +441,10 @@ function formatObjectInspectorSignature(state: LayoutInspectorDebugState): strin
     selected?.constraints ? formatConstraints(selected.constraints) : '',
     selected?.state === undefined ? '' : formatDebugState(selected.state),
     state.selectedPathIndex,
-    ...state.selectedPathInfo.map(info => `${info.debugId}:${info.typeName}`),
+    state.enabled,
+    state.overlayVisible,
+    state.hoverPathLength,
+    ...state.selectedPathInfo.map(info => `${info.debugId}:${info.typeName}:${formatPoint(info.globalOffset)}:${formatSize(info.size)}`),
     formatAppContextInspectorSignature(state),
   ].join('|')
 }

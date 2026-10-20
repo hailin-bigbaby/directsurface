@@ -948,7 +948,7 @@ expect(onNeedPaint).toHaveBeenCalledTimes(1)
     expect(tree.needsPaint).toBe(true)
   })
 
-  it('marks RenderTreeView dirty for paint when selectedKey changes after attach', () => {
+  it('schedules layout and repaint to reveal a changed TreeView selection after attach', () => {
     const onNeedLayout = vi.fn()
     const onNeedPaint = vi.fn()
     const owner = new PipelineOwner({ onNeedLayout, onNeedPaint })
@@ -961,9 +961,13 @@ expect(onNeedPaint).toHaveBeenCalledTimes(1)
 
     tree.selectedKey = 'root'
 
-    expect(onNeedPaint).toHaveBeenCalledTimes(1)
-    expect(onNeedLayout).not.toHaveBeenCalled()
+    expect(onNeedLayout).toHaveBeenCalledTimes(1)
+    expect(tree.needsLayout).toBe(true)
+    tree.layout(constraints)
+    expect(tree.needsLayout).toBe(false)
     expect(tree.needsPaint).toBe(true)
+    tree.paint(createPaintContext(), { x: 0, y: 0 })
+    expect(tree.needsPaint).toBe(false)
   })
 
   it('marks RenderTreeView dirty for paint when expandedKeys change after attach', () => {

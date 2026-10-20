@@ -16,3 +16,5 @@ Start with [layouts](../layouts.md) for the constraint model. The public declara
 `RenderDevToolsWindow` hosts framework diagnostics. Most applications open it through the `AppHost` UI services rather than constructing it in a page. Layout inspection is represented by `RenderLayoutInspectorPanel` and `RenderLayoutInspectorView`; runtime diagnostics use `RenderRuntimeDiagnosticsPanel` and `RenderRuntimeDiagnosticsView`. `RenderRuntimeDiagnosticsSnapshotViewer` displays a saved diagnostic snapshot. `RenderObjectInspector` expands object values for debugging.
 
 The normal startup path remains `Application.mount(...).run(window)`. Enable layout inspection through the application options when needed, keep the returned host, and release it when the host Canvas is removed. See [runtime and lifecycle](../lifecycle.md).
+
+See [DevTools](../devtools.md) for responsive layouts, selection visibility, context revisions and safe diagnostic snapshots.

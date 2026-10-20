@@ -567,6 +567,23 @@ export class DockWindowManager {
     return true
   }
 
+  /** Updates an existing split through the manager rather than mutating its readonly view. */
+  setSplitLayout(split: DockSplitNode, layout: { ratio?: number; direction?: SplitDirection }): boolean {
+    if (this._disposed) return false
+    const target = unwrapDockReadonlyView(split)
+    const contains = (node: DockLayoutNode): boolean => node === target ||
+      (node.type === 'split' && (contains(node.first) || contains(node.second)))
+    if (target.type !== 'split' || !contains(this._root)) return false
+    const ratio = layout.ratio ?? target.ratio
+    const direction = layout.direction ?? target.direction
+    if (!Number.isFinite(ratio) || ratio < 0 || ratio > 1 || (direction !== 'vertical' && direction !== 'horizontal')) return false
+    if (target.ratio === ratio && target.direction === direction) return true
+    target.ratio = ratio
+    target.direction = direction
+    this._emit()
+    return true
+  }
+
   dockWindowToWorkspace(window: RenderWindow, zone: Exclude<DockDropZone, 'center'>): boolean {
     const record = this._records.get(window)
     if (!record || window.disposed) return false

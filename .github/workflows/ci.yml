@@ -26,3 +26,5 @@ jobs:
         run: npx playwright install --with-deps chromium
       - if: matrix.node-version == '24'
         run: npm run test:browser
+      - if: matrix.node-version == '24'
+        run: npm run test:framework:browser
