@@ -197,18 +197,18 @@ export class RenderAdaptiveSidebarPanel extends RenderPanel {
     const contentWidth = Math.max(0, availableWidth - sidebarWidth - gap)
     const maxHeight = contentConstraints.maxHeight
 
-    const sidebarHeight = activeSidebar && hasSidebar
-      ? this._layoutChild(activeSidebar, sidebarWidth, maxHeight, context)
-      : 0
-    const contentHeight = this.content.participatesInLayout
-      ? this._layoutChild(this.content, contentWidth, maxHeight, context)
-      : 0
     const height = maxHeight === Infinity
-      ? Math.max(contentConstraints.minHeight, sidebarHeight, contentHeight)
+      ? Math.max(contentConstraints.minHeight,
+        activeSidebar && hasSidebar ? this._measureChildHeight(activeSidebar, sidebarWidth, context) : 0,
+        this.content.participatesInLayout ? this._measureChildHeight(this.content, contentWidth, context) : 0)
       : maxHeight
 
-    if (activeSidebar && hasSidebar) this._layoutChild(activeSidebar, sidebarWidth, height, context, true)
-    if (this.content.participatesInLayout) this._layoutChild(this.content, contentWidth, height, context, true)
+    this.size = this.inflatePaddingSize(constraints, { width: availableWidth, height })
+    // Predicting another breakpoint must not switch active children, focus or popups.
+    if (context.pass === 'measure') return
+
+    if (activeSidebar && hasSidebar) this._layoutChild(activeSidebar, sidebarWidth, height, context)
+    if (this.content.participatesInLayout) this._layoutChild(this.content, contentWidth, height, context)
 
     const contentX = this._side === 'left'
       ? this.contentOffset.x + sidebarWidth + gap
@@ -234,7 +234,6 @@ export class RenderAdaptiveSidebarPanel extends RenderPanel {
       }, this.content.resolveHorizontalAlignment('stretch'), this.content.resolveVerticalAlignment('stretch'))
     }
 
-    this.size = this.inflatePaddingSize(constraints, { width: availableWidth, height })
     this._debugState = {
       mode: this._mode,
       resolvedMode,
@@ -259,21 +258,25 @@ export class RenderAdaptiveSidebarPanel extends RenderPanel {
     this.paintAdornerChildren(context, offset)
   }
 
+  private _measureChildHeight(child: RenderBox, width: number, context: LayoutContext): number {
+    const layout = resolveChildLayout(child,
+      { minWidth: width, maxWidth: width, minHeight: 0, maxHeight: Infinity }, 'stretch', 'stretch')
+    return child.measureOuter(layout.constraints, context).height
+  }
+
   private _layoutChild(
     child: RenderBox,
     width: number,
     height: number,
     context: LayoutContext,
-    stretchHeight = false,
-  ): number {
+  ): void {
     const layout = resolveChildLayout(
       child,
-      { minWidth: width, maxWidth: width, minHeight: stretchHeight ? height : 0, maxHeight: height },
+      { minWidth: width, maxWidth: width, minHeight: height, maxHeight: height },
       'stretch',
       'stretch',
     )
     child.layout(layout.constraints, true, context)
-    return child.outerSize.height
   }
 
   private _resolveMode(availableWidth: number, finiteWidth: boolean): AdaptiveSidebarResolvedMode {

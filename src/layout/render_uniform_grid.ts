@@ -92,11 +92,11 @@ export class RenderUniformGrid extends RenderPanel {
     const childCount = visibleChildren.length
     const columns = this._resolveColumns(childCount)
     const rows = this._resolveRows(childCount, columns)
-    const naturalCell = this._measureNaturalCell(visibleChildren, context)
     const gapWidth = Math.max(0, columns - 1) * columnGap
     const gapHeight = Math.max(0, rows - 1) * rowGap
     const widthIsBounded = contentConstraints.maxWidth !== Infinity
     const heightIsBounded = contentConstraints.maxHeight !== Infinity
+    const naturalCell = widthIsBounded ? { width: 0, height: 0 } : this._measureNaturalCell(visibleChildren, context)
     const availableWidth = widthIsBounded ? contentConstraints.maxWidth : contentConstraints.minWidth
     const availableHeight = heightIsBounded ? contentConstraints.maxHeight : contentConstraints.minHeight
     const cellWidth = widthIsBounded
@@ -166,7 +166,7 @@ export class RenderUniformGrid extends RenderPanel {
     let height = 0
     for (const child of this.children.filter(child => child.participatesInLayout)) {
       const size = child.measureOuter({
-        minWidth: cellWidth,
+        minWidth: child.resolveHorizontalAlignment('stretch') === 'stretch' && child.width === undefined ? cellWidth : 0,
         maxWidth: cellWidth,
         minHeight: 0,
         maxHeight: Infinity,

@@ -91,6 +91,7 @@ export class RenderSplitter extends FocusableControl implements InteractiveRende
     assertFiniteNumber(value, 'Splitter minRatio')
     if (this._minRatio === value) return
     this._minRatio = value
+    this.ratio = this._ratio
     this.markNeedsLayout()
   }
 
@@ -99,6 +100,7 @@ export class RenderSplitter extends FocusableControl implements InteractiveRende
     assertFiniteNumber(value, 'Splitter maxRatio')
     if (this._maxRatio === value) return
     this._maxRatio = value
+    this.ratio = this._ratio
     this.markNeedsLayout()
   }
 
@@ -141,18 +143,23 @@ export class RenderSplitter extends FocusableControl implements InteractiveRende
     this.size = { width: w, height: h }
 
     if (this.direction === 'horizontal') {
-      const firstW = Math.round((w - this.splitterSize) * this.ratio)
-      const secondW = w - this.splitterSize - firstW
+      const { first: firstW, second: secondW, bar } = this._splitGeometry(w)
 
       this._layoutChildInSlot(this.first, { x: 0, y: 0, width: firstW, height: h }, context)
-      this._layoutChildInSlot(this.second, { x: firstW + this.splitterSize, y: 0, width: secondW, height: h }, context)
+      this._layoutChildInSlot(this.second, { x: firstW + bar, y: 0, width: secondW, height: h }, context)
     } else {
-      const firstH = Math.round((h - this.splitterSize) * this.ratio)
-      const secondH = h - this.splitterSize - firstH
+      const { first: firstH, second: secondH, bar } = this._splitGeometry(h)
 
       this._layoutChildInSlot(this.first, { x: 0, y: 0, width: w, height: firstH }, context)
-      this._layoutChildInSlot(this.second, { x: 0, y: firstH + this.splitterSize, width: w, height: secondH }, context)
+      this._layoutChildInSlot(this.second, { x: 0, y: firstH + bar, width: w, height: secondH }, context)
     }
+  }
+
+  private _splitGeometry(extent: number): { first: number; second: number; bar: number } {
+    const bar = Math.min(Math.max(0, extent), Math.max(0, this.splitterSize))
+    const available = Math.max(0, extent - bar)
+    const first = Math.max(0, Math.min(available, Math.round(available * this.ratio)))
+    return { first, second: available - first, bar }
   }
 
   private _layoutChildInSlot(child: RenderObject, slot: { x: number; y: number; width: number; height: number }, context: LayoutContext): void {
@@ -190,26 +197,28 @@ export class RenderSplitter extends FocusableControl implements InteractiveRende
     this.first.paint(context, { x: x + this.first.offset.x, y: y + this.first.offset.y })
     this.second.paint(context, { x: x + this.second.offset.x, y: y + this.second.offset.y })
 
+    const { first, bar } = this._splitGeometry(this.direction === 'horizontal' ? w : h)
+    if (bar <= 0 || w <= 0 || h <= 0) return
     if (this.direction === 'horizontal') {
-      const sx = x + this.second.offset.x - this.splitterSize
-      dl.fillRect(sx, y, this.splitterSize, h, splitterColor, 0)
+      const sx = x + first
+      dl.fillRect(sx, y, bar, h, splitterColor, 0)
       if (this.isFocused && !this.isDisabled) {
-        paintFocusRing(dl, context.theme.focusBorder, sx - 1, y, this.splitterSize + 2, h, 0)
+        paintFocusRing(dl, context.theme.focusBorder, sx - 1, y, bar + 2, h, 0)
       }
       if (this._interaction.isHovered || this._dragging) {
-        const cx = sx + this.splitterSize / 2
+        const cx = sx + bar / 2
         for (let i = -1; i <= 1; i++) {
           dl.fillCircle(cx, y + h / 2 + i * 6, 2, gripColor)
         }
       }
     } else {
-      const sy = y + this.second.offset.y - this.splitterSize
-      dl.fillRect(x, sy, w, this.splitterSize, splitterColor, 0)
+      const sy = y + first
+      dl.fillRect(x, sy, w, bar, splitterColor, 0)
       if (this.isFocused && !this.isDisabled) {
-        paintFocusRing(dl, context.theme.focusBorder, x, sy - 1, w, this.splitterSize + 2, 0)
+        paintFocusRing(dl, context.theme.focusBorder, x, sy - 1, w, bar + 2, 0)
       }
       if (this._interaction.isHovered || this._dragging) {
-        const cy = sy + this.splitterSize / 2
+        const cy = sy + bar / 2
         for (let i = -1; i <= 1; i++) {
           dl.fillCircle(x + w / 2 + i * 6, cy, 2, gripColor)
         }
@@ -219,13 +228,15 @@ export class RenderSplitter extends FocusableControl implements InteractiveRende
 
   private _inSplitter(p: Offset): boolean {
     const g = this.globalOffset
+    const { first, bar } = this._splitGeometry(this.direction === 'horizontal' ? this.size.width : this.size.height)
+    if (bar <= 0 || this.size.width <= 0 || this.size.height <= 0) return false
     if (this.direction === 'horizontal') {
-      const sx = g.x + this.second.offset.x - this.splitterSize
-      return p.x >= sx && p.x <= sx + this.splitterSize &&
+      const sx = g.x + first
+      return p.x >= sx && p.x <= sx + bar &&
         p.y >= g.y && p.y <= g.y + this.size.height
     }
-    const sy = g.y + this.second.offset.y - this.splitterSize
-    return p.y >= sy && p.y <= sy + this.splitterSize &&
+    const sy = g.y + first
+    return p.y >= sy && p.y <= sy + bar &&
       p.x >= g.x && p.x <= g.x + this.size.width
   }
 
@@ -277,9 +288,9 @@ export class RenderSplitter extends FocusableControl implements InteractiveRende
   onPointerMove(e: PointerEvent): void {
     if (this.isDisabled) return
     if (this._dragging) {
-      const total = this.direction === 'horizontal'
-        ? this.size.width - this.splitterSize
-        : this.size.height - this.splitterSize
+      const geometry = this._splitGeometry(this.direction === 'horizontal' ? this.size.width : this.size.height)
+      const total = geometry.first + geometry.second
+      if (total <= 0) return
       const delta = this.direction === 'horizontal'
         ? e.position.x - this._dragStartPos
         : e.position.y - this._dragStartPos

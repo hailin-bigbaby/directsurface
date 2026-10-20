@@ -129,20 +129,32 @@ export class RenderGridPanel extends RenderPanel {
     const rowCount = Math.max(this.rows.length, placements.reduce((max, placement) => Math.max(max, placement.row + placement.rowSpan), 0))
     const rowTracks = Array.from({ length: rowCount }, (_, index) => this.rows[index] ?? gridAuto())
 
-    const naturalSizes = this._measureNaturalSizes(context)
+    const availableWidth = this._availableTrackSize(contentConstraints.minWidth, contentConstraints.maxWidth)
+    const availableHeight = this._availableTrackSize(contentConstraints.minHeight, contentConstraints.maxHeight)
+    const naturalSizes = visibleChildren.map((child, index) =>
+      this._needsNaturalSize(columnTracks, placements[index]!, 'column', availableWidth)
+        ? child.measureOuter({ minWidth: 0, maxWidth: Infinity, minHeight: 0, maxHeight: Infinity }, context)
+        : { width: 0, height: 0 })
     const columnWidths = this._resolveTracks({
       tracks: columnTracks,
-      availableSize: this._availableTrackSize(contentConstraints.minWidth, contentConstraints.maxWidth),
+      availableSize: availableWidth,
       gap: columnGap,
       naturalSizes: this._naturalTrackSizes(columnTracks, placements, naturalSizes, 'column', columnGap),
     })
-    const widthConstrainedSizes = this._measureSizesForColumns(visibleChildren, columnWidths, placements, columnGap, context)
+    const widthConstrainedSizes = this._measureSizesForColumns(
+      visibleChildren, columnWidths, placements, columnGap, context, rowTracks, availableHeight)
     const rowHeights = this._resolveTracks({
       tracks: rowTracks,
-      availableSize: this._availableTrackSize(contentConstraints.minHeight, contentConstraints.maxHeight),
+      availableSize: availableHeight,
       gap: rowGap,
       naturalSizes: this._naturalTrackSizes(rowTracks, placements, widthConstrainedSizes, 'row', rowGap),
     })
+
+    this.size = this.inflatePaddingSize(constraints, {
+      width: this._totalExtent(columnWidths, columnGap),
+      height: this._totalExtent(rowHeights, rowGap),
+    })
+    if (context.pass === 'measure') return
 
     const columnOffsets = this._offsets(columnWidths, columnGap)
     const rowOffsets = this._offsets(rowHeights, rowGap)
@@ -167,10 +179,6 @@ export class RenderGridPanel extends RenderPanel {
         height: cellHeight,
       }, horizontalAlignment, verticalAlignment)
     }
-
-    const naturalWidth = this._totalExtent(columnWidths, columnGap)
-    const naturalHeight = this._totalExtent(rowHeights, rowGap)
-    this.size = this.inflatePaddingSize(constraints, { width: naturalWidth, height: naturalHeight })
   }
 
   performPaint(context: PaintContext, offset: Offset): void {
@@ -181,7 +189,6 @@ export class RenderGridPanel extends RenderPanel {
   private _resolvePlacements(columnCount: number, children: readonly RenderBox[]): GridPanelPlacement[] {
     const occupied: boolean[][] = []
     const placements: GridPanelPlacement[] = []
-    const isOccupied = (row: number, column: number): boolean => occupied[row]?.[column] ?? false
     const occupy = (placement: GridPanelPlacement): void => {
       for (let row = placement.row; row < placement.row + placement.rowSpan; row += 1) {
         occupied[row] ??= []
@@ -190,42 +197,52 @@ export class RenderGridPanel extends RenderPanel {
         }
       }
     }
-    let cursorRow = 0
-    let cursorColumn = 0
-    const nextFree = (): void => {
-      while (isOccupied(cursorRow, cursorColumn) || cursorColumn >= columnCount) {
-        cursorColumn += 1
-        if (cursorColumn >= columnCount) {
-          cursorColumn = 0
-          cursorRow += 1
+    const fits = (row: number, column: number, rowSpan: number, columnSpan: number): boolean => {
+      if (column + columnSpan > columnCount) return false
+      for (let r = row; r < row + rowSpan; r += 1) {
+        for (let c = column; c < column + columnSpan; c += 1) {
+          if (occupied[r]?.[c]) return false
         }
       }
+      return true
     }
-
-    for (const child of children) {
+    const indexValue = (value: number | undefined): number | undefined =>
+      value !== undefined && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : undefined
+    const requested = children.map(child => {
       const data = this.childData.get(child) ?? {}
-      const columnSpan = Math.max(1, Math.min(data.columnSpan ?? 1, columnCount))
-      const rowSpan = Math.max(1, data.rowSpan ?? 1)
+      const columnSpan = Math.max(1, Math.min(indexValue(data.columnSpan) ?? 1, columnCount))
+      const rowSpan = Math.max(1, indexValue(data.rowSpan) ?? 1)
+      const column = indexValue(data.column)
+      return { row: indexValue(data.row), column: column === undefined ? undefined : Math.min(column, columnCount - columnSpan),
+        rowSpan, columnSpan }
+    })
+    // Explicit placements may overlap intentionally; automatic items must avoid
+    // all reserved cells, including explicit items added later.
+    for (const data of requested) {
+      if (data.row !== undefined && data.column !== undefined) occupy({ ...data, row: data.row, column: data.column })
+    }
+    let cursorRow = 0
+    let cursorColumn = 0
+    for (const data of requested) {
+      const { rowSpan, columnSpan } = data
       let row = data.row
       let column = data.column
       if (row === undefined || column === undefined) {
-        nextFree()
-        while (cursorColumn + columnSpan > columnCount) {
-          cursorColumn = 0
-          cursorRow += 1
-          nextFree()
-        }
         row = row ?? cursorRow
-        column = column ?? cursorColumn
+        column = column ?? (data.row === undefined ? cursorColumn : 0)
+        while (!fits(row, column, rowSpan, columnSpan)) {
+          if (data.column !== undefined) {
+            row += 1
+          } else {
+            column += 1
+            if (column + columnSpan > columnCount) { column = 0; row += 1 }
+          }
+        }
       }
-      const placement = {
-        row: Math.max(0, row),
-        column: Math.max(0, Math.min(column, columnCount - columnSpan)),
-        rowSpan,
-        columnSpan,
-      }
+      const placement = { row, column, rowSpan, columnSpan }
       placements.push(placement)
       occupy(placement)
+      cursorRow = placement.row
       cursorColumn = placement.column + columnSpan
       if (cursorColumn >= columnCount) {
         cursorColumn = 0
@@ -235,10 +252,10 @@ export class RenderGridPanel extends RenderPanel {
     return placements
   }
 
-  private _measureNaturalSizes(context: LayoutContext): Size[] {
-    return this.children.filter(child => child.participatesInLayout).map(child => {
-      return child.measureOuter({ minWidth: 0, maxWidth: Infinity, minHeight: 0, maxHeight: Infinity }, context)
-    })
+  private _needsNaturalSize(tracks: GridPanelTrack[], placement: GridPanelPlacement, axis: 'row' | 'column', available: number): boolean {
+    const start = axis === 'column' ? placement.column : placement.row
+    const span = axis === 'column' ? placement.columnSpan : placement.rowSpan
+    return tracks.slice(start, start + span).some(track => track.type === 'auto' || (track.type === 'fr' && available === Infinity))
   }
 
   private _measureSizesForColumns(
@@ -247,9 +264,12 @@ export class RenderGridPanel extends RenderPanel {
     placements: GridPanelPlacement[],
     columnGap: number,
     context: LayoutContext,
+    rowTracks: GridPanelTrack[],
+    availableHeight: number,
   ): Size[] {
     return children.map((child, index) => {
       const placement = placements[index]!
+      if (!this._needsNaturalSize(rowTracks, placement, 'row', availableHeight)) return { width: 0, height: 0 }
       const cellWidth = this._spanExtent(columnWidths, placement.column, placement.columnSpan, columnGap)
       const horizontalAlignment = child.resolveHorizontalAlignment('stretch')
       return child.measureOuter({
@@ -269,16 +289,25 @@ export class RenderGridPanel extends RenderPanel {
     gap: number,
   ): number[] {
     const count = tracks.length
-    const sizes = new Array(count).fill(0)
+    const sizes = tracks.map(track => track.type === 'px' ? track.value : this._clamp(0, track.min, track.max))
+    // Establish single-track requirements before distributing spanning content.
     for (let index = 0; index < placements.length; index += 1) {
       const placement = placements[index]!
       const span = axis === 'column' ? placement.columnSpan : placement.rowSpan
       const trackIndex = axis === 'column' ? placement.column : placement.row
       const naturalSize = axis === 'column' ? naturalSizes[index]!.width : naturalSizes[index]!.height
       if (span === 1) {
-        sizes[trackIndex] = Math.max(sizes[trackIndex] ?? 0, naturalSize)
-        continue
+        const track = tracks[trackIndex]!
+        if (track.type !== 'px') sizes[trackIndex] = this._clamp(Math.max(sizes[trackIndex]!, naturalSize), track.min, track.max)
       }
+    }
+    const spanning = placements.map((placement, index) => ({ placement, index }))
+      .filter(({ placement }) => (axis === 'column' ? placement.columnSpan : placement.rowSpan) > 1)
+      .sort((a, b) => (axis === 'column' ? a.placement.columnSpan - b.placement.columnSpan : a.placement.rowSpan - b.placement.rowSpan))
+    for (const { placement, index } of spanning) {
+      const span = axis === 'column' ? placement.columnSpan : placement.rowSpan
+      const trackIndex = axis === 'column' ? placement.column : placement.row
+      const naturalSize = axis === 'column' ? naturalSizes[index]!.width : naturalSizes[index]!.height
       const end = Math.min(count, trackIndex + span)
       const current = this._spanExtent(sizes, trackIndex, end - trackIndex, gap)
       const deficit = naturalSize - current
@@ -289,20 +318,8 @@ export class RenderGridPanel extends RenderPanel {
         if (tracks[track]?.type === 'auto') autoIndexes.push(track)
         else if (tracks[track]?.type === 'fr') frIndexes.push(track)
       }
-      const growIndexes = autoIndexes.length > 0 ? autoIndexes : frIndexes
-      if (growIndexes.length === 0) continue
-      const frTotal = growIndexes.reduce((sum, growIndex) => {
-        const track = tracks[growIndex]
-        return track?.type === 'fr' ? sum + Math.max(0, track.value) : sum
-      }, 0)
-      const equalShare = deficit / growIndexes.length
-      for (const growIndex of growIndexes) {
-        const track = tracks[growIndex]
-        const share = track?.type === 'fr' && frTotal > 0
-          ? deficit * Math.max(0, track.value) / frTotal
-          : equalShare
-        sizes[growIndex] = (sizes[growIndex] ?? 0) + share
-      }
+      const remaining = this._distributeSpace(sizes, tracks, autoIndexes, deficit)
+      this._distributeSpace(sizes, tracks, frIndexes, remaining, true)
     }
     return sizes
   }
@@ -327,22 +344,45 @@ export class RenderGridPanel extends RenderPanel {
     }
     const gapTotal = Math.max(0, tracks.length - 1) * gap
     const used = sizes.reduce((sum, size) => sum + size, 0)
-    let remaining = Math.max(0, availableSize - gapTotal - used)
-    const frTracks = tracks
+    const remaining = Math.max(0, availableSize - gapTotal - used)
+    const frIndexes = tracks
       .map((track, index) => ({ track, index }))
-      .filter(entry => entry.track.type === 'fr') as Array<{ track: Extract<GridPanelTrack, { type: 'fr' }>; index: number }>
-    let frTotal = frTracks.reduce((sum, entry) => sum + entry.track.value, 0)
-    for (const entry of frTracks) {
-      if (frTotal <= 0) break
-      const currentSize = sizes[entry.index] ?? 0
-      const share = remaining * entry.track.value / frTotal
-      const maxExtra = entry.track.max === undefined ? undefined : Math.max(0, entry.track.max - currentSize)
-      const capped = this._clamp(share, 0, maxExtra)
-      sizes[entry.index] = (sizes[entry.index] ?? 0) + capped
-      remaining -= capped
-      frTotal -= entry.track.value
-    }
+      .filter(entry => entry.track.type === 'fr')
+      .map(entry => entry.index)
+    this._distributeSpace(sizes, tracks, frIndexes, remaining)
     return sizes
+  }
+
+  private _distributeSpace(sizes: number[], tracks: GridPanelTrack[], indexes: number[], remaining: number, natural = false): number {
+    const equalWeights = natural && indexes.every(index => {
+      const track = tracks[index]!
+      return track.type === 'fr' && track.value <= 0
+    })
+    const weight = (index: number): number => {
+      const track = tracks[index]!
+      return track.type === 'fr' && !equalWeights ? Math.max(0, track.value) : 1
+    }
+    const capacity = (index: number): number => {
+      const track = tracks[index]!
+      return track.type === 'px' ? 0 : Math.max(0, (track.max ?? Infinity) - sizes[index]!)
+    }
+    let active = indexes.filter(index => weight(index) > 0 && capacity(index) > 0)
+    while (remaining > 0 && active.length > 0) {
+      const totalWeight = active.reduce((sum, index) => sum + weight(index), 0)
+      const capped = active.filter(index => remaining * weight(index) / totalWeight >= capacity(index))
+      if (capped.length === 0) {
+        for (const index of active) sizes[index]! += remaining * weight(index) / totalWeight
+        return 0
+      }
+      for (const index of capped) {
+        const extra = capacity(index)
+        sizes[index]! += extra
+        remaining = Math.max(0, remaining - extra)
+      }
+      const frozen = new Set(capped)
+      active = active.filter(index => !frozen.has(index))
+    }
+    return remaining
   }
 
   private _offsets(sizes: number[], gap: number): number[] {

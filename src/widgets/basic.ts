@@ -269,8 +269,10 @@ export class RenderText extends RenderBox {
       this.fit,
       this.overflow,
     )
-    this._paintText = fit.text
-    this._paintFontSize = fit.fontSize
+    if (context.pass !== 'measure') {
+      this._paintText = fit.text
+      this._paintFontSize = fit.fontSize
+    }
     this.size = {
       width: fit.width,
       height: resolveTextLineHeight(style, this.role, fit.fontSize),
@@ -326,11 +328,12 @@ export class RenderParagraph extends RenderBox {
   performLayout(constraints: BoxConstraints, context: LayoutContext): void {
     const style = deriveTextStyle(context.theme)
     const maxWidth = constraints.maxWidth
-    this._lines = wrapTextLines(this._text, maxWidth, style.fontSize, style.fontFamily, style.fontWeight)
-    const widths = this._lines.map(line =>
+    const lines = wrapTextLines(this._text, maxWidth, style.fontSize, style.fontFamily, style.fontWeight)
+    const widths = lines.map(line =>
       TextMeasurer.measureWidth(line, style.fontSize, style.fontFamily, style.fontWeight))
     const width = widths.length > 0 ? Math.min(maxWidth, Math.max(...widths, 0)) : 0
-    const height = Math.max(1, this._lines.length) * style.lineHeight
+    const height = Math.max(1, lines.length) * style.lineHeight
+    if (context.pass !== 'measure') this._lines = lines
     this.size = {
       width,
       height,

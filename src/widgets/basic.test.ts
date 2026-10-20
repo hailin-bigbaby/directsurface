@@ -1,10 +1,14 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PipelineOwner, type BoxConstraints } from '../core/render_object'
 import { PaintContext } from '../rendering/paint_context'
 import { deriveTextStyle } from '../theme/component_styles'
 import { ImGuiDarkTheme, ImGuiLightTheme } from '../theme/default_theme'
 import { colorToCSS } from '../theme/theme'
 import { RenderParagraph, RenderText } from './basic'
+import { TextMeasurer } from '../core/text_measurer'
+import { DrawList } from '../rendering/draw_list'
+
+afterEach(() => { vi.restoreAllMocks() })
 
 const constraints: BoxConstraints = {
   minWidth: 0,
@@ -144,5 +148,33 @@ describe('RenderText style adapter', () => {
 
     expect(paragraph.size.height).toBeGreaterThan(deriveTextStyle(ImGuiDarkTheme).lineHeight)
     expect(paragraph.size.width).toBeLessThanOrEqual(80)
+  })
+})
+
+
+describe('text measurement isolation', () => {
+  it('preserves ellipsis and font fitting while measuring a different width and theme', () => {
+    const text = new RenderText('A long title that must remain fitted', { size: 26, minSize: 12, fit: 'shrink', overflow: 'ellipsis' })
+    text.layout({ ...constraints, maxWidth: 80 }, false, { theme: ImGuiDarkTheme })
+    const before = { text: text.paintText, font: text.paintFontSize, size: { ...text.size } }
+    text.measure({ ...constraints, maxWidth: 800 }, { theme: ImGuiLightTheme })
+    expect({ text: text.paintText, font: text.paintFontSize, size: text.size }).toEqual(before)
+    text.layout({ ...constraints, maxWidth: 800 }, false, { theme: ImGuiLightTheme })
+    expect(text.paintText).toBe(text.text)
+  })
+
+  it('preserves the painted paragraph lines until a real layout commits new wrapping', () => {
+    vi.spyOn(TextMeasurer, 'measureWidth').mockImplementation(text => String(text).length * 8)
+    const draw = vi.spyOn(DrawList.prototype, 'fillText').mockImplementation(() => {})
+    const context = new PaintContext({} as CanvasRenderingContext2D)
+    const paragraph = new RenderParagraph('1234567890'.repeat(4))
+    paragraph.layout({ ...constraints, maxWidth: 80 })
+    paragraph.paint(context, { x: 0, y: 0 })
+    const before = draw.mock.calls.map(call => call[0]); draw.mockClear()
+    paragraph.measure({ ...constraints, maxWidth: 400 })
+    paragraph.paint(context, { x: 0, y: 0 })
+    expect(draw.mock.calls.map(call => call[0])).toEqual(before)
+    draw.mockClear(); paragraph.layout({ ...constraints, maxWidth: 400 }); paragraph.paint(context, { x: 0, y: 0 })
+    expect(draw.mock.calls.map(call => call[0])).toEqual([paragraph.text])
   })
 })

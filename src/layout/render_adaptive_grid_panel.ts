@@ -138,8 +138,8 @@ export class RenderAdaptiveGridPanel extends RenderPanel {
         'stretch',
         'start',
       )
-      child.layout(layout.constraints, true, context)
-      rowHeights[placement.row] = Math.max(rowHeights[placement.row] ?? 0, child.outerSize.height)
+      const measured = child.measureOuter(layout.constraints, context)
+      rowHeights[placement.row] = Math.max(rowHeights[placement.row] ?? 0, measured.height)
     }
 
     const rowOffsets: number[] = []
@@ -149,6 +149,9 @@ export class RenderAdaptiveGridPanel extends RenderPanel {
       cursorY += rowHeights[row] ?? 0
       if (row < rowHeights.length - 1) cursorY += rowGap
     }
+
+    this.size = this.inflatePaddingSize(constraints, { width, height: cursorY })
+    if (context.pass === 'measure') return
 
     for (let index = 0; index < visibleChildren.length; index += 1) {
       const child = visibleChildren[index]!
@@ -169,8 +172,6 @@ export class RenderAdaptiveGridPanel extends RenderPanel {
         height: rowHeight,
       }, layout.horizontalAlignment, layout.verticalAlignment)
     }
-
-    this.size = this.inflatePaddingSize(constraints, { width, height: cursorY })
   }
 
   performPaint(context: PaintContext, offset: Offset): void {

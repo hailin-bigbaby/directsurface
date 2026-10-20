@@ -50,6 +50,7 @@ export class RenderDockPanel extends RenderPanel {
   setFill(child?: RenderBox): void {
     if (this._fillChild === child) return
     if (this._fillChild) {
+      this.childData.delete(this._fillChild)
       this._fillChild.parent = undefined
       if (this._fillChild.owner) this._fillChild.detach()
     }

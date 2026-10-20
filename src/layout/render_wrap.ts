@@ -1,7 +1,7 @@
 // RenderWrapPanel: 流式换行布局
 // 子元素超出主轴宽度时自动换行，类似 CSS flex-wrap
 
-import { RenderObject, constrainSize, type BoxConstraints, type LayoutContext, type Offset } from '../core/render_object'
+import { RenderObject, constrainSize, type BoxConstraints, type LayoutContext, type Offset, type Size } from '../core/render_object'
 import { RenderBox, RenderPanel, resolveChildLayout, type RenderPanelOptions } from './render_box'
 import type { PaintContext } from '../rendering/paint_context'
 import { deriveLayoutStyle } from '../theme/component_styles'
@@ -107,9 +107,12 @@ export class RenderWrapPanel extends RenderPanel {
     const maxW = contentConstraints.maxWidth === Infinity ? 0 : contentConstraints.maxWidth
     const visibleChildren = this.children.filter(child => child.participatesInLayout)
 
-    // 先以 loose 约束布局所有子节点，得到自然尺寸
+    // Measure runs without publishing provisional child layout or loaded events.
+    const measuredSizes = new Map<RenderBox, Size>()
     for (const child of visibleChildren) {
-      child.layout({ minWidth: 0, maxWidth: maxW || Infinity, minHeight: 0, maxHeight: Infinity }, true, context)
+      measuredSizes.set(child, child.measureOuter({
+        minWidth: 0, maxWidth: contentConstraints.maxWidth, minHeight: 0, maxHeight: Infinity,
+      }, context))
     }
 
     // 分行
@@ -123,8 +126,8 @@ export class RenderWrapPanel extends RenderPanel {
     let currentRun: Run = { children: [], mainSize: 0, crossSize: 0 }
 
     for (const child of visibleChildren) {
-      const cw = child.outerSize.width
-      const ch = child.outerSize.height
+      const cw = measuredSizes.get(child)!.width
+      const ch = measuredSizes.get(child)!.height
       const spacingBefore = currentRun.children.length > 0 ? spacing : 0
 
       if (currentRun.children.length > 0 && maxW > 0 &&
@@ -150,6 +153,7 @@ export class RenderWrapPanel extends RenderPanel {
       width: naturalWidth,
       height: totalH,
     })
+    if (context.pass === 'measure') return
     const contentSize = this.contentSize
     const contentOffset = this.contentOffset
 
@@ -161,18 +165,19 @@ export class RenderWrapPanel extends RenderPanel {
       const run = runs[ri]!
       const runY = runYs[ri]!
       const childXs = this._computePositions(
-        run.children.map(c => c.outerSize.width),
+        run.children.map(c => measuredSizes.get(c)!.width),
         spacing,
         contentSize.width,
         this._alignment,
       )
       for (let ci = 0; ci < run.children.length; ci++) {
         const child = run.children[ci]!
+        const childWidth = measuredSizes.get(child)!.width
         const childLayout = resolveChildLayout(
           child,
           {
-            minWidth: child.outerSize.width,
-            maxWidth: child.outerSize.width,
+            minWidth: childWidth,
+            maxWidth: childWidth,
             minHeight: run.crossSize,
             maxHeight: run.crossSize,
           },
@@ -183,7 +188,7 @@ export class RenderWrapPanel extends RenderPanel {
         child.positionInSlot({
           x: contentOffset.x + childXs[ci]!,
           y: contentOffset.y + runY,
-          width: child.outerSize.width,
+          width: childWidth,
           height: run.crossSize,
         }, childLayout.horizontalAlignment, childLayout.verticalAlignment)
       }

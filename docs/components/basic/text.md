@@ -322,3 +322,7 @@ DirectSurface UI 的基础文本是 canvas 绘制对象，不是 DOM 文本。�
 - [PlainTextEditor](../visualization/plain-text-editor.md)
 - [主题与状态](../../themes.md)
 - [布局与约束](../../lifecycle.md)
+
+## 预测量隔离
+
+`RenderText` 与 `RenderParagraph` 在预测量其他宽度或主题时，只计算返回尺寸，不覆盖当前已布局的省略文字、适配字号或段落分行。后续重绘继续使用最近一次正式布局的结果；需要应用新的宽度或字体时，应触发正式布局。
