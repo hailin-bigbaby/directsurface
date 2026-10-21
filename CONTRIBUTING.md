@@ -24,3 +24,5 @@ npm run verify:consumer
 - Edit `scripts/icon_manifest.json` and run `npm run generate:icons` when changing built-in icons. Do not edit the generated catalog by hand.
 
 Keep pull requests focused. Include a summary, the commands you ran, and a screenshot when the visible UI changes.
+
+Maintainers: see [Releasing](RELEASING.md) for npm trusted publishing and version tags.
