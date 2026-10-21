@@ -9,7 +9,10 @@ import { ellipsizeText } from '../core/text_overflow'
 import { RenderBox, RenderClip, resolveChildLayout } from '../layout/render_box'
 import { RenderAppContextScope } from '../layout/render_app_context_scope'
 import { DrawList } from '../rendering/draw_list'
-import type { InteractiveRenderObject, PointerEvent } from '../gestures/recognizers'
+import type { InteractiveRenderObject, PointerEvent, WheelPointerEvent } from '../gestures/recognizers'
+import { isPrimaryPointerButton } from '../gestures/hit_test'
+import { pointerKey, type PointerKey } from '../gestures/pointer_identity'
+import { ScrollController } from '../virtualization/scroll_controller'
 import type { PaintContext } from '../rendering/paint_context'
 import type { Color } from '../theme/theme'
 import {
@@ -274,6 +277,16 @@ type DockWorkbenchGuideHit = Required<Pick<DockWorkbenchDropTarget, 'scope' | 'r
   guideRect: Rect
 }
 type DockWorkbenchAutoHideRailSizes = Record<Exclude<DockRegion, 'center'>, number>
+type AutoHideRegion = Exclude<DockRegion, 'center'>
+interface AutoHideRailLayout {
+  rail: Rect
+  viewport: Rect
+  viewportSize: number
+  contentSize: number
+  before?: Rect
+  after?: Rect
+}
+interface AutoHideScrollButton { region: AutoHideRegion; direction: -1 | 1 }
 
 interface DockWorkbenchAutoHideSideTabMetrics {
   height: number
@@ -1045,10 +1058,12 @@ export class DockWorkbenchManager {
     if (this._rejectBeforeMutation()) return false
     const record = this._recordForItem(itemId)
     if (!record || record.window.disposed || record.kind !== 'tool' || !record.autoHideAllowed) return false
+    // Repeating the request must not extract a member from its hidden group.
+    if (record.placement.mode === 'autoHide') return this._autoHideItems.has(itemId)
     const targetRegion = this._autoHideRegionForRecord(record)
     if (!targetRegion) return false
     const previous = this._activeRecord()
-    const previousRegion = record.placement.mode === 'docked' || record.placement.mode === 'autoHide' ? record.placement.region : undefined
+    const previousRegion = record.placement.mode === 'docked' ? record.placement.region : undefined
     if (!this._canRunBeforeEvent({
       type: 'before-item-auto-hide',
       itemId: record.itemId,
@@ -1219,7 +1234,11 @@ export class DockWorkbenchManager {
     const records = autoHideGroup.itemIds
       .map(itemId => this._recordForItem(itemId))
       .filter((record): record is DockItemRecord => record !== undefined)
-    if (records.length !== autoHideGroup.itemIds.length || records.some(record => record.window.disposed)) return false
+    if (records.length !== autoHideGroup.itemIds.length || records.some(record => {
+      const hidden = this._autoHideItems.get(record.itemId)
+      return record.window.disposed || record.placement.mode !== 'autoHide' ||
+        record.placement.region !== autoHideGroup.region || hidden?.groupId !== groupId || hidden.window !== record.window
+    })) return false
     if (!records.every(record => this._canDockRecordToRegion(record, targetRegion))) return false
     const itemIds = records.map(record => record.itemId)
     if (!this._canRunBeforeEvent({
@@ -1237,6 +1256,7 @@ export class DockWorkbenchManager {
       })) return false
     }
     const previous = this._activeRecord()
+    const selectedItemId = this._activeAutoHideItemId
     this._autoHideGroups.delete(groupId)
     if (this._activeAutoHideItemId && autoHideGroup.itemIds.includes(this._activeAutoHideItemId)) this._activeAutoHideItemId = null
     const group = this._createTabGroup('tool')
@@ -1249,6 +1269,8 @@ export class DockWorkbenchManager {
       record.window.setPresentation('tabbed')
       this._syncWindowOwnership(record.window)
     }
+    const selected = records.find(record => record.itemId === selectedItemId)
+    if (selected) group.activeItem = selected.window
     this._activeFloatingWindow = null
     this._activeFloatingGroup = null
     const next = this._activeRecord()
@@ -2861,20 +2883,16 @@ class RenderWorkbenchTabGroup extends RenderBox implements InteractiveRenderObje
     const record = group.activeItem ? this._manager.items.find(candidate => candidate.window === group.activeItem) : undefined
     const nextActiveWindow = group.activeItem ?? undefined
     if (this._activeWindow !== nextActiveWindow) {
-      if (this._activeWindow && this._activeWindow !== preserveFocusFor) {
+      if (this._activeWindow?.parent === this._bodyClip && this._activeWindow !== preserveFocusFor) {
         this._clearFocusIfWithin(this._activeWindow)
       }
-      if (preserveFocusFor && this._activeWindow === preserveFocusFor && this._bodyClip.child === this._activeWindow) {
-        this._bodyClip.child = undefined
-        this._activeWindow.parent = undefined
-        this._bodyClip.markNeedsLayout()
-      }
-      if (this._activeWindow?.parent === this) {
-        this._activeWindow.parent = undefined
-        if (this._activeWindow.owner) this._activeWindow.detach()
-      }
+      this._releaseActiveWindow(this._activeWindow === preserveFocusFor)
       this._activeWindow = nextActiveWindow
       if (nextActiveWindow) {
+        const previousClip = nextActiveWindow.parent
+        if (previousClip instanceof RenderClip && previousClip.parent instanceof RenderWorkbenchTabGroup) {
+          previousClip.parent._releaseActiveWindow(true)
+        }
         nextActiveWindow.setPresentation('tabbed')
       }
       this._bodyClip.setChild(nextActiveWindow)
@@ -2911,6 +2929,8 @@ class RenderWorkbenchTabGroup extends RenderBox implements InteractiveRenderObje
     const style = deriveDockWorkbenchStyle(context.theme)
     const width = constraints.maxWidth === Infinity ? 400 : constraints.maxWidth
     const height = constraints.maxHeight === Infinity ? 260 : constraints.maxHeight
+    this.size = { width, height }
+    if (context.pass === 'measure') return
     const pinButtonWidth = Math.max(this.headerActionWidth, this._canPinToAutoHide() ? style.headerActionWidth : 0)
     this.tabs.layout({ minWidth: 0, maxWidth: Math.max(0, width - pinButtonWidth), minHeight: 0, maxHeight: height }, true, context)
     this.tabs.offset = { x: 0, y: 0 }
@@ -2928,7 +2948,6 @@ class RenderWorkbenchTabGroup extends RenderBox implements InteractiveRenderObje
       width,
       height: bodyHeight,
     }, bodyLayout.horizontalAlignment, bodyLayout.verticalAlignment)
-    this.size = { width, height }
   }
 
   performPaint(context: PaintContext, offset: Offset): void {
@@ -2998,10 +3017,7 @@ class RenderWorkbenchTabGroup extends RenderBox implements InteractiveRenderObje
     this._pinButtonRect = null
     this._pinPressed = false
     this._pinHovered = false
-    if (this._activeWindow) {
-      this._bodyClip.setChild(undefined)
-      this._activeWindow = undefined
-    }
+    this._releaseActiveWindow(false)
     this.tabs.parent = undefined
     if (this.tabs.owner) this.tabs.detach()
     this._bodyClip.parent = undefined
@@ -3011,6 +3027,20 @@ class RenderWorkbenchTabGroup extends RenderBox implements InteractiveRenderObje
   override dispose(): void {
     this.disposeDetached()
     super.dispose()
+  }
+
+  private _releaseActiveWindow(preserveAttachment: boolean): void {
+    const child = this._bodyClip.child
+    if (child && (preserveAttachment || child.parent !== this._bodyClip)) {
+      // A transfer keeps focus/IME and owner bindings. An obsolete view may
+      // discard its reference, but must never detach a new parent's child.
+      this._bodyClip.child = undefined
+      if (child.parent === this._bodyClip) child.parent = undefined
+      this._bodyClip.markNeedsLayout()
+    } else {
+      this._bodyClip.setChild(undefined)
+    }
+    this._activeWindow = undefined
   }
 
   private _clearFocusIfWithin(root: RenderObject): void {
@@ -3415,6 +3445,7 @@ class RenderWorkbenchRegionTree extends RenderBox {
     const width = constraints.maxWidth === Infinity ? 460 : constraints.maxWidth
     const height = constraints.maxHeight === Infinity ? 300 : constraints.maxHeight
     this.size = { width, height }
+    if (context.pass === 'measure') return
     if (!this._rootRender) return
     if (this._rootRender instanceof RenderBox) {
       const rootLayout = resolveChildLayout(
@@ -3648,6 +3679,15 @@ export class RenderDockWorkbench extends RenderBox implements InteractiveRenderO
   private readonly _groupViews = new Map<string, RenderWorkbenchTabGroup>()
   private readonly _splitViews = new Map<string, RenderSplitter>()
   private readonly _autoHideTabRects = new Map<string, Rect>()
+  private readonly _autoHideScroll = {
+    left: new ScrollController(), right: new ScrollController(), bottom: new ScrollController({ axis: 'x' }),
+  }
+  private readonly _autoHideRailLayouts = new Map<AutoHideRegion, AutoHideRailLayout>()
+  private _autoHideScrollPressed: AutoHideScrollButton | null = null
+  private _autoHideScrollHovered: AutoHideScrollButton | null = null
+  private _autoHideScrollPointer?: PointerKey
+  private _releaseAutoHideScrollCapture?: () => void
+  private _lastRevealedAutoHideItemId: string | null = null
   private _autoHidePinButtonRect: Rect | null = null
   private _autoHideOverlayGroup: DockWorkbenchTabGroupNode | null = null
   private _autoHideOverlayView: RenderWorkbenchTabGroup | null = null
@@ -3740,6 +3780,7 @@ export class RenderDockWorkbench extends RenderBox implements InteractiveRenderO
     const width = constraints.maxWidth === Infinity ? 840 : constraints.maxWidth
     const height = constraints.maxHeight === Infinity ? 520 : constraints.maxHeight
     this.size = { width, height }
+    if (context.pass === 'measure') return
     const rails = this._autoHideRailSizes()
     this._syncWorkbenchSplitterRatios()
     if (this._rootRender) {
@@ -3795,7 +3836,11 @@ export class RenderDockWorkbench extends RenderBox implements InteractiveRenderO
     dl.fillRect(offset.x, offset.y, this.size.width, this.size.height, context.theme.surfaceCanvas, 0)
     this.paintContentChildren(context, offset)
     const overlayDl = new DrawList(context)
-    this._paintAutoHideTabs(context, overlayDl, offset)
+    context.ctx.save()
+    try {
+      context.clipRect(offset.x, offset.y, this.size.width, this.size.height)
+      this._paintAutoHideTabs(context, overlayDl, offset)
+    } finally { context.ctx.restore() }
     this._paintAutoHideOverlayPin(context, offset)
     if (this.manager.isDragging) {
       const dragDl = new DrawList(context)
@@ -3810,6 +3855,7 @@ export class RenderDockWorkbench extends RenderBox implements InteractiveRenderO
   override dispose(): void {
     this._unsubscribe?.()
     this._unsubscribe = undefined
+    this._releaseRailPointer()
     this.manager.setDropResolver(undefined)
     this.manager.setUnhandledKeyDownHandler(undefined)
     for (const view of this._groupViews.values()) view.dispose()
@@ -3820,6 +3866,10 @@ export class RenderDockWorkbench extends RenderBox implements InteractiveRenderO
     this._autoHideHoveredItemId = null
     this._clearAutoHideDismissTimer()
     this._disposeAutoHideOverlay()
+    this._autoHideTabRects.clear()
+    this._autoHideRailLayouts.clear()
+    this._autoHideScrollPressed = null
+    this._autoHideScrollHovered = null
     this._rootRender = null
     if (this._disposeManagerOnDispose) this.manager.dispose()
     super.dispose()
@@ -3886,7 +3936,35 @@ export class RenderDockWorkbench extends RenderBox implements InteractiveRenderO
     this._handleAutoHidePointerLeave(event)
   }
 
+  onWheel(event: WheelPointerEvent): boolean {
+    if (event.ctrlKey || event.metaKey) return false
+    for (const [region, layout] of this._autoHideRailLayouts) {
+      if (!this._rectContains(layout.rail, event.position) || layout.contentSize <= layout.viewportSize) continue
+      const delta = region === 'bottom' ? event.deltaX || event.deltaY : event.deltaY
+      if (!Number.isFinite(delta) || delta === 0) return false
+      this._scrollAutoHideRail(region, delta)
+      return true
+    }
+    return false
+  }
+
   private _handleAutoHidePointerDown(event: PointerEvent): void {
+    if (!isPrimaryPointerButton(event)) return
+    if (this._autoHideScrollPointer !== undefined && this._autoHideScrollPointer !== pointerKey(event)) return
+    const scrollButton = this._autoHideScrollButtonAt(event.position)
+    if (scrollButton) {
+      this._releaseRailPointer()
+      this._autoHideScrollPointer = pointerKey(event)
+      this._autoHideScrollPressed = scrollButton
+      this._clearAutoHideHoverTimer()
+      this._clearAutoHideDismissTimer()
+      event.preventActivation?.()
+      this._releaseAutoHideScrollCapture = event.releasePointerCapture
+      event.setPointerCapture?.()
+      event.stopPropagation?.()
+      this.markNeedsPaint()
+      return
+    }
     this._autoHidePinPressed = this._autoHidePinButtonHitTest(event.position)
     if (this._autoHidePinPressed) {
       this._clearAutoHideHoverTimer()
@@ -3911,6 +3989,19 @@ export class RenderDockWorkbench extends RenderBox implements InteractiveRenderO
   }
 
   private _handleAutoHidePointerMove(event: PointerEvent): void {
+    if (this._autoHideScrollPointer !== undefined && this._autoHideScrollPointer !== pointerKey(event)) return
+    const scrollButton = this._autoHideScrollButtonAt(event.position)
+    if (!this._sameScrollButton(scrollButton, this._autoHideScrollHovered)) {
+      this._autoHideScrollHovered = scrollButton
+      this.markNeedsPaint()
+    }
+    if (scrollButton || this._autoHideScrollPressed) {
+      this._setAutoHideHoveredItem(null)
+      this._clearAutoHideHoverTimer()
+      this._clearAutoHideDismissTimer()
+      event.stopPropagation?.()
+      return
+    }
     const pinHovered = this._autoHidePinButtonHitTest(event.position)
     if (pinHovered !== this._autoHidePinHovered) {
       this._autoHidePinHovered = pinHovered
@@ -3951,6 +4042,20 @@ export class RenderDockWorkbench extends RenderBox implements InteractiveRenderO
   }
 
   private _handleAutoHidePointerUp(event: PointerEvent): void {
+    if (!isPrimaryPointerButton(event)) return
+    if (this._autoHideScrollPointer !== undefined && this._autoHideScrollPointer !== pointerKey(event)) return
+    if (this._autoHideScrollPressed) {
+      const pressed = this._autoHideScrollPressed
+      this._autoHideScrollPressed = null
+      if (this._sameScrollButton(pressed, this._autoHideScrollButtonAt(event.position))) {
+        const layout = this._autoHideRailLayouts.get(pressed.region)
+        if (layout) this._scrollAutoHideRail(pressed.region, pressed.direction * Math.max(24, layout.viewportSize * 0.8))
+      }
+      this._releaseRailPointer()
+      event.stopPropagation?.()
+      this.markNeedsPaint()
+      return
+    }
     if (this._autoHidePinPressed) {
       const pinHit = this._autoHidePinButtonHitTest(event.position)
       this._autoHidePinPressed = false
@@ -3979,13 +4084,17 @@ export class RenderDockWorkbench extends RenderBox implements InteractiveRenderO
   }
 
   private _handleAutoHidePointerCancel(event: PointerEvent): void {
-    const consumesCancel = this._autoHidePinPressed ||
+    if (this._autoHideScrollPointer !== undefined && this._autoHideScrollPointer !== pointerKey(event)) return
+    const consumesCancel = this._autoHideScrollPressed !== null || this._autoHidePinPressed ||
       this._autoHidePinHovered ||
       this._autoHidePressedItemId !== null ||
       (this.manager.activeAutoHideItemId !== null && !this._autoHideOverlayHitTest(event.position))
     this._clearAutoHideHoverTimer()
     this._clearAutoHideDismissTimer()
     this._autoHidePinPressed = false
+    this._autoHideScrollPressed = null
+    this._autoHideScrollHovered = null
+    this._releaseRailPointer()
     this._autoHidePinHovered = false
     this._autoHidePressedItemId = null
     this._setAutoHideHoveredItem(null)
@@ -3993,7 +4102,9 @@ export class RenderDockWorkbench extends RenderBox implements InteractiveRenderO
     if (consumesCancel) event.stopPropagation?.()
   }
 
-  private _handleAutoHidePointerLeave(_event: PointerEvent): void {
+  private _handleAutoHidePointerLeave(event: PointerEvent): void {
+    if (this._autoHideScrollPointer !== undefined && this._autoHideScrollPointer !== pointerKey(event)) return
+    if (this._autoHideScrollHovered) { this._autoHideScrollHovered = null; this.markNeedsPaint() }
     if (this._autoHidePinHovered) {
       this._autoHidePinHovered = false
       this.markNeedsPaint()
@@ -4098,7 +4209,7 @@ export class RenderDockWorkbench extends RenderBox implements InteractiveRenderO
     const bottomRail = rails.bottom
     if (region === 'bottom') {
       const style = deriveDockWorkbenchStyle(this.currentTheme)
-      const height = Math.min(this.size.height - bottomRail, Math.max(style.overlayMinHeight, this.manager.regionLayout.bottomHeight))
+      const height = Math.max(0, Math.min(this.size.height - bottomRail, Math.max(style.overlayMinHeight, this.manager.regionLayout.bottomHeight)))
       return {
         x: leftRail,
         y: Math.max(0, this.size.height - bottomRail - height),
@@ -4135,23 +4246,23 @@ export class RenderDockWorkbench extends RenderBox implements InteractiveRenderO
       return {
         x: offset.x,
         y: offset.y,
-        width: rails.left,
+        width: Math.min(this.size.width, rails.left),
         height: Math.max(0, this.size.height - rails.bottom),
       }
     }
     if (region === 'right') {
       return {
-        x: offset.x + this.size.width - rails.right,
+        x: offset.x + Math.max(0, this.size.width - rails.right),
         y: offset.y,
-        width: rails.right,
+        width: Math.min(this.size.width, rails.right),
         height: Math.max(0, this.size.height - rails.bottom),
       }
     }
     return {
       x: offset.x,
-      y: offset.y + this.size.height - rails.bottom,
+      y: offset.y + Math.max(0, this.size.height - rails.bottom),
       width: this.size.width,
-      height: rails.bottom,
+      height: Math.min(this.size.height, rails.bottom),
     }
   }
 
@@ -4228,6 +4339,7 @@ export class RenderDockWorkbench extends RenderBox implements InteractiveRenderO
     this._paintVerticalAutoHideTabs(context, dl, offset, 'left', byRegion.left)
     this._paintVerticalAutoHideTabs(context, dl, offset, 'right', byRegion.right)
     this._paintBottomAutoHideTabs(context, dl, offset, byRegion.bottom)
+    this._lastRevealedAutoHideItemId = this.manager.activeAutoHideItemId
   }
 
   private _paintAutoHideRail(
@@ -4256,61 +4368,128 @@ export class RenderDockWorkbench extends RenderBox implements InteractiveRenderO
   }
 
   private _paintVerticalAutoHideTabs(
-    context: PaintContext,
-    dl: DrawList,
-    offset: Offset,
-    region: 'left' | 'right',
-    items: readonly DockWorkbenchAutoHideItem[],
+    context: PaintContext, dl: DrawList, offset: Offset, region: 'left' | 'right', items: readonly DockWorkbenchAutoHideItem[],
   ): void {
-    if (items.length === 0) return
-    const rail = this._autoHideRailRect(region, offset)
-    if (!rail) return
-    const tabWidth = rail.width
-    const tabGap = Math.max(2, Math.round(context.theme.itemSpacing / 2))
-    const x = rail.x
-    let y = rail.y + tabGap
-    for (const item of items) {
-      const record = this.manager.getItem(item.itemId)
-      if (!record) continue
-      const metrics = this._autoHideSideTabMetrics(context, record.title, !!record.icon)
-      const rect = { x, y, width: tabWidth, height: metrics.height }
-      this._autoHideTabRects.set(item.itemId, rect)
-      const active = this.manager.activeAutoHideItemId === item.itemId
-      this._paintAutoHideTab(context, dl, rect, record, active, region, metrics)
-      y += metrics.height + tabGap
-    }
+    this._paintAutoHideRailItems(context, dl, offset, region, items)
   }
 
   private _paintBottomAutoHideTabs(context: PaintContext, dl: DrawList, offset: Offset, items: readonly DockWorkbenchAutoHideItem[]): void {
-    if (items.length === 0) return
-    const rail = this._autoHideRailRect('bottom', offset)
-    if (!rail) return
+    this._paintAutoHideRailItems(context, dl, offset, 'bottom', items)
+  }
+
+  private _paintAutoHideRailItems(
+    context: PaintContext, dl: DrawList, offset: Offset, region: AutoHideRegion, items: readonly DockWorkbenchAutoHideItem[],
+  ): void {
+    const rail = this._autoHideRailRect(region, offset)
+    const controller = this._autoHideScroll[region]
+    if (!rail || !items.length || rail.width <= 0 || rail.height <= 0) {
+      this._autoHideRailLayouts.delete(region)
+      controller.setOffset(0, { viewportSize: 0, contentSize: 0 })
+      return
+    }
+    const horizontal = region === 'bottom'
     const style = deriveDockWorkbenchStyle(context.theme)
-    const tabHeight = rail.height
-    const y = rail.y
-    const tabGap = Math.max(2, Math.round(context.theme.itemSpacing / 2))
-    let x = rail.x + tabGap + 1
+    const gap = Math.max(2, Math.round(context.theme.itemSpacing / 2))
     const draw = new DrawList(context)
-    for (const item of items) {
+    let cursor = gap + (horizontal ? 1 : 0)
+    const entries = items.flatMap(item => {
       const record = this.manager.getItem(item.itemId)
-      if (!record) continue
+      if (!record) return []
+      const metrics = horizontal ? undefined : this._autoHideSideTabMetrics(context, record.title, !!record.icon)
       const label = this._shortLabel(record.title, style.autoHideSideTabTextMaxLength)
+      const labelWidth = horizontal ? draw.measureText(label, style.autoHideTabFontSize, style.autoHideTabFontFamily, style.autoHideTabFontWeight).width : 0
       const iconWidth = record.icon ? style.autoHideBottomIconSize + style.autoHideBottomIconGap : 0
-      const labelWidth = draw.measureText(
-        label,
-        style.autoHideTabFontSize,
-        style.autoHideTabFontFamily,
-        style.autoHideTabFontWeight,
-      ).width
-      const width = Math.min(
-        style.autoHideSideTabMaxSize,
-        Math.max(style.autoHideSideTabBaseSize, Math.ceil(labelWidth + iconWidth + style.autoHideBottomTextInset * 2)),
-      )
-      const rect = { x, y, width, height: tabHeight }
-      this._autoHideTabRects.set(item.itemId, rect)
-      const active = this.manager.activeAutoHideItemId === item.itemId
-      this._paintAutoHideTab(context, dl, rect, record, active, 'bottom')
-      x += width + tabGap
+      const extent = metrics?.height ?? Math.min(style.autoHideSideTabMaxSize,
+        Math.max(style.autoHideSideTabBaseSize, Math.ceil(labelWidth + iconWidth + style.autoHideBottomTextInset * 2)))
+      const start = cursor
+      cursor += extent + gap
+      return [{ record, metrics, extent, start }]
+    })
+    const length = horizontal ? rail.width : rail.height
+    const contentSize = cursor
+    const overflow = contentSize > length
+    const buttonSize = overflow ? Math.min(horizontal ? rail.height : rail.width, Math.max(0, (length - 1) / 2)) : 0
+    const viewport: Rect = horizontal
+      ? { ...rail, x: rail.x + buttonSize, width: Math.max(0, length - buttonSize * 2) }
+      : { ...rail, y: rail.y + buttonSize, height: Math.max(0, length - buttonSize * 2) }
+    const viewportSize = horizontal ? viewport.width : viewport.height
+    const previous = this._autoHideRailLayouts.get(region)
+    const bounds = { viewportSize, contentSize }
+    controller.setOffset(controller.offset, bounds)
+    const active = entries.find(entry => entry.record.itemId === this.manager.activeAutoHideItemId)
+    if (active && (this._lastRevealedAutoHideItemId !== active.record.itemId || previous?.viewportSize !== viewportSize)) {
+      if (active.extent > viewportSize || active.start < controller.offset) controller.setOffset(active.start, bounds)
+      else if (active.start + active.extent > controller.offset + viewportSize) controller.setOffset(active.start + active.extent - viewportSize, bounds)
+    }
+    const before = buttonSize > 0 ? (horizontal ? { ...rail, width: buttonSize } : { ...rail, height: buttonSize }) : undefined
+    const after = buttonSize > 0 ? (horizontal
+      ? { ...rail, x: rail.x + rail.width - buttonSize, width: buttonSize }
+      : { ...rail, y: rail.y + rail.height - buttonSize, height: buttonSize }) : undefined
+    this._autoHideRailLayouts.set(region, { rail, viewport, viewportSize, contentSize, before, after })
+    context.ctx.save()
+    try {
+      context.clipRect(viewport.x, viewport.y, viewport.width, viewport.height)
+      for (const entry of entries) {
+        const start = entry.start - controller.offset
+        const rect: Rect = horizontal
+          ? { x: viewport.x + start, y: viewport.y, width: entry.extent, height: viewport.height }
+          : { x: viewport.x, y: viewport.y + start, width: viewport.width, height: entry.extent }
+        const hit = intersectWorkbenchRects(rect, viewport)
+        if (!hit) continue
+        this._autoHideTabRects.set(entry.record.itemId, hit)
+        this._paintAutoHideTab(context, dl, rect, entry.record, this.manager.activeAutoHideItemId === entry.record.itemId, region, entry.metrics)
+      }
+    } finally { context.ctx.restore() }
+    if (before) this._paintAutoHideScrollButton(context, before, { region, direction: -1 }, controller.offset > 0)
+    if (after) this._paintAutoHideScrollButton(context, after, { region, direction: 1 }, controller.offset < contentSize - viewportSize)
+  }
+
+  private _scrollAutoHideRail(region: AutoHideRegion, delta: number): void {
+    const layout = this._autoHideRailLayouts.get(region)
+    if (!layout) return
+    const controller = this._autoHideScroll[region]
+    const before = controller.offset
+    controller.scrollBy(delta, layout)
+    this._clearAutoHideHoverTimer()
+    this._clearAutoHideDismissTimer()
+    this._setAutoHideHoveredItem(null)
+    if (before !== controller.offset) this.markNeedsPaint()
+  }
+
+  private _releaseRailPointer(): void {
+    const release = this._releaseAutoHideScrollCapture
+    this._releaseAutoHideScrollCapture = undefined
+    this._autoHideScrollPointer = undefined
+    release?.()
+  }
+
+  private _sameScrollButton(a: AutoHideScrollButton | null, b: AutoHideScrollButton | null): boolean {
+    return a?.region === b?.region && a?.direction === b?.direction
+  }
+
+  private _autoHideScrollButtonAt(position: Offset): AutoHideScrollButton | null {
+    for (const [region, layout] of this._autoHideRailLayouts) {
+      if (layout.before && this._rectContains(layout.before, position)) return { region, direction: -1 }
+      if (layout.after && this._rectContains(layout.after, position)) return { region, direction: 1 }
+    }
+    return null
+  }
+
+  private _paintAutoHideScrollButton(context: PaintContext, rect: Rect, button: AutoHideScrollButton, enabled: boolean): void {
+    const style = deriveDockWorkbenchStyle(context.theme)
+    const state = { disabled: !enabled, hovered: this._sameScrollButton(button, this._autoHideScrollHovered),
+      pressed: this._sameScrollButton(button, this._autoHideScrollPressed) }
+    const dl = new DrawList(context)
+    dl.fillRect(rect.x, rect.y, rect.width, rect.height, resolveBgColor(style.autoHideTabBg, state), 0)
+    const color = resolveTextColor(style.autoHideTabText, state)
+    const cx = rect.x + rect.width / 2, cy = rect.y + rect.height / 2
+    const arm = Math.min(4, rect.width / 4, rect.height / 4)
+    if (button.region === 'bottom') {
+      dl.line(cx - button.direction * arm / 2, cy - arm, cx + button.direction * arm / 2, cy, color, 1)
+      dl.line(cx + button.direction * arm / 2, cy, cx - button.direction * arm / 2, cy + arm, color, 1)
+    } else {
+      dl.line(cx - arm, cy - button.direction * arm / 2, cx, cy + button.direction * arm / 2, color, 1)
+      dl.line(cx, cy + button.direction * arm / 2, cx + arm, cy - button.direction * arm / 2, color, 1)
     }
   }
 
@@ -4528,12 +4707,15 @@ export class RenderDockWorkbench extends RenderBox implements InteractiveRenderO
   ): RenderSplitter {
     let splitter = this._splitViews.get(id)
     if (!splitter) {
+      const pixelRegion = id === 'workbench-left-split' || id === 'workbench-right-split' || id === 'workbench-bottom-split'
       splitter = new RenderSplitter({
         first,
         second,
         direction,
         ratio,
         splitterSize: workbenchSplitterSize,
+        minRatio: pixelRegion ? 0 : 0.1,
+        maxRatio: pixelRegion ? 1 : 0.9,
         onChange,
       })
       this._splitViews.set(id, splitter)
@@ -4561,7 +4743,7 @@ export class RenderDockWorkbench extends RenderBox implements InteractiveRenderO
   }
 
   private _clampRatio(value: number): number {
-    return Math.max(0.12, Math.min(0.88, Number.isFinite(value) ? value : 0.5))
+    return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0.5))
   }
 
   private _leftSplitWidth(): number {
@@ -4977,4 +5159,11 @@ export class RenderDockWorkbench extends RenderBox implements InteractiveRenderO
       position.y >= rect.y &&
       position.y <= rect.y + rect.height
   }
+}
+
+function intersectWorkbenchRects(a: Rect, b: Rect): Rect | null {
+  const x = Math.max(a.x, b.x), y = Math.max(a.y, b.y)
+  const width = Math.min(a.x + a.width, b.x + b.width) - x
+  const height = Math.min(a.y + a.height, b.y + b.height) - y
+  return width > 0 && height > 0 ? { x, y, width, height } : null
 }

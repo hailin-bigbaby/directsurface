@@ -16,6 +16,11 @@ function paintBottomTab(title: string) {
   workbench.layout({ minWidth: 0, maxWidth: 900, minHeight: 0, maxHeight: 540 })
 
   const ctx = {
+    save: vi.fn(),
+    restore: vi.fn(),
+    beginPath: vi.fn(),
+    rect: vi.fn(),
+    clip: vi.fn(),
     fillRect: vi.fn(),
     strokeRect: vi.fn(),
     fillText: vi.fn(),
@@ -28,6 +33,8 @@ function paintBottomTab(title: string) {
   view._paintBottomAutoHideTabs(context, new DrawList(context), { x: 0, y: 0 }, manager.autoHideItems)
   const rect = view._autoHideTabRects.get('activity') as Rect
   const label = vi.mocked(ctx.fillText).mock.calls.at(-1)?.[0] as string
+  workbench.dispose()
+  manager.dispose()
   return { ctx, rect, label }
 }
 
@@ -35,6 +42,8 @@ describe('RenderDockWorkbench bottom auto-hide tabs', () => {
   it('allocates measured width for Chinese labels', () => {
     const { ctx, rect, label } = paintBottomTab('活动记录')
     const inset = deriveDockWorkbenchStyle(ImGuiDarkTheme).autoHideBottomTextInset
+    expect(ctx.clip).toHaveBeenCalledOnce()
+    expect(ctx.restore).toHaveBeenCalledOnce()
     expect(label).toBe('活动记录')
     expect(rect.width).toBeGreaterThanOrEqual(ctx.measureText(label).width + inset * 2)
   })
