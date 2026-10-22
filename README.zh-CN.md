@@ -1,5 +1,7 @@
 # DirectSurface
 
+[Office procurement demo / 办公采购工作台](https://hailin-bigbaby.github.io/directsurface/procurement/) · [Example source and setup](examples/procurement-workbench/README.md)
+
 **面向专业浏览器工作台的 Canvas GUI 框架。** DirectSurface（简称 `ds-ui`，npm 包名 `directsurface`）使用 TypeScript，提供可停靠窗口、虚拟数据表格、图表、表单、浮层和主题。
 
 [在线演示](https://hailin-bigbaby.github.io/directsurface/) · [快速开始](docs/getting-started.md) · [组件手册](docs/components/README.md) · [English README](README.md)

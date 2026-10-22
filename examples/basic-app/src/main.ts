@@ -272,6 +272,7 @@ function createApp(): AppHost {
   const accountRow = new RenderStackPanel({ orientation: 'horizontal', spacing: 12, mainAxisAlignment: 'end', crossAxisAlignment: 'center' })
   accountRow.addChild(new RenderBadge({ value: 'AM', status: 'primary', appearance: 'filled' }))
   accountRow.addChild(identity)
+  accountRow.addChild(new RenderButton({ label: 'Procurement demo', onClick: () => { window.location.href = new URL('procurement/', window.location.href).href } }))
   accountRow.addChild(settings)
   const header = new RenderAdaptiveGridPanel({ minColumnWidth: 280, maxColumns: 2, columnGap: 12, rowGap: 10, padding: { left: 24, right: 24, top: 16, bottom: 14 } })
   header.addChild(brand)

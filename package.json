@@ -32,7 +32,13 @@
     "test:browser": "node tests/browser/basic_app_smoke.mjs",
     "test:example:state": "vitest --run examples/basic-app/src/workbench_model.test.ts",
     "test:framework:browser": "npm run build && playwright test --config playwright.framework.config.mjs",
-    "test:consumer:charts": "vitest --run --config vitest.consumer.config.ts"
+    "test:consumer:charts": "vitest --run --config vitest.consumer.config.ts",
+    "procurement:setup": "node scripts/setup_procurement.mjs",
+    "procurement:check": "npm --prefix examples/procurement-workbench run check && npm --prefix examples/procurement-workbench test",
+    "procurement:build": "npm --prefix examples/procurement-workbench run build",
+    "procurement:test:browser": "npm --prefix examples/procurement-workbench run test:browser",
+    "procurement:test:production": "npm --prefix examples/procurement-workbench run test:production",
+    "build:site": "npm --prefix examples/basic-app run build && npm run procurement:build && node scripts/assemble_site.mjs"
   },
   "devDependencies": {
     "typescript": "^5.4.0",

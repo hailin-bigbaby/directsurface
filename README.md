@@ -1,5 +1,7 @@
 # DirectSurface
 
+[Office procurement demo / 办公采购工作台](https://hailin-bigbaby.github.io/directsurface/procurement/) · [Example source and setup](examples/procurement-workbench/README.md)
+
 **Desktop-grade browser workspaces, drawn on Canvas.** DirectSurface (`ds-ui`) is an ESM TypeScript GUI framework for data-heavy applications with dockable windows, virtual data grids, charts, forms, overlays, and themes.
 
 [Live demo](https://hailin-bigbaby.github.io/directsurface/) · [Getting started](docs/getting-started.md) · [Component guides](docs/components/README.md) · [中文说明](https://github.com/hailin-bigbaby/directsurface/blob/main/README.zh-CN.md)

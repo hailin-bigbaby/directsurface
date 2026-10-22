@@ -28,12 +28,16 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run verify:consumer
+      - run: npm run procurement:setup
+      - run: npm run procurement:check
       - run: npx playwright install --with-deps chromium
       - run: npm run test:browser
-      - run: GITHUB_PAGES=true npm --prefix examples/basic-app run build
+      - run: npm run procurement:test:browser
+      - run: npm run procurement:test:production
+      - run: GITHUB_PAGES=true npm run build:site
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:
-          path: examples/basic-app/dist
+          path: .runtime/site
       - id: deployment
         uses: actions/deploy-pages@v4

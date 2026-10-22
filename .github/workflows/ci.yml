@@ -22,9 +22,16 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run verify:consumer
+      - run: npm run procurement:setup
+      - run: npm run procurement:check
+      - run: npm run procurement:build
       - if: matrix.node-version == '24'
         run: npx playwright install --with-deps chromium
       - if: matrix.node-version == '24'
         run: npm run test:browser
       - if: matrix.node-version == '24'
         run: npm run test:framework:browser
+      - if: matrix.node-version == '24'
+        run: npm run procurement:test:browser
+      - if: matrix.node-version == '24'
+        run: npm run procurement:test:production

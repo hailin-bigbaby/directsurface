@@ -17,6 +17,7 @@ const documentation = [
   'README.md',
   'CONTRIBUTING.md',
   'examples/basic-app/README.md',
+  'examples/procurement-workbench/README.md',
   ...markdownFiles('docs'),
 ]
 for (const path of documentation) {

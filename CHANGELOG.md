@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add an office procurement example with local SQLite persistence and a separate online demo.
+
 - Button text changes now invalidate layout automatically.
 - DockWorkbench can cancel activation before leaving an invalid edit.
 - Consumed shortcuts no longer reach a newly opened confirmation dialog.

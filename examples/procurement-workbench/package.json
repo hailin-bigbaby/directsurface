@@ -1,0 +1,27 @@
+{
+  "name": "directsurface-procurement-workbench",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 4190 --strictPort",
+    "check": "tsc --noEmit && node scripts/check_boundaries.mjs",
+    "test": "vitest run",
+    "test:browser": "playwright test",
+    "build": "npm run check && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4191 --strictPort",
+    "test:production": "npm run build && playwright test --config playwright.production.config.ts"
+  },
+  "dependencies": {
+    "@sqlite.org/sqlite-wasm": "3.54.1-build1",
+    "directsurface": "file:../../.packs/directsurface.tgz"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.1",
+    "@types/node": "^20.12.0",
+    "typescript": "^5.4.0",
+    "vite": "^5.4.21",
+    "vitest": "^1.5.0"
+  },
+  "license": "MIT"
+}
