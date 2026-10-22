@@ -144,6 +144,9 @@ export class RenderLayoutInspectorView extends RenderStackPanel {
   }
 
   setInspectorState(state: LayoutInspectorDebugState): void {
+    const preserveObjectState = this._state !== null &&
+      this._state.selected?.debugId === state.selected?.debugId &&
+      this._state.selectedRenderObject === state.selectedRenderObject
     this._state = state
     const selected = state.selected
     this._summary.text = selected
@@ -171,9 +174,9 @@ export class RenderLayoutInspectorView extends RenderStackPanel {
       this._appContextInspector.setValue(createAppContextInspectorValue(state), 'layoutInspector.appContext')
     }
     const objectInspectorSignature = formatObjectInspectorSignature(state)
-    if (contextChanged || objectInspectorSignature !== this._objectInspectorSignature) {
+    if (!preserveObjectState || contextChanged || objectInspectorSignature !== this._objectInspectorSignature) {
       this._objectInspectorSignature = objectInspectorSignature
-      this._objectInspector.setValue(createSelectedInspectorValue(state), 'layoutInspector.selected')
+      this._objectInspector.setValue(createSelectedInspectorValue(state), 'layoutInspector.selected', { preserveState: preserveObjectState })
     }
     this._syncTreeView(state)
   }

@@ -586,6 +586,59 @@ expect(onNeedPaint).toHaveBeenCalledTimes(1)
     })
   })
 
+  it('inherits nested content clips during independent transient replay and restores after failure', () => {
+    class ClippedNode extends TestNode {
+      override get animationContentClip() { return { ...this.globalOffset, width: 80, height: 40 } }
+    }
+    const outer = new ClippedNode(), inner = new ClippedNode(), caret = new TestNode()
+    outer.addChild(inner); inner.addChild(caret)
+    outer.offset = { x: 10, y: 20 }; inner.offset = { x: 5, y: 6 }
+    const context = createPaintContext()
+    const paint = vi.spyOn(caret, 'performTransientPaint').mockImplementation(() => { throw new Error('paint') })
+    expect(() => caret.paintTransient(context, caret.globalOffset)).toThrow('paint')
+    expect(context.ctx.rect).toHaveBeenCalledWith(15, 26, 80, 40)
+    expect(context.ctx.rect).toHaveBeenCalledWith(10, 20, 80, 40)
+    expect(context.ctx.save).toHaveBeenCalledTimes(1)
+    expect(context.ctx.restore).toHaveBeenCalledTimes(1)
+    paint.mockClear()
+    inner.visible = false
+    caret.paintTransient(context, caret.globalOffset)
+    expect(paint).not.toHaveBeenCalled()
+  })
+
+  it('keeps a content clip off its adorners while retaining an outer viewport clip', () => {
+    class ClipNode extends TestNode {
+      override get animationContentClip() { return { ...this.globalOffset, width: 80, height: 40 } }
+    }
+    class AdornedNode extends ClipNode {
+      adorner = new TestNode()
+      constructor() { super(); this.addChild(this.adorner) }
+      override visitAdornerChildren(visitor: (child: RenderObject) => void): void { visitor(this.adorner) }
+    }
+    const outer = new ClipNode(), inner = new AdornedNode()
+    outer.addChild(inner)
+    outer.offset = { x: 10, y: 20 }; inner.offset = { x: 5, y: 6 }
+    const context = createPaintContext(), paint = vi.spyOn(inner.adorner, 'performTransientPaint')
+    inner.adorner.paintTransient(context, inner.adorner.globalOffset)
+    expect(paint).toHaveBeenCalledOnce()
+    expect(context.ctx.rect).toHaveBeenCalledTimes(1)
+    expect(context.ctx.rect).toHaveBeenCalledWith(10, 20, 80, 40)
+  })
+
+  it('skips transient drawing from inactive tab-like children even when their visible flag is true', () => {
+    class ActiveContainer extends TestNode {
+      active?: RenderObject
+      override isFocusChildActive(child: RenderObject) { return child === this.active }
+    }
+    const root = new ActiveContainer(), first = new TestNode(), second = new TestNode()
+    root.addChild(first); root.addChild(second); root.active = first
+    const firstPaint = vi.spyOn(first, 'performTransientPaint'), secondPaint = vi.spyOn(second, 'performTransientPaint')
+    first.paintTransient(createPaintContext(), first.globalOffset)
+    second.paintTransient(createPaintContext(), second.globalOffset)
+    expect(firstPaint).toHaveBeenCalledOnce()
+    expect(secondPaint).not.toHaveBeenCalled()
+  })
+
   it('marks RenderText dirty for layout when text changes after attach', () => {
     const onNeedLayout = vi.fn()
     const owner = new PipelineOwner({ onNeedLayout })

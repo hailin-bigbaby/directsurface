@@ -96,6 +96,25 @@ describe('RenderLayoutInspectorPanel runtime diagnostics', () => {
     ])
   })
 
+  it('refreshes diagnostics without collapsing the same selected object, but resets for a new selection', () => {
+    const panel = new RenderLayoutInspectorPanel()
+    try {
+      const state = selectedState()
+      panel.setInspectorState(state)
+      const inspector = panel.debugObjectInspector()
+      inspector.expandNode('layoutInspector.selected.selected')
+      inspector.expandNode('layoutInspector.selected.overlay')
+      const expanded = inspector.debugState().expandedKeys
+      const next = { ...state, hoverPathLength: 99, selected: { ...state.selected!, size: { width: 333, height: 44 } } }
+      panel.setInspectorState(next)
+      expect(inspector.debugState().expandedKeys).toEqual(expanded)
+      expect((inspector.value as any).overlay.hoverPathLength).toBe(99)
+      expect((inspector.value as any).selected.size.width).toBe(333)
+      panel.setInspectorState({ ...next, selected: debugInfo(4, 'RenderButton') })
+      expect(inspector.debugState().expandedKeys).toHaveLength(1)
+    } finally { panel.dispose() }
+  })
+
   it('does not invalidate layout when runtime debug state is unchanged', () => {
     const panel = new RenderLayoutInspectorPanel()
     const state = {

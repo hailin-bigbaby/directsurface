@@ -1,3 +1,8 @@
+import { RenderScrollViewer } from '../widgets/scroll_view'
+import { RenderStackPanel } from '../layout/render_flex'
+import { RenderText } from '../widgets/basic'
+import { RenderTextBox } from '../widgets/text_field'
+import { RenderComboBox } from '../widgets/dropdown'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { FocusManager, FocusScope, FocusScopeType, type Focusable } from './focus_manager'
 import { ClipboardController, type CopyableSelection } from './clipboard'
@@ -460,6 +465,83 @@ describe('FocusScope', () => {
     expect(manager.scopeStack).toHaveLength(2)
     expect(manager.scopeStack[1]).toBe(replacement)
     expect(manager.scopeStack).not.toContain(original)
+  })
+
+  it('focuses newly revealed registered popup children synchronously in the popup scope', () => {
+    const manager = FocusManager.instance
+    const page = new FocusNode(), root = new FocusNode(), group = new FocusNode()
+    const first = new FocusNode(), revealed = new FocusNode(), unregistered = new FocusNode()
+    root.addChild(first); root.addChild(group); group.addChild(revealed); group.addChild(unregistered)
+    manager.setRootResolver(() => [page])
+    manager.register(first); manager.register(revealed)
+    group.visible = false
+    const scope = new FocusScope(FocusScopeType.Popup)
+    manager.pushScope(scope)
+    manager.refreshScopeFocusRoots(scope, [root])
+    manager.setFocus(first)
+    manager.setFocus(revealed)
+    expect(manager.current).toBe(first)
+    group.visible = true
+    manager.setFocus(revealed)
+    expect(scope.current).toBe(revealed)
+    expect(first.isFocused).toBe(false)
+    manager.setFocus(unregistered)
+    expect(scope.current).toBe(revealed)
+    manager.clearFocus()
+    group.visible = false
+    manager.setFocus(revealed)
+    expect(manager.current).toBe(null)
+    manager.popScope(null, scope)
+    expect(revealed.isFocused).toBe(false)
+  })
+
+  it.each(['text', 'combo'] as const)('reveals %s controls through nested ScrollViewers without locking wheel scroll', kind => {
+    const manager = FocusManager.instance
+    const control = kind === 'text'
+      ? new RenderTextBox({ value: 'Focused field' })
+      : new RenderComboBox({ options: [{ value: 'a', label: 'A' }], value: 'a' })
+    const body = new RenderStackPanel({ orientation: 'vertical' })
+    const gap = new RenderText('Inner spacer'); gap.height = 250
+    body.addChild(gap); body.addChild(control)
+    const inner = new RenderScrollViewer({ child: body }); inner.height = 100
+    const outerBody = new RenderStackPanel({ orientation: 'vertical' })
+    const outerGap = new RenderText('Outer spacer'); outerGap.height = 160
+    outerBody.addChild(outerGap); outerBody.addChild(inner)
+    const outer = new RenderScrollViewer({ child: outerBody })
+    manager.setRootResolver(() => [outer])
+    outer.layout({ minWidth: 240, maxWidth: 240, minHeight: 150, maxHeight: 150 })
+    try {
+      manager.setFocus(control)
+      expect(control.isFocused).toBe(true)
+      expect(inner.scrollY).toBeGreaterThan(0)
+      expect(outer.scrollY).toBeGreaterThan(0)
+      expect(control.globalOffset.y).toBeGreaterThanOrEqual(0)
+      expect(control.globalOffset.y + control.size.height).toBeLessThanOrEqual(outer.size.height)
+      const before = inner.scrollY
+      inner.onWheel({ pointerId: 1, type: 'wheel', position: { x: inner.globalOffset.x + 20, y: inner.globalOffset.y + 20 }, deltaX: 0, deltaY: -40 })
+      expect(inner.scrollY).toBeLessThan(before)
+      expect(control.isFocused).toBe(true)
+    } finally { outer.dispose() }
+  })
+
+  it('admits revealed popup controls without bypassing an underlying modal boundary', () => {
+    const manager = FocusManager.instance
+    const page = new FocusNode(), modalRoot = new FocusNode(), popupRoot = new FocusNode()
+    const old = new FocusNode(), group = new FocusNode(), revealed = new FocusNode()
+    group.addChild(revealed); popupRoot.addChild(old); popupRoot.addChild(group)
+    group.visible = false
+    for (const node of [page, old, revealed]) manager.register(node)
+    manager.setRootResolver(() => [page])
+    const modal = new FocusScope(FocusScopeType.Modal), popup = new FocusScope(FocusScopeType.Popup)
+    manager.pushScope(modal); manager.refreshScopeFocusRoots(modal, [modalRoot])
+    manager.pushScope(popup); manager.refreshScopeFocusRoots(popup, [popupRoot])
+    manager.setFocus(old)
+    group.visible = true
+    manager.setFocus(revealed)
+    expect(popup.current).toBe(revealed)
+    manager.setFocus(page)
+    expect(manager.current).toBe(revealed)
+    manager.popScope(null, popup); manager.popScope(null, modal)
   })
 
   it('popup scope preserves the current focused widget in the underlying scope', () => {

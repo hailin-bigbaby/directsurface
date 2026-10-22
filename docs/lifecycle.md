@@ -38,6 +38,12 @@ clock.dispose()
 
 The standalone clock does not create browser frame callbacks itself. `RuntimeHost.renderFrame(timestamp)` advances the clock; omitting the timestamp paints current state only. Decorative animation time excludes hidden time and must not be used as a business deadline clock. Failed callbacks or activity predicates are removed and surfaced while other subscriptions can continue.
 
+## Dynamic focus and scroll visibility
+
+A registered control revealed inside a popup can request focus immediately. The focus manager checks active popup ancestry and adds the control to that scope synchronously; hidden, removed, or unregistered controls cannot use this path to acquire focus. Modal boundaries remain in effect.
+
+Focusing a control asks ancestor scroll containers to reveal it. Wheel scrolling remains independent of focus. Carets and other independently replayed transient drawing inherit ancestor content clips, retaining the container's adorner exception, so offscreen editors do not draw over nearby controls.
+
 ## Focus visibility
 
 Actual focus and its navigation outline are separate. Pointer presses hide navigation focus rings without clearing focus or selection. Keyboard navigation reveals them again, including when focus remains on the same control. Pointer movement and scrolling do not hide a keyboard focus ring.

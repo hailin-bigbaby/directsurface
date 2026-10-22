@@ -929,6 +929,13 @@ const columns: GridColumnDef<OrderRow>[] = [
 默认保持统一行高。可仅让长文本列参与自动测量：
 
 ```ts
+import { RenderDataGrid } from 'directsurface'
+
+const rows = [
+  { id: 1, description: '短说明' },
+  { id: 2, description: '较长的说明会根据列宽自动换行，并参与当前行的高度测量。' },
+]
+
 const grid = new RenderDataGrid({
   columns: [
     { key: 'id', title: '编号', type: 'number', width: 80, pinned: 'left' },

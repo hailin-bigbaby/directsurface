@@ -321,6 +321,15 @@ export class FocusManager {
         this._setFocusInScope(scope, widget)
         return
       }
+      // Popup contents can reveal a registered control between layout/input passes.
+      // Admit it into its owning scope synchronously, never into a lower scope.
+      if (scope.type === FocusScopeType.Popup &&
+          this._defaultScope.contains(widget) &&
+          this._isFocusableWithinRoots(widget, scope.focusRoots)) {
+        scope.add(widget)
+        this._setFocusInScope(scope, widget)
+        return
+      }
       if (scope.type === FocusScopeType.Modal) {
         if (this._isFocusableWithinRoots(widget, scope.focusRoots)) {
           scope.add(widget)
@@ -606,6 +615,15 @@ export class FocusManager {
       }
     }
     scope.setFocus(widget)
+    if (scope.current === widget && widget instanceof RenderObject) {
+      // Scroll containers own their reveal geometry; focus only requests visibility.
+      let ancestor = widget.parent
+      while (ancestor) {
+        const viewport = ancestor as RenderObject & { revealDescendant?: (target: RenderObject) => boolean }
+        viewport.revealDescendant?.(widget)
+        ancestor = ancestor.parent
+      }
+    }
     if (scope === this._defaultScope && scope.current) {
       this._syncActiveRootFor(scope.current)
     }

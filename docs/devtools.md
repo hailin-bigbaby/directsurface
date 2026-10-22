@@ -20,6 +20,21 @@ Layout 支持拾取元素、查看渲染树、对象属性、命中路径和 App
 - 快照和上下文预览不会执行 getter 或自定义 `toJSON()`；访问器显示 `[Getter]`、`[Setter]` 或 `[Getter/Setter]`，无效日期显示 `[Invalid Date]`，无法检查的对象显示 `[Uninspectable]`，循环引用显示 `[Circular]`。对象某个属性异常不会中断其他属性和整个快照。
 - 诊断序列化限制对象深度、属性/数组数量和长字符串，适合排障而非业务数据备份；业务敏感信息仍须在接入层脱敏。
 
+## 对象刷新与浏览状态
+
+Layout Inspector 刷新同一选中组件时保留仍有效的展开路径与选择，同时更新显示值；切换组件时重置。
+通用 `RenderObjectInspector.setValue(value, label?, { preserveState: true })` 也可采用此行为；默认 `setValue()` 仍重置浏览状态。
+
+```ts
+import { RenderObjectInspector } from 'directsurface'
+
+const inspector = new RenderObjectInspector({ label: 'state', value: { nested: { count: 1 } } })
+inspector.expandNode('state.nested')
+inspector.setValue({ nested: { count: 2 } }, 'state', { preserveState: true })
+```
+
+恢复按唯一显示路径匹配。属性重排不转移到其他属性；已删除路径、重复 Symbol 显示路径不恢复，标签改变时重置。数组和 Map/Set 条目使用索引路径，不按业务键匹配。恢复遵循分批加载和数量限制，不执行 getter；加载期间的手动折叠或选择优先于待恢复状态。更换值或释放组件会取消旧加载任务。此选项保留展开和选择，不保证滚动像素位置不变。
+
 ## Runtime 状态与刷新
 
 默认 RuntimeHost 保留最近 80 条刷新请求，Hotspots 聚合这段历史。刷新按钮重新拉取当前数据，不是持续累积的长周期性能统计。

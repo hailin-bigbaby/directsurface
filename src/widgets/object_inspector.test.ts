@@ -49,6 +49,82 @@ describe('RenderObjectInspector', () => {
     expect(expandedPatient?.children?.map(node => node.path)).toContain('state.patient.visit')
   })
 
+  it('preserves expanded paths and selection while refreshing displayed values', () => {
+    const inspector = new RenderObjectInspector({ value: { nested: { value: 1 }, other: {} }, includePrototype: false })
+    inspector.expandNode('root.nested')
+    const tree = (inspector as any)._tree
+    tree.selectedKey = findNodeByPath(inspector.debugState().roots, 'root.nested.value')!.key
+    inspector.setValue({ other: {}, nested: { value: 2 } }, 'root', { preserveState: true })
+    const state = inspector.debugState()
+    const nested = findNodeByPath(state.roots, 'root.nested')!
+    expect(state.expandedKeys).toContain(nested.key)
+    expect(state.detailRows).toMatchObject({ path: 'root.nested.value', value: '2' })
+    expect(findNodeByPath(state.roots, 'root.other')!.loaded).toBe(false)
+    inspector.setValue({ other: {} }, 'root', { preserveState: true })
+    expect(inspector.debugState().expandedKeys).toEqual([inspector.debugState().roots[0]!.key])
+    expect(inspector.debugState().detailRows.path).toBe('root')
+    inspector.dispose()
+  })
+
+  it('keeps default replacement and label changes as explicit view resets', () => {
+    const inspector = new RenderObjectInspector({ value: { nested: {} }, includePrototype: false })
+    inspector.expandNode('root.nested')
+    inspector.setValue({ nested: {} })
+    expect(inspector.debugState().expandedKeys).toHaveLength(1)
+    inspector.expandNode('root.nested')
+    inspector.setValue({ nested: {} }, 'other', { preserveState: true })
+    expect(inspector.debugState().expandedKeys).toHaveLength(1)
+    expect(inspector.debugState().detailRows.path).toBe('other')
+    inspector.dispose()
+  })
+
+  it('restores deep paths after batched loading and repeated refreshes without invoking accessors', () => {
+    vi.useFakeTimers()
+    const getter = vi.fn(() => 'must not run')
+    const value = (version: number) => Object.defineProperty({ first: 0, second: 0, nested: { deeper: { version } } }, 'accessor', { get: getter })
+    const inspector = new RenderObjectInspector({ value: value(1), expansionBatchSize: 1, includePrototype: false })
+    vi.runAllTimers()
+    inspector.expandNode('root.nested'); vi.runAllTimers()
+    inspector.expandNode('root.nested.deeper'); vi.runAllTimers()
+    const tree = (inspector as any)._tree
+    tree.selectedKey = findNodeByPath(inspector.debugState().roots, 'root.nested.deeper.version')!.key
+    inspector.setValue(value(2), 'root', { preserveState: true })
+    inspector.setValue(value(3), 'root', { preserveState: true })
+    vi.runAllTimers()
+    const state = inspector.debugState()
+    expect(state.expandedKeys).toContain(findNodeByPath(state.roots, 'root.nested.deeper')!.key)
+    expect(state.detailRows).toMatchObject({ path: 'root.nested.deeper.version', value: '3' })
+    expect(getter).not.toHaveBeenCalled()
+    inspector.setValue(value(4), 'root', { preserveState: true })
+    inspector.dispose()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('does not transfer expansion to colliding symbol paths or override manual collapse during refresh', () => {
+    vi.useFakeTimers()
+    const first = Symbol('same'), second = Symbol('same')
+    const inspector = new RenderObjectInspector({ value: { [first]: { a: 1 }, [second]: { b: 2 } }, includePrototype: false })
+    const firstNode = inspector.debugState().roots[0]!.children![0]!
+    inspector.expandNode(firstNode.key)
+    inspector.setValue({ [second]: { b: 3 }, [first]: { a: 4 } }, 'root', { preserveState: true })
+    expect(inspector.debugState().expandedKeys).toHaveLength(1)
+    inspector.dispose()
+
+    const batched = new RenderObjectInspector({ value: { nested: { a: 1, b: 2, c: 3 } }, expansionBatchSize: 1, includePrototype: false })
+    vi.runAllTimers(); batched.expandNode('root.nested'); vi.runAllTimers()
+    ;(batched as any)._tree.selectedKey = findNodeByPath(batched.debugState().roots, 'root.nested.a')!.key
+    batched.setValue({ nested: { a: 4, b: 5, c: 6 } }, 'root', { preserveState: true })
+    vi.runOnlyPendingTimers()
+    const tree = (batched as any)._tree
+    const node = tree.roots[0].children.find((child: any) => child.data?.path === 'root.nested')
+    tree.expandedKeys = tree.expandedKeys.filter((key: string) => key !== node.key)
+    tree.onExpand(node, false)
+    vi.runAllTimers()
+    expect(batched.debugState().expandedKeys).not.toContain(node.key)
+    expect(batched.debugState().detailRows.path).not.toBe('root.nested.a')
+    batched.dispose()
+  })
+
   it('generates semantic label tokens for devtools-style coloring', () => {
     const inspector = new RenderObjectInspector({
       value: {

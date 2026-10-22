@@ -99,6 +99,8 @@ export class RenderObjectInspector extends RenderStackPanel {
   private _detailText = ''
   private _nextNodeId = 0
   private _loadVersion = 0
+  private _restoreState: { expandedPaths: Set<string>; selectedPath: string | null } | null = null
+  private _restoringState = false
 
   constructor(options: ObjectInspectorOptions) {
     super({ orientation: 'horizontal', spacing: 8, crossAxisAlignment: 'stretch' })
@@ -143,8 +145,15 @@ export class RenderObjectInspector extends RenderStackPanel {
       height: this._adaptiveTreeHeight ? undefined : options.treeHeight ?? 280,
       defaultExpandedKeys: [this._roots[0]!.key],
       copyText: node => this._copyTextForNode(node),
-      onSelect: node => this._selectNode(node),
+      onSelect: node => {
+        if (this._restoreState) this._restoreState.selectedPath = null
+        this._selectNode(node)
+      },
       onExpand: (node, expanded) => {
+        if (this._restoreState && node.data) {
+          this._restoreState.expandedPaths.delete(node.data.path)
+          this._restoreState.selectedPath = null
+        }
         if (expanded) this._ensureChildren(node)
       },
     })
@@ -175,17 +184,20 @@ export class RenderObjectInspector extends RenderStackPanel {
     return this._tree.selectedKey
   }
 
-  setValue(value: unknown, label = this._label): void {
+  setValue(value: unknown, label = this._label, options: { preserveState?: boolean } = {}): void {
+    const restore = options.preserveState && label === this._label ? this._captureViewState() : null
     this._cancelPendingLoads()
+    this._restoreState = restore
     this._value = value
     this._label = label
     this._nextNodeId = 0
     this._roots = [this._createNode(this._label, this._value, this._label, [])]
     this._tree.setRoots(this._roots)
-    this._tree.expandedKeys = [this._roots[0]!.key]
-    this._ensureChildren(this._roots[0]!)
+    this._tree.expandedKeys = restore ? [] : [this._roots[0]!.key]
     this._tree.selectedKey = this._roots[0]!.key
     this._selectNode(this._roots[0]!)
+    this._ensureChildren(this._roots[0]!)
+    this._restoreViewState()
     this.markNeedsLayout()
   }
 
@@ -226,6 +238,10 @@ export class RenderObjectInspector extends RenderStackPanel {
   expandNode(key: string): boolean {
     const node = this._findNodeByKeyOrPath(key, this._roots)
     if (!node || !node.data?.expandable) return false
+    if (this._restoreState) {
+      this._restoreState.expandedPaths.delete(node.data.path)
+      this._restoreState.selectedPath = null
+    }
     this._ensureChildren(node)
     if (!this._tree.expandedKeys.includes(node.key)) this._tree.expandedKeys = [...this._tree.expandedKeys, node.key]
     return true
@@ -341,6 +357,7 @@ export class RenderObjectInspector extends RenderStackPanel {
     node.label = this._labelForData(data)
     node.labelTokens = this._labelTokensForData(data)
     this._tree.setRoots(this._roots)
+    this._restoreViewState()
   }
 
   private _readChildBatch(
@@ -382,11 +399,79 @@ export class RenderObjectInspector extends RenderStackPanel {
     task.node.label = this._labelForData(task.data)
     task.node.labelTokens = this._labelTokensForData(task.data)
     this._tree.setRoots(this._roots)
+    this._restoreViewState()
     this.markNeedsLayout()
+  }
+
+  private _captureViewState(): { expandedPaths: Set<string>; selectedPath: string | null } {
+    const counts = new Map<string, number>()
+    const paths = new Map<string, string>()
+    const visit = (nodes: readonly TreeNode<InspectorNodeData>[]): void => {
+      for (const node of nodes) {
+        if (node.data) {
+          paths.set(node.key, node.data.path)
+          counts.set(node.data.path, (counts.get(node.data.path) ?? 0) + 1)
+        }
+        visit(node.children ?? [])
+      }
+    }
+    visit(this._roots)
+    const uniquePath = (key: string): string | null => {
+      const path = paths.get(key)
+      return path !== undefined && counts.get(path) === 1 ? path : null
+    }
+    return {
+      expandedPaths: new Set([
+        ...(this._restoreState?.expandedPaths ?? []),
+        ...this._tree.expandedKeys.flatMap(key => {
+          const path = uniquePath(key)
+          return path === null ? [] : [path]
+        }),
+      ]),
+      selectedPath: this._restoreState?.selectedPath ?? uniquePath(this._tree.selectedKey),
+    }
+  }
+
+  private _restoreViewState(): void {
+    const state = this._restoreState
+    if (!state || this._restoringState) return
+    this._restoringState = true
+    try {
+      const expanded = new Set(this._tree.expandedKeys)
+      let selected: TreeNode<InspectorNodeData> | undefined
+      const visit = (nodes: readonly TreeNode<InspectorNodeData>[]): void => {
+        const counts = new Map<string, number>()
+        for (const node of nodes) {
+          if (node.data) counts.set(node.data.path, (counts.get(node.data.path) ?? 0) + 1)
+        }
+        for (const node of nodes) {
+          const data = node.data
+          // Symbol display paths may collide; never transfer state to an ambiguous branch.
+          if (!data || counts.get(data.path) !== 1) continue
+          if (state.expandedPaths.has(data.path) && data.expandable) {
+            expanded.add(node.key)
+            this._ensureChildren(node)
+          }
+          if (state.selectedPath === data.path) selected = node
+          // Wait for a full sibling batch before resolving path identity.
+          if (data.loaded) visit(node.children ?? [])
+        }
+      }
+      visit(this._roots)
+      this._tree.expandedKeys = [...expanded]
+      if (selected) {
+        this._tree.selectedKey = selected.key
+        this._selectNode(selected)
+      }
+      if (this._loadTimers.size === 0) this._restoreState = null
+    } finally {
+      this._restoringState = false
+    }
   }
 
   private _cancelPendingLoads(): void {
     this._loadVersion += 1
+    this._restoreState = null
     for (const timer of this._loadTimers) clearTimeout(timer)
     this._loadTimers.clear()
   }

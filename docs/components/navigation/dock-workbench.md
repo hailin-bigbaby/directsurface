@@ -497,3 +497,22 @@ left/right/bottom 自动隐藏边栏在内容溢出时提供两端翻页按钮�
 ## Activation validation
 
 `before-item-activate` is a synchronous cancellable event for switching existing items through `activateItem()`, `activateWindow()` and `selectDockedItemTab()`. Return `false` to retain the selected tab, for example when `grid.commitEdit()` fails. Do not mutate the manager from the listener. Validate edits separately before creating items, and use `beforeClose` for closing. Docking and floating have their own before events.
+
+
+```ts
+import { DockWorkbenchManager, RenderDataGrid } from 'directsurface'
+
+// 在宿主装配时传入工作台 manager，以及获取当前页面表格的方法。
+function guardGridNavigation(
+  manager: DockWorkbenchManager,
+  getCurrentGrid: () => RenderDataGrid | null,
+): () => void {
+  return manager.subscribeBeforeEvent(event => {
+    if (event.type === 'before-item-activate') {
+      return getCurrentGrid()?.commitEdit() ?? true
+    }
+  })
+}
+```
+
+Call the returned unsubscribe function when the page or workbench is disposed. With no active grid, navigation is allowed.

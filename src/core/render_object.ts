@@ -458,8 +458,27 @@ export abstract class RenderObject {
   }
 
   paintTransient(context: PaintContext, offset: Offset): void {
-    if (!this._visible) return
-    this.performTransientPaint(context, offset)
+    const clips: Rect[] = []
+    for (let node: RenderObject | undefined = this; node; node = node.parent) {
+      if (!node.visible || (node.parent && !node.parent.isFocusChildActive(node))) return
+      const clip = node.parent?.animationContentClip
+      if (!clip) continue
+      let adorner = false
+      node.parent!.visitAdornerChildren(child => { if (child === node) adorner = true })
+      if (!adorner) clips.push(clip)
+    }
+    if (clips.length === 0) {
+      this.performTransientPaint(context, offset)
+      return
+    }
+    // Independent caret/selection replay must inherit the same ancestor content clips.
+    context.save()
+    try {
+      for (const clip of clips) context.clipRect(clip.x, clip.y, Math.max(0, clip.width), Math.max(0, clip.height))
+      this.performTransientPaint(context, offset)
+    } finally {
+      context.restore()
+    }
   }
 
   // 子类实现
