@@ -301,6 +301,7 @@ test('compact request errors remain visible and 800px keeps the order editable',
 })
 
 async function openToolbarOverflow(page: Page) {
+  await expect.poll(() => page.evaluate(() => (window as any).__PROCUREMENT__.commandToolbar.needsLayout)).toBe(false)
   const rect = await page.evaluate(() => {
     const toolbar = (window as any).__PROCUREMENT__.commandToolbar
     const r = toolbar.itemRect('__toolbar_overflow__'); const o = toolbar.globalOffset
@@ -321,6 +322,7 @@ test('command toolbar overflows data management and preserves menu actions and s
   const download = page.waitForEvent('download')
   await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter')
   expect((await download).suggestedFilename()).toBe('procurement-snapshot.json')
+  await expect.poll(() => page.evaluate(() => (window as any).__PROCUREMENT__.commands.evaluate('data.export').executing)).toBe(false)
   await openToolbarOverflow(page)
   await page.keyboard.press('ArrowDown'); await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter')
   await expect.poll(() => page.evaluate(() => (window as any).__PROCUREMENT__.overlay.activeModal?.title)).toBe('重置演示数据')
