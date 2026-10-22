@@ -2,7 +2,7 @@ import type { BoxConstraints, LayoutContext, Offset, Rect, RenderObject } from '
 import type { DrawableImage, ImageRequest } from '../core/image_loader'
 import { resolveImageLoader } from '../core/image_loader_binding'
 import { RenderBox, type RenderBoxOptions } from '../layout/render_box'
-import { DrawList } from '../rendering/draw_list'
+import { DrawList, type DrawLineSegment } from '../rendering/draw_list'
 import type { PaintContext } from '../rendering/paint_context'
 import {
   hitTestScrollbarGeometry,
@@ -1631,10 +1631,6 @@ export class RenderMarkdownViewer extends RenderBox implements InteractiveRender
       let cellX = block.x
       for (let cellIndex = 0; cellIndex < table.columns.length; cellIndex++) {
         const width = table.columns[cellIndex]!
-        const paintedCellX = origin.x + cellX - table.scrollX
-        if (paintedCellX + width >= x && paintedCellX <= x + table.viewportWidth) {
-          dl.strokeRect(paintedCellX, rowY, width, row.height, theme.borderData, 0.5, 0)
-        }
         const lines = row.cells[cellIndex] ?? []
         for (const line of lines) {
           const lineWidth = line.runs.reduce((sum, run) => sum + run.width, 0)
@@ -1653,6 +1649,24 @@ export class RenderMarkdownViewer extends RenderBox implements InteractiveRender
         }
         cellX += width
       }
+    }
+    // Each shared edge belongs to the table, not to both adjoining cells.
+    const segments: DrawLineSegment[] = []
+    const firstRow = table.rows[0]
+    const lastRow = table.rows.at(-1)
+    if (firstRow && lastRow) {
+      const top = origin.y + firstRow.y
+      const bottom = origin.y + lastRow.y + lastRow.height
+      let edgeX = x - table.scrollX
+      for (const width of table.columns.slice(0, -1)) {
+        edgeX += width
+        if (edgeX >= x && edgeX <= x + table.viewportWidth) segments.push({ x1: edgeX, y1: top, x2: edgeX, y2: bottom })
+      }
+      for (const edgeY of table.rows.slice(0, -1).map(row => origin.y + row.y + row.height)) {
+        segments.push({ x1: x, y1: edgeY, x2: x + Math.min(table.contentWidth - table.scrollX, table.viewportWidth), y2: edgeY })
+      }
+      dl.strokeSegments(segments, theme.borderData, 0.5)
+      dl.strokeRect(x - table.scrollX, top, table.contentWidth, bottom - top, theme.borderData, 0.5, 0)
     }
     dl.popClip()
 

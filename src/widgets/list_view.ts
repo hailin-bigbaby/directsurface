@@ -1,3 +1,4 @@
+import { pushSurfaceInnerClip } from './surface_appearance'
 import { FocusManager } from '../core/focus_manager'
 import type { Focusable } from '../core/focus_manager'
 import type { CopyableSelection } from '../core/clipboard'
@@ -333,7 +334,7 @@ export class RenderListView<T = unknown> extends RenderBox implements Interactiv
     const contentW = this._contentWidth(sb)
 
     dl.fillRect(x, y, w, h, s.panelBg, s.borderRadius)
-    dl.strokeRect(x, y, w, h, s.panelBorder, 1, s.borderRadius)
+    pushSurfaceInnerClip(dl, { x, y, width: w, height: h }, s.borderRadius)
     dl.pushClip(x, y, contentW, h)
 
     const range = calcFixedVirtualRange({
@@ -422,6 +423,8 @@ export class RenderListView<T = unknown> extends RenderBox implements Interactiv
         state: this._vScrollbar,
       })
     }
+    dl.popClip()
+    dl.strokeRect(x, y, w, h, s.panelBorder, 1, s.borderRadius)
   }
 
   override dispose(): void {

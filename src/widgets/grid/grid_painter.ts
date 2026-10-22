@@ -1,4 +1,5 @@
 import { DrawList } from '../../rendering/draw_list'
+import { gridBodyBorderSegments, gridColumnBorderEdges } from './grid_border_geometry'
 import { paintFrozenBoundary } from '../../rendering/frozen_boundary_painter'
 import { ellipsizeText } from '../../core/text_overflow'
 import type { PaintContext } from '../../rendering/paint_context'
@@ -111,7 +112,8 @@ export class GridPainter<T extends Record<string, any> = any> {
     const footerY = bodyY + bodyH
 
     dl.fillRect(offset.x, offset.y, width, height, snapshot.gridTokens.windowBg, snapshot.gridTokens.frameRounding)
-    dl.strokeRect(offset.x, offset.y, width, height, snapshot.gridTokens.windowBorder, 1, snapshot.gridTokens.frameRounding)
+    // State fills must not change the backdrop of translucent frame colors.
+    dl.pushRoundedClip(offset.x + 1, offset.y + 1, Math.max(0, width - 2), Math.max(0, height - 2), Math.max(0, snapshot.gridTokens.frameRounding - 1))
 
     this.paintHeader(context, dl, offset.x, offset.y, viewWidth, snapshot)
     if (snapshot.viewport.filterRowHeight > 0) {
@@ -127,6 +129,9 @@ export class GridPainter<T extends Record<string, any> = any> {
     if (snapshot.footerHeight > 0) {
       this.paintSummaryFooter(dl, offset.x, footerY, viewWidth, snapshot)
     }
+    const sectionEdges = new Set([offset.y + snapshot.viewport.headerHeight, bodyY])
+    if (snapshot.footerHeight > 0) sectionEdges.add(footerY)
+    for (const edge of sectionEdges) dl.line(offset.x, edge, offset.x + viewWidth, edge, snapshot.gridTokens.separator, 1)
     this.paintFrozenColumnBoundaries(dl, offset.x, offset.y, viewWidth, snapshot)
     this.paintColumnResizeAffordance(dl, offset.x, offset.y, viewWidth, snapshot)
     this.paintScrollbars(dl, offset.x, offset.y, bodyY, bodyH, scrollbarWidth, snapshot)
@@ -140,6 +145,17 @@ export class GridPainter<T extends Record<string, any> = any> {
         snapshot.gridTokens.frameRounding,
       )
     }
+    dl.popClip()
+    dl.strokeRect(offset.x, offset.y, width, height, snapshot.gridTokens.windowBorder, 1, snapshot.gridTokens.frameRounding)
+  }
+
+  private paintColumnBorders(dl: DrawList, x: number, y: number, height: number, snapshot: GridPainterSnapshot<T>): void {
+    const { viewport } = snapshot
+    dl.pushClip(x, y, viewport.viewWidth, height)
+    dl.strokeSegments(gridColumnBorderEdges(viewport, snapshot.columns, x).map(edge => ({
+      x1: edge, y1: y, x2: edge, y2: y + height,
+    })), snapshot.gridTokens.separator, 0.5)
+    dl.popClip()
   }
 
   private paintHeader(
@@ -181,7 +197,6 @@ export class GridPainter<T extends Record<string, any> = any> {
       if (visibleCell.w > 0) {
         const clipX = visibleCell.x
         const clipW = visibleCell.w
-        dl.strokeRect(clipX, y, clipW, viewport.headerHeight, tokens.separator, 0.5, 0)
         dl.pushClip(clipX, y, clipW, viewport.headerHeight)
         const headerState = {
           disabled: snapshot.disabled,
@@ -268,7 +283,7 @@ export class GridPainter<T extends Record<string, any> = any> {
       }
     }
 
-    dl.line(x, y + viewport.headerHeight, x + viewWidth, y + viewport.headerHeight, tokens.separator, 1)
+    this.paintColumnBorders(dl, x, y, viewport.headerHeight, snapshot)
 
     if (viewport.draggingCol >= 0 && viewport.dropTargetCol >= 0) {
       const dropX = viewport.cellX(snapshot.columns, x, viewport.dropTargetCol)
@@ -328,7 +343,6 @@ export class GridPainter<T extends Record<string, any> = any> {
     const viewport = snapshot.viewport
     const rowHeight = viewport.filterRowHeight
     dl.fillRect(x, y, viewWidth, rowHeight, resolveBgColor(tokens.headerBgState, 'normal'), 0)
-    dl.line(x, y, x + viewWidth, y, tokens.separator, 1)
 
     for (let colIndex = 0; colIndex < snapshot.columns.length; colIndex++) {
       const column = snapshot.columns[colIndex]!
@@ -339,7 +353,6 @@ export class GridPainter<T extends Record<string, any> = any> {
 
       const clipX = visibleCell.x
       const clipW = visibleCell.w
-      dl.strokeRect(clipX, y, clipW, rowHeight, tokens.separator, 0.5, 0)
       if (!column.filterable || clipW <= 8) continue
 
       const inputX = columnX + 4
@@ -367,7 +380,7 @@ export class GridPainter<T extends Record<string, any> = any> {
       })
       dl.popClip()
     }
-    dl.line(x, y + rowHeight, x + viewWidth, y + rowHeight, tokens.separator, 1)
+    this.paintColumnBorders(dl, x, y, rowHeight, snapshot)
   }
 
   private paintRows(
@@ -382,13 +395,15 @@ export class GridPainter<T extends Record<string, any> = any> {
     const tokens = snapshot.gridTokens
     const virtualRange = viewport.visibleVirtualRange(snapshot.visibleItems.length)
     if (virtualRange.startIndex < 0) return
+    const overlays: Array<() => void> = []
+    const rowOverlays: Array<() => void> = []
 
     for (let itemIndex = virtualRange.startIndex; itemIndex <= virtualRange.endIndex; itemIndex++) {
       const item = snapshot.visibleItems[itemIndex]!
       const rowHeight = viewport.rowHeightAt(itemIndex)
       const rowY = bodyY + viewport.rowOffset(itemIndex) - viewport.scrollY
       if (item.kind === 'group') {
-        this.paintGroupRow(dl, x, viewWidth, rowY, itemIndex, item, snapshot)
+        this.paintGroupRow(dl, x, viewWidth, rowY, itemIndex, item, snapshot, overlays)
         continue
       }
 
@@ -413,15 +428,16 @@ export class GridPainter<T extends Record<string, any> = any> {
       }
 
       if (rowPresentation.borderColor) {
-        dl.strokeRect(
+        const borderColor = rowPresentation.borderColor
+        rowOverlays.push(() => dl.strokeRect(
           x + 1,
           rowY + 1,
           viewWidth - 2,
           rowHeight - 2,
-          rowPresentation.borderColor,
+          borderColor,
           1,
           0,
-        )
+        ))
       }
 
       for (let colIndex = 0; colIndex < snapshot.columns.length; colIndex++) {
@@ -457,7 +473,6 @@ export class GridPainter<T extends Record<string, any> = any> {
         })
         const clipX = visibleCell.x
         const clipW = visibleCell.w
-        dl.strokeRect(clipX, rowY, clipW, rowHeight, tokens.separator, 0.5, 0)
         dl.pushClip(clipX + 1, rowY, Math.max(0, clipW - 2), rowHeight)
         if (isCellSelected && !isEditing) {
           dl.fillRect(columnX + 1, rowY + 1, columnWidth - 2, rowHeight - 2, tokens.selectionBg, 0)
@@ -482,43 +497,56 @@ export class GridPainter<T extends Record<string, any> = any> {
         const borderX = clipX + 1
         const borderW = Math.max(0, clipW - 2)
         if (cellPresentation.borderColor && borderW > 0) {
-          dl.strokeRect(
+          const borderColor = cellPresentation.borderColor
+          overlays.push(() => dl.strokeRect(
             borderX,
             rowY + 1,
             borderW,
             rowHeight - 2,
-            cellPresentation.borderColor,
+            borderColor,
             isEditing ? 1.5 : 1,
             0,
-          )
+          ))
         }
         if (isCellFocused && !isEditing && borderW > 0) {
-          dl.strokeRect(
+          const borderColor = tokens.focusedRowBorder
+          overlays.push(() => dl.strokeRect(
             borderX,
             rowY + 1,
             borderW,
             rowHeight - 2,
-            tokens.focusedRowBorder,
+            borderColor,
             1.5,
             0,
-          )
+          ))
         }
         if (cellError && borderW > 0) {
-          dl.strokeRect(
+          const borderColor = tokens.cellErrorBorder
+          overlays.push(() => dl.strokeRect(
             borderX,
             rowY + 1,
             borderW,
             rowHeight - 2,
-            tokens.cellErrorBorder,
+            borderColor,
             1.5,
             0,
-          )
+          ))
         }
       }
-
-      dl.line(x, rowY + rowHeight, x + viewWidth, rowY + rowHeight, tokens.rowSeparator, 0.5)
     }
-    this.paintMergedCells(dl, x, bodyY, virtualRange.startIndex, virtualRange.endIndex, snapshot)
+    // Merge backgrounds mask row-level outlines; otherwise a focused row would
+    // draw a horizontal line through the interior of a vertical merge.
+    for (const paintRowOverlay of rowOverlays) paintRowOverlay()
+    this.paintMergedCells(dl, x, bodyY, virtualRange.startIndex, virtualRange.endIndex, snapshot, overlays)
+    const borders = gridBodyBorderSegments({ viewport, columns: snapshot.columns, items: snapshot.visibleItems,
+      merges: snapshot.rowMerges, x, bodyY, footer: snapshot.footerHeight > 0 })
+    if (tokens.separator === tokens.rowSeparator) {
+      dl.strokeSegments([...borders.vertical, ...borders.horizontal], tokens.separator, 0.5)
+    } else {
+      dl.strokeSegments(borders.vertical, tokens.separator, 0.5)
+      dl.strokeSegments(borders.horizontal, tokens.rowSeparator, 0.5)
+    }
+    for (const paintOverlay of overlays) paintOverlay()
   }
 
   private paintMergedCells(
@@ -528,6 +556,7 @@ export class GridPainter<T extends Record<string, any> = any> {
     first: number,
     last: number,
     snapshot: GridPainterSnapshot<T>,
+    overlays: Array<() => void>,
   ): void {
     if (!snapshot.rowMerges) return
     const viewport = snapshot.viewport
@@ -590,14 +619,16 @@ export class GridPainter<T extends Record<string, any> = any> {
         if (snapshot.getCellEditPolicy?.(run.anchorDataRowIndex, colIndex).state === 'disabled') {
           dl.fillRect(columnX + 1, top, columnWidth - 2, bottom - top, tokens.disabledOverlay, 0)
         }
-        this.paintMergeOutline(dl, visibleCell.x, visibleCell.w, top, bottom,
-          startY >= bodyY, endY <= bodyBottom, tokens.separator, 0.5)
-        if (cellPresentation.borderColor) this.paintMergeOutline(dl,
-          visibleCell.x + 1, Math.max(0, visibleCell.w - 2), top + 1, bottom - 1,
-          startY >= bodyY, endY <= bodyBottom, cellPresentation.borderColor, 1)
-        if (focused) this.paintMergeOutline(dl,
-          visibleCell.x + 1, Math.max(0, visibleCell.w - 2), top + 1, bottom - 1,
-          startY >= bodyY, endY <= bodyBottom, tokens.focusedRowBorder, 1.5)
+        if (cellPresentation.borderColor || focused) overlays.push(() => {
+          dl.pushClip(visibleCell.x, top, visibleCell.w, bottom - top)
+          if (cellPresentation.borderColor) this.paintMergeOutline(dl,
+            visibleCell.x + 1, Math.max(0, visibleCell.w - 2), top + 1, bottom - 1,
+            startY >= bodyY, endY <= bodyBottom, cellPresentation.borderColor, 1)
+          if (focused) this.paintMergeOutline(dl,
+            visibleCell.x + 1, Math.max(0, visibleCell.w - 2), top + 1, bottom - 1,
+            startY >= bodyY, endY <= bodyBottom, tokens.focusedRowBorder, 1.5)
+          dl.popClip()
+        })
         dl.popClip()
       }
     }
@@ -666,6 +697,7 @@ export class GridPainter<T extends Record<string, any> = any> {
     itemIndex: number,
     item: GridGroupItem<T>,
     snapshot: GridPainterSnapshot<T>,
+    overlays: Array<() => void>,
   ): void {
     const tokens = snapshot.gridTokens
     const viewport = snapshot.viewport
@@ -673,10 +705,9 @@ export class GridPainter<T extends Record<string, any> = any> {
     const isFocused = snapshot.focusedItemIndex === itemIndex && !snapshot.editableState
     const state = isFocused ? 'focused' : isHovered ? 'hovered' : 'normal'
     dl.fillRect(x, rowY, viewWidth, viewport.rowHeightAt(itemIndex), resolveBgColor(tokens.groupRowBgState, state), 0)
-    dl.strokeRect(x, rowY, viewWidth, viewport.rowHeightAt(itemIndex), tokens.separator, 0.5, 0)
 
     if (isFocused) {
-      dl.strokeRect(
+      overlays.push(() => dl.strokeRect(
         x + 1,
         rowY + 1,
         viewWidth - 2,
@@ -684,7 +715,7 @@ export class GridPainter<T extends Record<string, any> = any> {
         resolveBgColor(tokens.groupRowBorderState, 'focused'),
         1,
         0,
-      )
+      ))
     }
 
     const column = snapshot.columns.find(entry => entry.key === item.groupKey)
@@ -976,7 +1007,6 @@ export class GridPainter<T extends Record<string, any> = any> {
     const tokens = snapshot.gridTokens
     const viewport = snapshot.viewport
     dl.fillRect(x, y, viewWidth, snapshot.footerHeight, resolveBgColor(tokens.headerBgState, 'normal'), 0)
-    dl.line(x, y, x + viewWidth, y, tokens.separator, 1)
     for (let colIndex = 0; colIndex < snapshot.columns.length; colIndex++) {
       const column = snapshot.columns[colIndex]!
       const columnWidth = viewport.colWidths[colIndex]!
@@ -985,7 +1015,6 @@ export class GridPainter<T extends Record<string, any> = any> {
       if (visibleCell.w <= 0) continue
       const clipX = visibleCell.x
       const clipW = visibleCell.w
-      dl.strokeRect(clipX, y, clipW, snapshot.footerHeight, tokens.separator, 0.5, 0)
 
       const cell = snapshot.summaryCells.find(entry => entry.key === column.key)
       if (!cell && (snapshot.summaryCells.length === 0 || colIndex !== 0)) continue
@@ -1017,6 +1046,7 @@ export class GridPainter<T extends Record<string, any> = any> {
       )
       dl.popClip()
     }
+    this.paintColumnBorders(dl, x, y, snapshot.footerHeight, snapshot)
   }
 
   private resolveCellTextOverflow(column: GridColumnDef<T>, snapshot: GridPainterSnapshot<T>): GridCellTextOverflow {

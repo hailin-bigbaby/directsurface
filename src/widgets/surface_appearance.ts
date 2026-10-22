@@ -65,3 +65,13 @@ export function paintSurfaceBorder(
     style.borderRadius,
   )
 }
+
+/** Push the content clip inside a frame; callers paint the frame after popping it. */
+export function pushSurfaceInnerClip(
+  dl: DrawList, rect: SurfaceFrameRect, borderRadius: number, borderWidth = 1,
+): void {
+  const inset = Math.max(0, borderWidth)
+  dl.pushRoundedClip(rect.x + inset, rect.y + inset,
+    Math.max(0, rect.width - inset * 2), Math.max(0, rect.height - inset * 2),
+    Math.max(0, borderRadius - inset))
+}

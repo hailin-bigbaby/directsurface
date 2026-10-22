@@ -1,3 +1,4 @@
+import { pushSurfaceInnerClip } from './surface_appearance'
 import { RenderObject, constrainSize, type BoxConstraints, type LayoutContext, type Offset } from '../core/render_object'
 import { RenderBox, RenderPanel, resolveChildLayout, type RenderPanelOptions } from '../layout/render_box'
 import { DrawList } from '../rendering/draw_list'
@@ -154,9 +155,13 @@ export class RenderBorder extends RenderPanel {
       dl.popClip()
     }
     if (borderWidth > 0) {
+      pushSurfaceInnerClip(dl, { ...offset, ...this.size }, radius, borderWidth)
+      try { this.paintContentChildren(context, offset) } finally { dl.popClip() }
       dl.strokeRect(offset.x, offset.y, this.size.width, this.size.height, borderColor, borderWidth, radius)
+    } else {
+      this.paintContentChildren(context, offset)
     }
-    super.performPaint(context, offset)
+    this.paintAdornerChildren(context, offset)
   }
 
   private accentRect(offset: Offset): { x: number; y: number; width: number; height: number } {

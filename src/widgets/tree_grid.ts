@@ -1,3 +1,5 @@
+import { gridBodyBorderSegments, gridColumnBorderEdges } from './grid/grid_border_geometry'
+import { pushSurfaceInnerClip } from './surface_appearance'
 import { FocusManager, type Focusable } from '../core/focus_manager'
 import type { CopyableSelection } from '../core/clipboard'
 import { GET_POPUP_ANCHOR_RECT } from '../core/popup_anchor'
@@ -756,13 +758,22 @@ export class RenderTreeGrid<T extends Record<string, any> = any>
     const bodyHeight = this._viewport.viewHeight
 
     dl.fillRect(offset.x, offset.y, width, height, tokens.windowBg, tokens.frameRounding)
-    dl.strokeRect(offset.x, offset.y, width, height, tokens.windowBorder, 1, tokens.frameRounding)
+    pushSurfaceInnerClip(dl, { ...offset, width, height }, tokens.frameRounding)
 
     this._paintHeader(dl, offset.x, offset.y, viewWidth, tokens)
     dl.pushClip(offset.x, bodyY, viewWidth, bodyHeight)
     this._paintRows(context, dl, offset.x, bodyY, viewWidth, context.theme, tokens)
     dl.popClip()
+    dl.line(offset.x, bodyY, offset.x + viewWidth, bodyY, tokens.separator, 1)
+    if (this._viewport.scrollableContentWidth(this._columns) > 0 && this._viewport.scrollableViewWidth(this._columns) > 0) {
+      const left = this._viewport.fixedRegionWidth(this._columns)
+      const right = this._viewport.rightFixedRegionWidth(this._columns)
+      if (left > 0 && left < viewWidth) dl.line(offset.x + left, offset.y, offset.x + left, bodyY + bodyHeight, tokens.separator, 1)
+      if (right > 0 && right < viewWidth) dl.line(offset.x + viewWidth - right, offset.y, offset.x + viewWidth - right, bodyY + bodyHeight, tokens.separator, 1)
+    }
     this._paintScrollbars(dl, offset.x, offset.y, bodyY, bodyHeight, scrollbarWidth, scrollbarTokens)
+    dl.popClip()
+    dl.strokeRect(offset.x, offset.y, width, height, tokens.windowBorder, 1, tokens.frameRounding)
   }
 
   private _captureDrag(event: PointerEvent): boolean {
@@ -1454,7 +1465,6 @@ export class RenderTreeGrid<T extends Record<string, any> = any>
       if (visibleCell.w <= 0) continue
       const clipX = visibleCell.x
       const clipW = visibleCell.w
-      dl.strokeRect(clipX, y, clipW, this._viewport.headerHeight, tokens.separator, 0.5, 0)
       dl.pushClip(clipX, y, clipW, this._viewport.headerHeight)
       if (showActive) dl.fillRect(clipX, y, clipW, this._viewport.headerHeight, resolveBgColor(tokens.headerBgState, 'selected'), 0)
 
@@ -1487,18 +1497,18 @@ export class RenderTreeGrid<T extends Record<string, any> = any>
         }
       }
       dl.popClip()
-      if (this._viewport.resizingCol === colIndex) {
-        const guideX = this._viewport.resizeCurrentX || columnX + columnWidth
-        const separatorX = Math.max(x, Math.min(x + viewWidth, guideX))
-        dl.line(separatorX, y, separatorX, y + this._viewport.headerHeight, tokens.resizeActiveColor, 2)
-      }
     }
-
-    const fixedWidth = this._viewport.fixedRegionWidth(this._columns)
-    if (fixedWidth > 0 && fixedWidth < viewWidth) {
-      dl.line(x + fixedWidth, y, x + fixedWidth, y + this._viewport.headerHeight, tokens.separator, 1)
+    dl.pushClip(x, y, viewWidth, this._viewport.headerHeight)
+    dl.strokeSegments(gridColumnBorderEdges(this._viewport, this._columns, x).map(edge => ({
+      x1: edge, y1: y, x2: edge, y2: y + this._viewport.headerHeight,
+    })), tokens.separator, 0.5)
+    if (this._viewport.resizingCol >= 0) {
+      const index = this._viewport.resizingCol
+      const guideX = this._viewport.resizeCurrentX || this._viewport.cellX(this._columns, x, index) + this._viewport.colWidths[index]!
+      const separatorX = Math.max(x, Math.min(x + viewWidth, guideX))
+      dl.line(separatorX, y, separatorX, y + this._viewport.headerHeight, tokens.resizeActiveColor, 2)
     }
-    dl.line(x, y + this._viewport.headerHeight, x + viewWidth, y + this._viewport.headerHeight, tokens.separator, 1)
+    dl.popClip()
   }
 
   private _paintRows(
@@ -1512,6 +1522,7 @@ export class RenderTreeGrid<T extends Record<string, any> = any>
   ): void {
     const virtualRange = this._viewport.visibleVirtualRange(this._visibleItems.length)
     if (virtualRange.startIndex < 0) return
+    const overlays: Array<() => void> = []
     const treeTokens = deriveTreeStyle(theme)
     const checkboxTokens = deriveCheckboxStyle(theme)
 
@@ -1524,7 +1535,10 @@ export class RenderTreeGrid<T extends Record<string, any> = any>
       const isEditingRow = this.editing.state?.row === item.dataRowIndex
       const rowPresentation = this._resolveRowPresentation(itemIndex, item, isSelected, isHovered, isFocused, isEditingRow, tokens)
       if (rowPresentation.backgroundColor) dl.fillRect(x, rowY, viewWidth, this._viewport.rowHeight, rowPresentation.backgroundColor, 0)
-      if (rowPresentation.borderColor) dl.strokeRect(x + 1, rowY + 1, viewWidth - 2, this._viewport.rowHeight - 2, rowPresentation.borderColor, 1, 0)
+      if (rowPresentation.borderColor) {
+        const color = rowPresentation.borderColor
+        overlays.push(() => dl.strokeRect(x + 1, rowY + 1, viewWidth - 2, this._viewport.rowHeight - 2, color, 1, 0))
+      }
 
       for (let colIndex = 0; colIndex < this._columns.length; colIndex++) {
         const column = this._columns[colIndex]!
@@ -1535,12 +1549,14 @@ export class RenderTreeGrid<T extends Record<string, any> = any>
 
         const clipX = visibleCell.x
         const clipW = visibleCell.w
-        dl.strokeRect(clipX, rowY, clipW, this._viewport.rowHeight, tokens.separator, 0.5, 0)
         const isEditingCell = this.editing.state?.row === item.dataRowIndex && this.editing.state?.col === colIndex
         const isFocusedCell = isFocused && this._focusedColIndex === colIndex
         const cellPresentation = this._resolveCellPresentation(itemIndex, item, colIndex, rowPresentation, isEditingCell, tokens)
         if (cellPresentation.backgroundColor) dl.fillRect(clipX, rowY, clipW, this._viewport.rowHeight, cellPresentation.backgroundColor, 0)
-        if (cellPresentation.borderColor) dl.strokeRect(clipX + 1, rowY + 1, clipW - 2, this._viewport.rowHeight - 2, cellPresentation.borderColor, 1, 0)
+        if (cellPresentation.borderColor) {
+          const color = cellPresentation.borderColor
+          overlays.push(() => this._paintCellOutline(dl, clipX, rowY, clipW, color, 1))
+        }
 
         dl.pushClip(clipX, rowY, clipW, this._viewport.rowHeight)
         if (isEditingCell) {
@@ -1656,21 +1672,24 @@ export class RenderTreeGrid<T extends Record<string, any> = any>
         }
         dl.popClip()
         if (isFocusedCell && !isEditingCell) {
-          const borderX = clipX + 1
-          const borderW = Math.max(0, clipW - 2)
-          if (borderW > 0) {
-            dl.strokeRect(
-              borderX,
-              rowY + 1,
-              borderW,
-              this._viewport.rowHeight - 2,
-              tokens.focusedRowBorder,
-              1.5,
-              0,
-            )
-          }
+          overlays.push(() => this._paintCellOutline(dl, clipX, rowY, clipW, tokens.focusedRowBorder, 1.5))
         }
       }
+    }
+    const borders = gridBodyBorderSegments({ viewport: this._viewport, columns: this._columns,
+      items: this._visibleItems, x, bodyY, footer: false })
+    dl.strokeSegments([...borders.vertical, ...borders.horizontal], tokens.separator, 0.5)
+    for (const paintBorder of overlays) paintBorder()
+  }
+
+  private _paintCellOutline(dl: DrawList, x: number, y: number, visibleWidth: number, color: Color, width: number): void {
+    if (visibleWidth <= 2 || this._viewport.rowHeight <= 2) return
+    // A narrow clipped column must not draw a collapsed outline into its neighbour.
+    dl.pushClip(x, y, visibleWidth, this._viewport.rowHeight)
+    try {
+      dl.strokeRect(x + 1, y + 1, visibleWidth - 2, this._viewport.rowHeight - 2, color, width, 0)
+    } finally {
+      dl.popClip()
     }
   }
 

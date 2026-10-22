@@ -1,3 +1,4 @@
+import { pushSurfaceInnerClip } from './surface_appearance'
 import { PopupManager, type Popup, type PopupContext } from '../core/popup_manager'
 import type { Offset } from '../core/render_object'
 import type { PointerEvent, WheelPointerEvent } from '../gestures/hit_test'
@@ -197,7 +198,7 @@ export class RenderLoadingModal implements Popup {
     const fillWidth = Math.max(0, Math.min(width, width * this._progress))
 
     dl.fillRect(x, y, width, height, progress.trackBg, radius)
-    dl.strokeRect(x, y, width, height, progress.trackBorder, 1, radius)
+    pushSurfaceInnerClip(dl, { x, y, width, height }, radius)
     if (fillWidth > 0) {
       const ctx = context.ctx
       dl.pushClip(x, y, width, height)
@@ -227,6 +228,8 @@ export class RenderLoadingModal implements Popup {
       'middle',
     )
     dl.popClip()
+    dl.popClip()
+    dl.strokeRect(x, y, width, height, progress.trackBorder, 1, radius)
   }
 
   private _normalizeProgress(progress?: number): number | undefined {

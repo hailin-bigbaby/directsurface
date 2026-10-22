@@ -103,7 +103,8 @@ type BorderBackground = 'panel' | 'muted' | 'selected' | 'primary'
 - child 的水平和垂直 alignment 在内容槽位中生效。
 - Border 的最终尺寸由 child `outerSize`、padding 和父约束共同决定。
 - 没有 child 时，尺寸由 padding、显式尺寸和父级最小约束决定，不会自动填满父级最大尺寸。
-- 背景、accent 和边框绘制在 child 之前；Adorner 绘制在内容之后。
+- 背景和 accent 先绘制；有边框时，child 的绘制裁剪到边框内侧，随后绘制边框，最后绘制 Adorner。即使 `padding: 0`，有背景的 child 也不会覆盖外框。
+- 边框裁剪不改变 child 的布局尺寸、位置或 `padding`；Adorner 不受该内容裁剪限制。`borderWidth: 0` 时保留无边框内容的绘制方式。
 
 ## 生命周期
 
@@ -121,7 +122,7 @@ panel.setChild(nextContent)
 
 - Border 只增加一次背景和可选边框/accent 绘制，适合普通页面区域。
 - 大型虚拟列表不要为每行无条件叠加多层 Border。
-- 圆角 accent 会建立裁剪路径；只在确实需要视觉强调时启用。
+- 有边框的内容和圆角 accent 会建立裁剪路径；只在确实需要视觉强调时启用 accent。
 - 颜色、边框和圆角默认来自主题 token。显式颜色应有清晰业务语义，不作为随意美化入口。
 
 ## 相关文档

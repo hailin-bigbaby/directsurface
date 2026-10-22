@@ -362,6 +362,10 @@ function applySearchResult(list: RenderListView, rows: ListViewItem[]): void {
 
 `Home` 和 `End` 直接定位到首尾 item；如果首尾 item disabled，确认键不会触发选中或激活。方向键移动会跳过 disabled 项。
 
+## 边框与内容绘制
+
+列表内容与滚动条限制在外边框内侧，外框最后统一绘制。悬停、选中、禁用项背景不会覆盖外框，键盘焦点提示保留在对应行内。
+
 ## 相关文档
 
 - [DataGrid](./data-grid.md)

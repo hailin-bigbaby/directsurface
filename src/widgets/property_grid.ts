@@ -1,3 +1,4 @@
+import { pushSurfaceInnerClip } from './surface_appearance'
 import { FocusManager, type Focusable } from '../core/focus_manager'
 import { applicationFiles } from '../runtime/application_file_binding'
 import { RenderBox } from '../layout/render_box'
@@ -454,7 +455,7 @@ export class RenderPropertyGrid extends RenderBox implements InteractiveRenderOb
     const fontSize = PROPERTY_GRID_FONT_SIZE
     const fontFamily = PROPERTY_GRID_FONT_FAMILY
     dl.fillRect(offset.x, offset.y, this.size.width, this.size.height, theme.surfacePanel)
-    dl.strokeRect(offset.x, offset.y, this.size.width, this.size.height, theme.borderPanel, 1)
+    pushSurfaceInnerClip(dl, { ...offset, ...this.size }, 0)
     const scrollbarStyle = deriveScrollbarStyle(theme)
     const contentWidth = this._contentWidth(scrollbarStyle)
 
@@ -470,6 +471,8 @@ export class RenderPropertyGrid extends RenderBox implements InteractiveRenderOb
     } else {
       dl.pushClip(offset.x, offset.y, contentWidth, this._viewHeight)
       let y = offset.y - this.scrollY
+      const rowEdges: number[] = []
+      const statusBorders: Array<() => void> = []
       for (let rowIndex = 0; rowIndex < this._paintRows.length; rowIndex += 1) {
         const row = this._paintRows[rowIndex]!
         const h = row.type === 'group' ? this._groupHeight : this._rowHeight
@@ -489,7 +492,6 @@ export class RenderPropertyGrid extends RenderBox implements InteractiveRenderOb
           if (rowIndex === this._hoveredIndex) {
             dl.fillRect(offset.x, y, contentWidth, h, theme.surfaceControlHover)
           }
-          dl.strokeRect(offset.x, y, contentWidth, h, theme.borderSubtle, 1)
           const nameWidth = this._resolvedNameColumnWidth(contentWidth)
           dl.fillRect(offset.x, y, nameWidth, h, theme.surfaceControl)
           dl.fillText(
@@ -500,14 +502,15 @@ export class RenderPropertyGrid extends RenderBox implements InteractiveRenderOb
             fontSize,
             fontFamily,
           )
+          const statusY = y
           const editingError = (this._inlineEditing.isEditingRow(row.row) && !!this._inlineEditing.state?.errorText) ||
             (this._popupEditors.isEditingRow(row.row) && !!this._popupEditors.state?.errorText)
           if (row.row?.status === 'error' || editingError) {
-            dl.strokeRect(offset.x + 1, y + 1, contentWidth - 2, h - 2, theme.accentDanger, 1, 2)
+            statusBorders.push(() => dl.strokeRect(offset.x + 1, statusY + 1, contentWidth - 2, h - 2, theme.accentDanger, 1, 2))
           } else if (row.row?.status === 'warning') {
-            dl.strokeRect(offset.x + 1, y + 1, contentWidth - 2, h - 2, theme.accentWarning, 1, 2)
+            statusBorders.push(() => dl.strokeRect(offset.x + 1, statusY + 1, contentWidth - 2, h - 2, theme.accentWarning, 1, 2))
           } else if (rowKey && rowKey === this._selectedRowId) {
-            dl.strokeRect(offset.x + 1, y + 1, contentWidth - 2, h - 2, this._focused ? theme.accentPrimary : theme.borderControl, 1, 2)
+            statusBorders.push(() => dl.strokeRect(offset.x + 1, statusY + 1, contentWidth - 2, h - 2, this._focused ? theme.accentPrimary : theme.borderControl, 1, 2))
           }
           const valueX = offset.x + nameWidth + 8
           const valueWidth = Math.max(0, contentWidth - nameWidth - 16)
@@ -524,7 +527,10 @@ export class RenderPropertyGrid extends RenderBox implements InteractiveRenderOb
           }
         }
         y += h
+        if (y > offset.y + 1e-7 && y <= offset.y + this._viewHeight) rowEdges.push(y)
       }
+      dl.strokeSegments(rowEdges.map(edge => ({ x1: offset.x, y1: edge, x2: offset.x + contentWidth, y2: edge })), theme.borderSubtle, 1)
+      for (const paintBorder of statusBorders) paintBorder()
       const dividerX = offset.x + this._resolvedNameColumnWidth(contentWidth)
       const dividerColor = this._columnDividerDragging
         ? theme.accentPrimary
@@ -556,6 +562,8 @@ export class RenderPropertyGrid extends RenderBox implements InteractiveRenderOb
       })
     }
     if (this._showDescriptionPanel) this._paintDescriptionPanel(dl, theme, offset, scrollbarStyle)
+    dl.popClip()
+    dl.strokeRect(offset.x, offset.y, this.size.width, this.size.height, theme.borderPanel, 1)
     this._inlineEditing.refreshGeometry()
   }
 

@@ -1,3 +1,4 @@
+import { pushSurfaceInnerClip } from './surface_appearance'
 // ProgressBar: 进度条组件
 // 支持确定进度（0-1）、不确定动画（indeterminate）、颜色自定义
 
@@ -95,7 +96,7 @@ export class RenderProgressBar extends RenderBox {
 
     // 轨道背景
     dl.fillRect(x, y, w, h, s.trackBg, r)
-    dl.strokeRect(x, y, w, h, s.trackBorder, 1, r)
+    pushSurfaceInnerClip(dl, { x, y, width: w, height: h }, r)
 
     const fillColor = this.color ?? s.fillBg
 
@@ -150,6 +151,8 @@ export class RenderProgressBar extends RenderBox {
       dl.fillText(pct, x + w / 2, y + h / 2, s.text, s.labelFontSize, s.fontFamily, 'center', 'middle')
       dl.popClip()
     }
+    dl.popClip()
+    dl.strokeRect(x, y, w, h, s.trackBorder, 1, r)
   }
 
   dispose(): void {

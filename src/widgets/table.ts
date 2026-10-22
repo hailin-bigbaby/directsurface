@@ -280,7 +280,8 @@ export class RenderTable<T extends Record<string, any> = any> extends RenderBox 
     const bodyH = this._viewH
 
     dl.fillRect(x, y, w, h, s.normalBg, s.frameRounding)
-    dl.strokeRect(x, y, w, h, s.windowBorder, 1, s.frameRounding)
+    // Keep state backgrounds out of the frame, including translucent theme borders.
+    dl.pushRoundedClip(x + 1, y + 1, Math.max(0, w - 2), Math.max(0, h - 2), Math.max(0, s.frameRounding - 1))
 
     dl.fillRect(x, y, viewW, this.headerHeight, resolveBgColor(s.headerBgState, 'normal'), 0)
     let colX = x - this._scrollX
@@ -294,7 +295,6 @@ export class RenderTable<T extends Record<string, any> = any> extends RenderBox 
       if (cellX + cw > x && cellX < x + viewW) {
         const clipX = Math.max(x, cellX)
         const clipW = Math.max(0, Math.min(cellX + cw, x + viewW) - clipX)
-        dl.strokeRect(clipX, y, clipW, this.headerHeight, s.cellSeparatorColor, 0.5, 0)
         dl.pushClip(clipX, y, clipW, this.headerHeight)
 
         if (isSortedColumn) {
@@ -330,17 +330,25 @@ export class RenderTable<T extends Record<string, any> = any> extends RenderBox 
         }
 
         dl.popClip()
-
-        if (this._resizingCol === ci) {
-          const guideX = this._resizeCurrentX || cellX + cw
-          const separatorX = Math.max(x, Math.min(x + viewW, guideX))
-          dl.line(separatorX, y, separatorX, y + this.headerHeight, s.focusedBorder, 2)
-        }
       }
       colX += cw
     }
 
-    dl.line(x, y + this.headerHeight, x + viewW, y + this.headerHeight, s.rowSeparatorColor, 0.5)
+    // Use real column boundaries, never the clipped edge of a partially visible cell.
+    const columnEdges: number[] = []
+    let edgeX = x - this._scrollX
+    for (const width of colWidths) {
+      edgeX += width
+      if (edgeX > x && edgeX <= x + viewW) columnEdges.push(edgeX)
+    }
+    dl.pushClip(x, y, viewW, this.headerHeight)
+    for (const edge of columnEdges) dl.line(edge, y, edge, bodyY, s.cellSeparatorColor, 0.5)
+    if (this._resizingCol >= 0) {
+      const guideX = this._resizeCurrentX || x - this._scrollX + colWidths.slice(0, this._resizingCol + 1).reduce((sum, width) => sum + width, 0)
+      const separatorX = Math.max(x, Math.min(x + viewW, guideX))
+      dl.line(separatorX, y, separatorX, bodyY, s.focusedBorder, 2)
+    }
+    dl.popClip()
 
     const visibleRows = this._visibleRows()
     dl.pushClip(x, bodyY, viewW, bodyH)
@@ -365,9 +373,6 @@ export class RenderTable<T extends Record<string, any> = any> extends RenderBox 
         if (rowBg === null && ri % 2 === 1) rowBg = s.stripeBg
 
         if (rowBg) dl.fillRect(x, rowY, viewW, this.rowHeight, rowBg, 0)
-        if (this._focusedRow === ri && FocusManager.keyboardFocusVisible) {
-          dl.strokeRect(x + 1, rowY + 1, viewW - 2, this.rowHeight - 2, resolveBgColor(s.rowBorderState, 'focused'), 1, 0)
-        }
 
         let cellX = x - this._scrollX
         for (let ci = 0; ci < this.columns.length; ci++) {
@@ -377,7 +382,6 @@ export class RenderTable<T extends Record<string, any> = any> extends RenderBox 
           if (cellX + cw > x && cellX < x + viewW) {
             const clipX = Math.max(x, cellX)
             const clipW = Math.max(0, Math.min(cellX + cw, x + viewW) - clipX)
-            dl.strokeRect(clipX, rowY, clipW, this.rowHeight, s.cellSeparatorColor, 0.5, 0)
             const contentX = clipX + 1
             const contentW = Math.max(0, clipW - 2)
             dl.pushClip(contentX, rowY, contentW, this.rowHeight)
@@ -414,12 +418,27 @@ export class RenderTable<T extends Record<string, any> = any> extends RenderBox 
           }
           cellX += cw
         }
-
-        dl.line(x, rowY + this.rowHeight, x + viewW, rowY + this.rowHeight, s.rowSeparatorColor, 0.5)
+      }
+      // Paint each shared edge once, after every row background, so stripes and
+      // interaction fills cannot erase any part of the grid.
+      const gridTop = Math.max(bodyY, bodyY + virtualRange.startIndex * this.rowHeight - this._scrollY)
+      const gridBottom = Math.min(bodyY + bodyH, bodyY + (virtualRange.endIndex + 1) * this.rowHeight - this._scrollY)
+      for (const edge of columnEdges) dl.line(edge, gridTop, edge, gridBottom, s.cellSeparatorColor, 0.5)
+      for (let ri = virtualRange.startIndex; ri <= virtualRange.endIndex; ri++) {
+        const relativeBottom = (ri + 1) * this.rowHeight - this._scrollY
+        const bottom = bodyY + relativeBottom
+        if (relativeBottom > 0 && relativeBottom <= bodyH) {
+          dl.line(x, bottom, x + viewW, bottom, s.rowSeparatorColor, 0.5)
+        }
+      }
+      if (this._focusedRow >= virtualRange.startIndex && this._focusedRow <= virtualRange.endIndex && FocusManager.keyboardFocusVisible) {
+        const rowY = bodyY + this._focusedRow * this.rowHeight - this._scrollY
+        dl.strokeRect(x + 1, rowY + 1, Math.max(0, viewW - 2), Math.max(0, this.rowHeight - 2), resolveBgColor(s.rowBorderState, 'focused'), 1, 0)
       }
     }
 
     dl.popClip()
+    dl.line(x, bodyY, x + viewW, bodyY, s.rowSeparatorColor, 0.5)
     paintVBar({
       dl,
       style: sb,
@@ -444,6 +463,9 @@ export class RenderTable<T extends Record<string, any> = any> extends RenderBox 
       scrollOffset: this._scrollX,
       state: this._hScrollbar,
     })
+    dl.popClip()
+    // The frame owns the perimeter and must remain above all content and gutters.
+    dl.strokeRect(x, y, w, h, s.windowBorder, 1, s.frameRounding)
   }
 
   private _drawArrow(dl: DrawList, x: number, y: number, dir: 'up' | 'down', color: Color): void {

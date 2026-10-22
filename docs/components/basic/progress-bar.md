@@ -103,3 +103,7 @@ progress.stopIndeterminate(1)
 - [Notification 通知](../overlay/notification.md)
 
 构造时传入负数即可声明循环动画；挂载到运行时后自动开始，无需再次调用 `startIndeterminate()`。独立低层宿主需要向 `PipelineOwner` 注入动画时钟，详见[运行时与生命周期](../../lifecycle.md)。
+
+## 边框与内容绘制
+
+轨道背景先绘制，进度填充及文字裁剪在轨道边框内侧，边框最后绘制。确定进度从 0 到 100% 时、以及不确定进度光条移动时，轨道边框都保持完整。该规则也用于 LoadingModal 内的进度条；不改变动画时钟、运动周期或进度值语义。
