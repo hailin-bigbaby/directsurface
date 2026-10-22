@@ -3694,6 +3694,7 @@ export class RenderDockWorkbench extends RenderBox implements InteractiveRenderO
   private readonly _autoHideRailLayouts = new Map<AutoHideRegion, AutoHideRailLayout>()
   private _autoHideScrollPressed: AutoHideScrollButton | null = null
   private _autoHideScrollHovered: AutoHideScrollButton | null = null
+  private _autoHideDismissPointer?: PointerKey
   private _autoHideScrollPointer?: PointerKey
   private _releaseAutoHideScrollCapture?: () => void
   private _lastRevealedAutoHideItemId: string | null = null
@@ -3879,6 +3880,7 @@ export class RenderDockWorkbench extends RenderBox implements InteractiveRenderO
     this._autoHideRailLayouts.clear()
     this._autoHideScrollPressed = null
     this._autoHideScrollHovered = null
+    this._autoHideDismissPointer = undefined
     this._rootRender = null
     if (this._disposeManagerOnDispose) this.manager.dispose()
     super.dispose()
@@ -3959,6 +3961,7 @@ export class RenderDockWorkbench extends RenderBox implements InteractiveRenderO
 
   private _handleAutoHidePointerDown(event: PointerEvent): void {
     if (!isPrimaryPointerButton(event)) return
+    if (this._autoHideDismissPointer === pointerKey(event)) this._autoHideDismissPointer = undefined
     if (this._autoHideScrollPointer !== undefined && this._autoHideScrollPointer !== pointerKey(event)) return
     const scrollButton = this._autoHideScrollButtonAt(event.position)
     if (scrollButton) {
@@ -3991,6 +3994,7 @@ export class RenderDockWorkbench extends RenderBox implements InteractiveRenderO
       return
     }
     if (this.manager.activeAutoHideItemId && !this._autoHideOverlayHitTest(event.position)) {
+      this._autoHideDismissPointer = pointerKey(event)
       this._clearAutoHideHoverTimer()
       this._clearAutoHideDismissTimer()
       event.stopPropagation?.()
@@ -4052,6 +4056,8 @@ export class RenderDockWorkbench extends RenderBox implements InteractiveRenderO
 
   private _handleAutoHidePointerUp(event: PointerEvent): void {
     if (!isPrimaryPointerButton(event)) return
+    const dismissPointer = this._autoHideDismissPointer === pointerKey(event)
+    if (dismissPointer) this._autoHideDismissPointer = undefined
     if (this._autoHideScrollPointer !== undefined && this._autoHideScrollPointer !== pointerKey(event)) return
     if (this._autoHideScrollPressed) {
       const pressed = this._autoHideScrollPressed
@@ -4080,10 +4086,14 @@ export class RenderDockWorkbench extends RenderBox implements InteractiveRenderO
       this._clearAutoHideDismissTimer()
       this.manager.runWithCommandSource('button', () => this.manager.showAutoHideItem(itemId))
       event.stopPropagation?.()
-    } else if (!itemId && this.manager.activeAutoHideItemId && !this._autoHideOverlayHitTest(event.position)) {
-      this._clearAutoHideHoverTimer()
-      this._clearAutoHideDismissTimer()
-      this.manager.runWithCommandSource('button', () => this.manager.hideAutoHideItem())
+    } else if (dismissPointer) {
+      // An overlay can appear after another control captured pointer-down.
+      // Only consume the matching outside-click sequence, never that control's release.
+      if (!itemId && this.manager.activeAutoHideItemId && !this._autoHideOverlayHitTest(event.position)) {
+        this._clearAutoHideHoverTimer()
+        this._clearAutoHideDismissTimer()
+        this.manager.runWithCommandSource('button', () => this.manager.hideAutoHideItem())
+      }
       event.stopPropagation?.()
     }
     if (this._autoHidePressedItemId !== null) {
@@ -4094,10 +4104,12 @@ export class RenderDockWorkbench extends RenderBox implements InteractiveRenderO
 
   private _handleAutoHidePointerCancel(event: PointerEvent): void {
     if (this._autoHideScrollPointer !== undefined && this._autoHideScrollPointer !== pointerKey(event)) return
+    const dismissPointer = this._autoHideDismissPointer === pointerKey(event)
+    if (dismissPointer) this._autoHideDismissPointer = undefined
     const consumesCancel = this._autoHideScrollPressed !== null || this._autoHidePinPressed ||
       this._autoHidePinHovered ||
       this._autoHidePressedItemId !== null ||
-      (this.manager.activeAutoHideItemId !== null && !this._autoHideOverlayHitTest(event.position))
+      dismissPointer
     this._clearAutoHideHoverTimer()
     this._clearAutoHideDismissTimer()
     this._autoHidePinPressed = false

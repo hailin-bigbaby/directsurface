@@ -23,7 +23,11 @@ async function start(mode: 'opfs' | 'memory' = 'opfs'): Promise<void> {
   cleanup = () => { document.removeEventListener('compositionstart', begin, true); document.removeEventListener('compositionend', end, true); view.dispose(); host.dispose(); app.dispose() }
   try {
     await view.start(); view.updateViewport(window.innerWidth); bootstrap.hidden = true
-    if (__PROCUREMENT_TEST__) Object.assign(window, { __PROCUREMENT__: { ...view.test, popupOpen: () => !!PopupManager.instance.current, manager: view.manager, showDocument: view.showDocument, flush: view.flush, tabRect(id: string) {
+    if (__PROCUREMENT_TEST__) Object.assign(window, { __PROCUREMENT__: { ...view.test, popupOpen: () => !!PopupManager.instance.current, manager: view.manager, showDocument: view.showDocument, flush: view.flush, tabPointerState(id: string) {
+      let result: unknown = null
+      const visit = (node: RenderObject) => { if (node instanceof RenderTabs && node.tabRect(id)) result = { pressed: (node as any)._pressedTab, dragging: (node as any)._draggingTab }; node.visitChildren(visit) }
+      visit(view.root); return result
+    }, tabRect(id: string) {
       let result: unknown = null
       const visit = (node: RenderObject) => { if (node instanceof RenderTabs) { const rect = node.tabRect(id); if (rect) result = rect }; node.visitChildren(visit) }
       visit(view.root); return result

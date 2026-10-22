@@ -75,3 +75,69 @@ describe('document activation guard', () => {
     manager.dispose()
   })
 })
+
+describe('auto-hide outside-click ownership', () => {
+  for (const ending of ['up', 'cancel'] as const) {
+    it(`does not intercept ${ending} when the overlay appeared after a descendant pressed`, () => {
+      const manager = new DockWorkbenchManager()
+      manager.openDocument({ itemId: 'order', title: 'Order', content: new RenderText('Content') })
+      manager.openTool({ itemId: 'validation', title: 'Validation', region: 'bottom', content: new RenderText('Content') })
+      const workbench = new RenderDockWorkbench({ manager })
+      manager.autoHideItem('validation')
+      workbench.layout({ minWidth: 900, maxWidth: 900, minHeight: 540, maxHeight: 540 })
+      const position = { x: 700, y: 20 }
+      const stopDown = vi.fn()
+      workbench.onPointerDownCapture({ pointerId: 1, type: 'down', position, stopPropagation: stopDown })
+      expect(stopDown).not.toHaveBeenCalled()
+      manager.showAutoHideItem('validation')
+      workbench.layout({ minWidth: 900, maxWidth: 900, minHeight: 540, maxHeight: 540 })
+      const stopEnd = vi.fn()
+      const event = { pointerId: 1, type: ending, position, stopPropagation: stopEnd }
+      if (ending === 'up') workbench.onPointerUpCapture(event)
+      else workbench.onPointerCancelCapture(event)
+      expect(stopEnd).not.toHaveBeenCalled()
+      expect(manager.activeAutoHideItemId).toBe('validation')
+      workbench.dispose(); manager.dispose()
+    })
+  }
+})
+
+
+it('only consumes the matching terminal event for an outside-dismiss press', () => {
+  const manager = new DockWorkbenchManager()
+  manager.openDocument({ itemId: 'order', title: 'Order', content: new RenderText('Content') })
+  manager.openTool({ itemId: 'validation', title: 'Validation', region: 'bottom', content: new RenderText('Content') })
+  const workbench = new RenderDockWorkbench({ manager })
+  manager.autoHideItem('validation'); manager.showAutoHideItem('validation')
+  workbench.layout({ minWidth: 900, maxWidth: 900, minHeight: 540, maxHeight: 540 })
+  const position = { x: 700, y: 20 }
+  workbench.onPointerDownCapture({ pointerId: 1, type: 'down', position })
+  const otherStop = vi.fn()
+  workbench.onPointerUpCapture({ pointerId: 2, type: 'up', position, stopPropagation: otherStop })
+  expect(otherStop).not.toHaveBeenCalled()
+  expect(manager.activeAutoHideItemId).toBe('validation')
+  const ownedStop = vi.fn()
+  workbench.onPointerCancelCapture({ pointerId: 1, type: 'cancel', position, stopPropagation: ownedStop })
+  expect(ownedStop).toHaveBeenCalledOnce()
+  expect(manager.activeAutoHideItemId).toBe('validation')
+  workbench.dispose(); manager.dispose()
+})
+
+
+it('does not reuse an outside-dismiss press for a new pointer sequence', () => {
+  const manager = new DockWorkbenchManager()
+  manager.openDocument({ itemId: 'order', title: 'Order', content: new RenderText('Content') })
+  manager.openTool({ itemId: 'validation', title: 'Validation', region: 'bottom', content: new RenderText('Content') })
+  const workbench = new RenderDockWorkbench({ manager })
+  manager.autoHideItem('validation'); manager.showAutoHideItem('validation')
+  workbench.layout({ minWidth: 900, maxWidth: 900, minHeight: 540, maxHeight: 540 })
+  const position = { x: 700, y: 20 }
+  workbench.onPointerDownCapture({ pointerId: 1, type: 'down', position })
+  manager.hideAutoHideItem()
+  workbench.onPointerDownCapture({ pointerId: 1, type: 'down', position })
+  manager.showAutoHideItem('validation')
+  const stopUp = vi.fn()
+  workbench.onPointerUpCapture({ pointerId: 1, type: 'up', position, stopPropagation: stopUp })
+  expect(stopUp).not.toHaveBeenCalled()
+  workbench.dispose(); manager.dispose()
+})
