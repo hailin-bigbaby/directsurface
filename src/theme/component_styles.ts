@@ -1105,6 +1105,7 @@ export interface DatePickerStyleTokens {
 function computeDatePickerStyle(theme: ResolvedTheme): DatePickerStyleTokens {
   const cellSize = theme.controlHeight
   const selectedBg = theme.accentPrimary
+  const hoveredBg = lerpColor(theme.surfacePopup, theme.accentPrimary, 0.22)
   return {
     text: theme.textPrimary,
     textDisabled: theme.textDisabled,
@@ -1113,17 +1114,18 @@ function computeDatePickerStyle(theme: ResolvedTheme): DatePickerStyleTokens {
     weekendText: theme.textSecondary,
     navBg: {
       normalBg: rgba(0, 0, 0, 0),
-      hoveredBg: theme.selectionMuted,
+      hoveredBg,
     },
     cellBg: {
       normalBg: rgba(0, 0, 0, 0),
-      hoveredBg: theme.stateHoverOverlay,
+      hoveredBg,
+      focusedBg: theme.selectionBg,
       selectedBg: selectedBg,
       selectedHoveredBg: compositeColor(theme.stateHoverOverlay, selectedBg),
     },
     footerButtonBg: {
       normalBg: rgba(0, 0, 0, 0),
-      hoveredBg: theme.selectionMuted,
+      hoveredBg,
     },
     separator: theme.borderSubtle,
     fontSize: theme.fontSize,

@@ -700,7 +700,8 @@ export class DateCalendarPanel {
         }
         const background = resolveBgColor(style.cellBg, {
           selected,
-          hovered: !selected && currentMonth && (hovered || focused),
+          hovered: !selected && currentMonth && hovered,
+          focused: !selected && focused,
         })
         if (background.a > 0) {
           drawList.fillRect(
@@ -710,6 +711,12 @@ export class DateCalendarPanel {
             cellSize - 2,
             background,
             popupStyle.borderRadius,
+          )
+        }
+        if (focused && !selected) {
+          drawList.strokeRect(
+            cellX + 2, cellY + 2, cellSize - 4, cellSize - 4,
+            context.theme.focusBorder, 2, popupStyle.borderRadius,
           )
         }
         const isToday = sameCalendarDate(date, today)

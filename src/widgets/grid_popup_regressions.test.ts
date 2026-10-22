@@ -182,3 +182,23 @@ describe('Grid popup and clipboard regressions', () => {
     grid.dispose()
   })
 })
+
+  for (const rejected of [false, true]) it(`confirms an unchanged date only when validation accepts it (rejected=${rejected})`, () => {
+    setPopupTestContext()
+    const onCellChange = vi.fn()
+    const validateCell = vi.fn(() => rejected ? 'Date is not allowed' : true)
+    const grid = new RenderDataGrid({
+      columns: [{ key: 'due', title: 'Due', type: 'date', width: 120 }],
+      rows: [{ due: '2026-04-13' }], editable: true,
+      rowHeight: 20, headerHeight: 20, onCellChange, validateCell,
+    })
+    grid.layout({ minWidth: 0, maxWidth: 320, minHeight: 0, maxHeight: 120 })
+    grid.onDoubleClick({ x: 20, y: 30 })
+    expect(grid.debugPopupState().datePicker.visible).toBe(true)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', cancelable: true }))
+    expect(validateCell).toHaveBeenCalledOnce()
+    expect(grid.debugPopupState().datePicker.visible).toBe(rejected)
+    if (!rejected) expect(grid.editingCell).toBe(null)
+    expect(onCellChange).not.toHaveBeenCalled()
+    grid.dispose()
+  })

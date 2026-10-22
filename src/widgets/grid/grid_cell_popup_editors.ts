@@ -376,7 +376,12 @@ export class GridCellPopupEditors<T extends Record<string, any> = any> {
   ): boolean {
     const rowIndex = this._resolveCommitRowIndex(openedRow)
     if (!this._structureEditing.canEditCell(rowIndex, colIndex)) return false
-    return this._structureEditing.commitVisibleValue(rowIndex, key, value)
+    const changed = this._structureEditing.commitVisibleValue(rowIndex, key, value)
+    // A validated no-op still confirms the editor; false alone only reports no mutation.
+    return changed || (
+      Object.is(this._getVisibleRows()[rowIndex]?.[key], value)
+      && !this._structureEditing.cellError(rowIndex, key)
+    )
   }
 
   private _resolveCommitRowIndex(openedRow: T): number {
