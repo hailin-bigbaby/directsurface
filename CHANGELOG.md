@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Button text changes now invalidate layout automatically.
+- DockWorkbench can cancel activation before leaving an invalid edit.
+- Consumed shortcuts no longer reach a newly opened confirmation dialog.
+
 ## 0.2.0 — 2026-10-21
 
 - DataGrid adds vertical row merging, automatic row heights, and wrapped cell text.

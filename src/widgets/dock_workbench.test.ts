@@ -5,7 +5,7 @@ import { PaintContext } from '../rendering/paint_context'
 import { deriveDockWorkbenchStyle } from '../theme/component_styles'
 import { ImGuiDarkTheme } from '../theme/default_theme'
 import { RenderText } from './basic'
-import { DockWorkbenchManager, RenderDockWorkbench } from './dock_workbench'
+import { DockWorkbenchManager, RenderDockWorkbench, type DockWorkbenchEvent } from './dock_workbench'
 
 function paintBottomTab(title: string) {
   const manager = new DockWorkbenchManager()
@@ -54,5 +54,24 @@ describe('RenderDockWorkbench bottom auto-hide tabs', () => {
     expect(rect.width).toBeLessThanOrEqual(style.autoHideSideTabMaxSize)
     expect(label).toContain('...')
     expect(ctx.measureText(label).width).toBeLessThanOrEqual(rect.width - style.autoHideBottomTextInset * 2)
+  })
+})
+
+describe('document activation guard', () => {
+  it('cancels API activation and selection without changing the selected document', () => {
+    const manager = new DockWorkbenchManager()
+    manager.openDocument({ itemId: 'a', title: 'A', content: new RenderText('Document') })
+    manager.openDocument({ itemId: 'b', title: 'B', content: new RenderText('Document') })
+    const events: DockWorkbenchEvent[] = []
+    manager.subscribeEvent(event => events.push(event))
+    const unsubscribe = manager.subscribeBeforeEvent(event => event.type !== 'before-item-activate')
+    expect(manager.activateItem('a')).toBe(false)
+    expect(manager.selectDockedItemTab('a')).toBe(false)
+    expect(events).toEqual([])
+    const center = manager.regions.center
+    expect(center?.type === 'tabs' && center.activeItem?.title).toBe('B')
+    unsubscribe()
+    expect(manager.activateItem('a')).toBe(true)
+    manager.dispose()
   })
 })

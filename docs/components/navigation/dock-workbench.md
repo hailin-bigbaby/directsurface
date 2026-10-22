@@ -492,3 +492,8 @@ left/right/bottom 自动隐藏边栏在内容溢出时提供两端翻页按钮�
 仅绘制和命中边栏可见部分，滚出视窗的 tab 不会保留可点击区域。激活视窗外的 auto-hide item 会自动将其入口滚动到可见范围；关闭工具项或扩大工作台后会重新收敛滚动范围。极小视窗可能只显示 tab 的一部分，仍可使用翻页按钮逐项访问。开始滚动会取消待触发的 hover 展开，取消操作或释放工作台时会清理翻页按钮的指针捕获。
 
 翻页按钮的按下操作由发起它的指针独占；其他触点，或编号相同的不同输入类型，不会抢占、翻页或结束已有操作。原指针抬起、取消或工作台释放后解除捕获。
+
+
+## Activation validation
+
+`before-item-activate` is a synchronous cancellable event for switching existing items through `activateItem()`, `activateWindow()` and `selectDockedItemTab()`. Return `false` to retain the selected tab, for example when `grid.commitEdit()` fails. Do not mutate the manager from the listener. Validate edits separately before creating items, and use `beforeClose` for closing. Docking and floating have their own before events.

@@ -126,7 +126,7 @@ const linkButton = new RenderButton({
 
 | API | 类型 / 返回值 | 说明 |
 | --- | --- | --- |
-| `label` | `string` | 按钮文本。修改后需要重新 layout 才能更新尺寸。 |
+| `label` | `string` | 按钮文本。修改后自动请求重新布局并更新尺寸；相同值赋值不会触发布局。 |
 | `onClick` | `() => void \| undefined` | 点击回调。`dispose()` 时会被清空。 |
 | `loading` | `boolean` | 当前 loading 状态。建议通过 `setLoading()` 修改。 |
 | `tooltip` | `string` | tooltip 文本。空字符串表示不显示。 |

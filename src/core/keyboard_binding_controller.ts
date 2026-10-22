@@ -70,7 +70,9 @@ export class KeyboardBindingController {
       if (!FocusManager.instance.allowsKeyboardBindingSource(binding.options?.source?.())) continue
       const consumed = binding.handler(event)
       if (consumed || event.defaultPrevented) {
-        event.stopPropagation()
+        // A consumed shortcut must not reach another capture listener on window.
+        // It may have just opened a modal which would otherwise receive the same Enter.
+        event.stopImmediatePropagation()
         return
       }
     }

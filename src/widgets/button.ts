@@ -26,7 +26,7 @@ import { FocusableControl, paintFocusRing, type ControlInteractionSnapshot } fro
 
 export class RenderButton extends FocusableControl implements InteractiveRenderObject, GestureArenaMember {
   static override debugTypeName = 'RenderButton'
-  label: string
+  private _label: string
   onClick?: () => void
   private _loading: boolean
   tooltip: string
@@ -49,7 +49,7 @@ export class RenderButton extends FocusableControl implements InteractiveRenderO
     tooltip?: string
   }) {
     super({ disabled: (opts.disabled ?? false) || (opts.loading ?? false) })
-    this.label = opts.label
+    this._label = opts.label
     this.onClick = opts.onClick
     this._variant = opts.variant ?? 'default'
     this._disabled = opts.disabled ?? false
@@ -65,6 +65,14 @@ export class RenderButton extends FocusableControl implements InteractiveRenderO
     this._disposables.addDisposable(this._pressAnim)
 
     if (this.loading) this._startSpin()
+  }
+
+  get label(): string { return this._label }
+
+  set label(value: string) {
+    if (this._label === value) return
+    this._label = value
+    this.markNeedsLayout()
   }
 
   private _startSpin(): void {

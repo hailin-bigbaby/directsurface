@@ -6,6 +6,7 @@ import { PipelineOwner, type BoxConstraints } from '../core/render_object'
 import { FocusManager } from '../core/focus_manager'
 import { GestureArenaManager, type GestureArenaMember } from '../gestures/gesture_arena'
 import { RenderButton } from './button'
+import { RenderStackPanel } from '../layout/render_flex'
 import { deriveButtonStyle } from '../theme/component_styles'
 import { TextMeasurer } from '../core/text_measurer'
 
@@ -554,4 +555,30 @@ describe('RenderButton lifecycle', () => {
     expect(onClick).toHaveBeenCalledTimes(1)
   })
 
+})
+
+
+it('remeasures a changed label and moves siblings without manual layout invalidation', () => {
+  vi.spyOn(TextMeasurer, 'measureWidth').mockImplementation(text => text.length * 10)
+  const row = new RenderStackPanel({ orientation: 'horizontal', spacing: 8 })
+  const button = new RenderButton({ label: '生成订单' })
+  const sibling = new RenderButton({ label: 'Next' })
+  row.addChild(button); row.addChild(sibling)
+  const bounds = { minWidth: 0, maxWidth: 400, minHeight: 0, maxHeight: 40 }
+  row.layout(bounds)
+  const initialWidth = button.size.width
+  const initialSiblingX = sibling.offset.x
+  button.label = '生成订单 (12)'
+  expect(button.needsLayout).toBe(true)
+  expect(row.needsLayout).toBe(true)
+  row.layout(bounds)
+  expect(button.size.width).toBeGreaterThan(initialWidth)
+  expect(sibling.offset.x).toBeGreaterThan(initialSiblingX)
+  button.label = '生成订单 (12)'
+  expect(button.needsLayout).toBe(false)
+  button.label = '生成订单'
+  row.layout(bounds)
+  expect(button.size.width).toBe(initialWidth)
+  expect(sibling.offset.x).toBe(initialSiblingX)
+  row.dispose()
 })

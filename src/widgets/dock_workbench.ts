@@ -154,6 +154,7 @@ export interface DockWorkbenchEvent {
 }
 
 export type DockWorkbenchBeforeEventType =
+  | 'before-item-activate'
   | 'before-item-dock'
   | 'before-item-float'
   | 'before-group-float'
@@ -667,6 +668,7 @@ export class DockWorkbenchManager {
     const location = this._findGroupContaining(record.window)
     if (!location) return false
     if (location.group.activeItem === record.window) return true
+    if (!this._canRunBeforeEvent({ type: 'before-item-activate', itemId: record.itemId })) return false
     location.group.activeItem = record.window
     this._emit()
     return true
@@ -674,6 +676,9 @@ export class DockWorkbenchManager {
 
   activateWindow(window: RenderWindow): boolean {
     if (this._rejectBeforeMutation()) return false
+    const target = this._records.get(window)
+    if (!target) return false
+    if (this._activeRecord() !== target && !this._canRunBeforeEvent({ type: 'before-item-activate', itemId: target.itemId })) return false
     const autoHideRecord = this._records.get(window)
     if (autoHideRecord && this._autoHideItems.has(autoHideRecord.itemId)) {
       return this.showAutoHideItem(autoHideRecord.itemId)
@@ -2852,7 +2857,11 @@ class RenderWorkbenchTabGroup extends RenderBox implements InteractiveRenderObje
     this.tabs = new RenderTabs({
       tabs: [],
       activeKey: '',
-      onTabChange: key => this._manager.runWithCommandSource('button', () => this._manager.activateItem(key)),
+      onTabChange: key => {
+        this._manager.runWithCommandSource('button', () => this._manager.activateItem(key))
+        // RenderTabs selects optimistically; a cancelled activation retains the old tab.
+        this.tabs.activeKey = this._manager.items.find(item => item.window === this._group.activeItem)?.itemId ?? ''
+      },
       onTabClose: key => {
         void this._manager.runWithCommandSourceAsync('button', () => this._manager.closeItem(key))
       },
