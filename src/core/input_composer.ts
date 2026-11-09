@@ -6,14 +6,22 @@ import { DisposableBag } from './disposable'
 import { FocusManager } from './focus_manager'
 
 export interface InputSession {
+  /** Notification after this session loses ownership, before another begins. */
+  onSessionEnd?: () => void
   // 普通输入（非 IME）
   onInput?: (value: string) => void
+  /** Native-event alternative to onInput; only one handler receives an input. */
+  onNativeInput?: (value: string, event: Event) => void
+  // Optional native intent; consumers retain responsibility for preventDefault.
+  onBeforeInput?: (event: InputEvent) => void
   // IME 开始组字（可在此切换到单行模式）
   onCompositionStart?: () => void
   // IME 组字预览
   onCompositionUpdate?: (text: string) => void
   // IME 确认
   onCompositionEnd?: (value: string, data?: string) => void
+  /** Alternative preserving an explicitly empty native composition result. */
+  onNativeCompositionEnd?: (event: CompositionEvent) => void
   // 键盘事件（Enter/Escape/Arrow 等）
   onKeyDown?: (e: KeyboardEvent) => void
   // 剪贴板事件
@@ -26,6 +34,8 @@ export interface InputSession {
 export interface InputComposerBeginOptions {
   focus?: boolean
   readOnly?: boolean
+  /** Retire this native carrier on release, isolating queued native events. */
+  isolateNativeEvents?: boolean
 }
 
 export type InputSessionToken = symbol
@@ -48,10 +58,12 @@ export class InputComposer {
   private _session: InputSession | null = null
   private _sessionToken: InputSessionToken | null = null
   private _composing = false
+  private _isolateNativeEvents = false
   private _disposables = new DisposableBag()
 
   // 事件处理器引用
   private _onInput: (e: Event) => void
+  private _onBeforeInput: (e: InputEvent) => void
   private _onKeyDown: (e: KeyboardEvent) => void
   private _onCompositionStart: () => void
   private _onCompositionUpdate: (e: CompositionEvent) => void
@@ -66,14 +78,16 @@ export class InputComposer {
     document.body.appendChild(ta)
     this._ta = ta
 
-    this._onInput = () => {
+    this._onBeforeInput = e => { this._session?.onBeforeInput?.(e) }
+    this._onInput = e => {
       if (!this._session || this._composing) return
-      this._session.onInput?.(this._ta.value)
+      if (this._session.onNativeInput) this._session.onNativeInput(this._ta.value, e)
+      else this._session.onInput?.(this._ta.value)
     }
 
     this._onKeyDown = (e: KeyboardEvent) => {
       if (!this._session) return
-      if (e.key === 'Tab' && FocusManager.instance.handleKeyDownEvent(e)) return
+      if (e.key === 'Tab' && !this._composing && !e.isComposing && e.keyCode !== 229 && FocusManager.instance.handleKeyDownEvent(e)) return
       this._session.onKeyDown?.(e)
     }
 
@@ -91,7 +105,8 @@ export class InputComposer {
     this._onCompositionEnd = (e: CompositionEvent) => {
       if (!this._composing) return
       this._composing = false
-      this._session?.onCompositionEnd?.(this._ta.value, e.data || undefined)
+      if (this._session?.onNativeCompositionEnd) this._session.onNativeCompositionEnd(e)
+      else this._session?.onCompositionEnd?.(this._ta.value, e.data || undefined)
     }
 
     this._onCopy = (e: ClipboardEvent) => {
@@ -124,6 +139,7 @@ export class InputComposer {
   get selectionStart(): number { return this._ta.selectionStart ?? this._ta.value.length }
   get selectionEnd(): number { return this._ta.selectionEnd ?? this._ta.value.length }
   get hasSession(): boolean { return this._session !== null }
+  ownsSession(token: InputSessionToken): boolean { return this._sessionToken === token }
 
   setSelection(start: number, end: number): void {
     this._ta.setSelectionRange(start, end)
@@ -131,9 +147,11 @@ export class InputComposer {
 
   // 开始一个输入会话
   begin(session: InputSession, initialValue = '', options?: InputComposerBeginOptions): InputSessionToken {
+    if (this._session) this.end(this._sessionToken!)
     const token = Symbol('InputSession')
     this._session = session
     this._sessionToken = token
+    this._isolateNativeEvents = options?.isolateNativeEvents === true
     this._composing = false
     this._ta.readOnly = options?.readOnly ?? false
     this._resetTextareaIfNeeded(initialValue, { preserveFocus: options?.focus !== false })
@@ -146,9 +164,14 @@ export class InputComposer {
   // 结束当前会话（不调 blur，保持 textarea 持有浏览器焦点）
   end(token?: InputSessionToken): void {
     if (token !== undefined && token !== this._sessionToken) return
+    const previous = this._session
+    const retire = this._isolateNativeEvents || this._composing
     this._session = null
     this._sessionToken = null
     this._composing = false
+    this._isolateNativeEvents = false
+    if (retire) this._replaceTextarea(false)
+    previous?.onSessionEnd?.()
   }
 
   // 更新 textarea 的屏幕位置（让 IME 候选框跟随光标）
@@ -236,6 +259,7 @@ export class InputComposer {
   }
 
   private _bindTextarea(ta: HTMLTextAreaElement): void {
+    ta.addEventListener('beforeinput', this._onBeforeInput)
     ta.addEventListener('input', this._onInput)
     ta.addEventListener('keydown', this._onKeyDown)
     ta.addEventListener('compositionstart', this._onCompositionStart)
@@ -248,6 +272,7 @@ export class InputComposer {
   }
 
   private _unbindTextarea(ta: HTMLTextAreaElement): void {
+    ta.removeEventListener('beforeinput', this._onBeforeInput)
     ta.removeEventListener('input', this._onInput)
     ta.removeEventListener('keydown', this._onKeyDown)
     ta.removeEventListener('compositionstart', this._onCompositionStart)

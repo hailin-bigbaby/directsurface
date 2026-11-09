@@ -80,6 +80,8 @@ export interface TextBoxEditResult {
 }
 
 export interface TextBoxInputAdapter {
+  /** Reject raw inserted text before single-line normalization (for example a pasted newline). */
+  acceptInsertion?(text: string): boolean
   transform(value: string, context: TextBoxEditContext): TextBoxEditResult
   handleKeyDown?(event: KeyboardEvent, context: TextBoxEditContext): TextBoxEditResult | undefined
 }
@@ -118,6 +120,7 @@ export class RenderTextBox extends RenderBox implements
   placeholder: string
   onChange?: (value: string) => void
   onSubmit?: (value: string) => void
+  blurOnSubmit: boolean
   onBlur?: (value: string) => void
   onKeyDown?: (event: KeyboardEvent) => boolean | void
   password: boolean
@@ -188,6 +191,7 @@ export class RenderTextBox extends RenderBox implements
     placeholder?: string
     onChange?: (value: string) => void
     onSubmit?: (value: string) => void
+    blurOnSubmit?: boolean
     onBlur?: (value: string) => void
     onKeyDown?: (event: KeyboardEvent) => boolean | void
     password?: boolean
@@ -213,6 +217,7 @@ export class RenderTextBox extends RenderBox implements
     this.placeholder = opts.placeholder ?? ''
     this.onChange = opts.onChange
     this.onSubmit = opts.onSubmit
+    this.blurOnSubmit = opts.blurOnSubmit ?? true
     this.onBlur = opts.onBlur
     this.onKeyDown = opts.onKeyDown
     this.password = opts.password ?? false
@@ -398,6 +403,7 @@ export class RenderTextBox extends RenderBox implements
   visitChildren(_visitor: (child: RenderObject) => void): void {}
 
   get isFocused(): boolean { return this._focused }
+  get isComposing(): boolean { return this._textInput.composing }
   focusIn(): void { this._focus() }
   focusOut(): void { this._blur() }
 
@@ -1055,7 +1061,7 @@ export class RenderTextBox extends RenderBox implements
   }
 
   protected shouldBlurOnSubmit(): boolean {
-    return true
+    return this.blurOnSubmit
   }
 
   private _blur(): void {
@@ -1089,6 +1095,7 @@ export class RenderTextBox extends RenderBox implements
     const { start, end } = normalizeUtf16ScalarRange(this.value, {
       start: this._textInput.selStart, end: this._textInput.selEnd,
     })
+    if (this._inputAdapter?.acceptInsertion?.(text) === false) return { value: this.value, selectionStart: start, selectionEnd: end, changed: false, previousValue: this.value }
     const normalizedText = text.replace(/\r\n?/g, '\n').replace(/\n/g, ' ')
     const prefix = this.value.slice(0, start)
     const suffix = this.value.slice(end)

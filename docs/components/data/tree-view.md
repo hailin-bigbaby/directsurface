@@ -314,3 +314,7 @@ TreeView 会把当前展开状态下的节点扁平化为可视节点列表，�
 - [DropTreeGridEdit 树表下拉](../selector/drop-tree-grid-edit.md)：弹出树表选择。
 - [MarkdownViewer](../visualization/markdown-viewer.md)：文档树常见搭配组件。
 - [Runtime Diagnostics](../../lifecycle.md)：调试布局、绘制和事件。
+
+## 局部替换叶节点
+
+`replaceLeafChildren(parent, children)` 更新已挂载节点的叶子列表；调用方负责保持节点 key 唯一。单选叶节点场景会局部更新可见行、焦点及滚动范围；不满足快速路径的树结构会执行完整状态同步。

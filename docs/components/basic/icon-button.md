@@ -115,6 +115,8 @@ lockButton.tooltip = state.readonly ? '当前只读' : '锁定'
 
 ## 内置图标
 
+弹框语义图标提供 `info-filled`、`warning-filled`、`check-circle-filled`、`error-circle-filled` 四种 Filled 实心版本；沿用同一 Fluent 图标来源与固定版本，原有细线图标名称保持不变。
+
 `icon` 类型为 `IconName`。当前公共图标由图标 Manifest 生成：
 
 See the [icon manifest](../../../scripts/icon_manifest.json) for current names, categories, and source metadata.

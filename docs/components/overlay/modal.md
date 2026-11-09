@@ -1,5 +1,7 @@
 # Modal 模态框
 
+统一视觉与布局规则见 [Modal 与 Prompt 统一设计规范](dialog-design.md)。
+
 > **通用布局能力**：`RenderModal` 实例继承 `RenderBox` 的尺寸、min/max、`margin` 和槽位对齐属性；作为 popup 打开时，实际位置仍由 modal/viewport 规则决定。详见[组件通用布局属性](../common-layout-properties.md)。
 
 
@@ -17,12 +19,14 @@ import {
   type AppConfirmDialogOptions,
   type AppModalOptions,
   type ModalButton,
+  type DialogIntent,
 } from 'directsurface'
 ```
 
 | API | 类型 | 用途 |
 | --- | --- | --- |
 | `RenderModal` | class | 阻断式确认对话框。直接创建时需要调用 `show()` 打开，并在关闭后自行 `dispose()`。 |
+| `DialogIntent` | type | `info`、`warning`、`success`、`error`；可选的标题语义图标。 |
 | `ModalButton` | type | 底部按钮定义，决定显示文本、返回 key、主按钮和危险按钮样式。 |
 | `AppOverlayService` | class | 应用级 overlay 服务。`showModal()`、`alert()` 和 `confirm()` 会托管 modal 的打开、关闭和释放。 |
 | `AppModalOptions` | type | `AppOverlayService.showModal()` 的配置对象。 |
@@ -142,11 +146,12 @@ interface ModalButton {
 | 参数 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `title` | `string` | 必填 | 标题栏文本。 |
-| `content` | `string` | 必填 | 内容文本。当前只绘制单行字符串。 |
+| `content` | `string` | 必填 | 内容文本，支持换行与滚动。 |
 | `buttons` | `ModalButton[]` | 取消/确认 | 底部按钮列表。 |
+| `intent` | `DialogIntent \| null` | `info` | 标题语义图标；显式传 `null` 隐藏。 |
 | `visible` | `boolean` | `false` | 初始可见状态。直接传 `true` 只设置状态，不等同于调用 `show()` 注册 popup。 |
 | `modalWidth` | `number` | `360` | 面板宽度。 |
-| `modalHeight` | `number` | `180` | 面板高度。 |
+| `modalHeight` | `number` | `0` | 最小面板高度；默认根据正文和操作区自适应。 |
 | `appContext` | `AppContextRegistry` | `undefined` | modal 局部上下文。 |
 | `disposeAppContextOnDispose` | `boolean` | `false` | `dispose()` 时是否释放 `appContext`。 |
 | `onClose` | `(buttonKey: string \| null) => void` | `undefined` | 关闭回调。按钮关闭返回按钮 `key`，Escape、`close()` 返回 `null`。 |
@@ -169,10 +174,10 @@ interface ModalButton {
 | `show()` | `void` | 打开 modal，注册到 `PopupManager`，启动淡入动画。 |
 | `hide(buttonKey?)` | `void` | 关闭 modal，注销 popup，触发 `onClose`。默认 `buttonKey` 为 `null`。 |
 | `close()` | `void` | Popup 协议关闭入口，等同于 `hide(null)`。 |
-| `onKeyDown(event)` | `boolean` | 处理 Tab、Enter、Escape。 |
+| `onKeyDown(event)` | `boolean` | 处理 Tab、Shift+Tab、Enter、Space、Escape、PageUp 和 PageDown。 |
 | `onEscape(event)` | `boolean` | 关闭 modal 并返回 `true`。 |
 | `onOutsidePointerDown(event)` | `boolean` | 消费外部点击，但不会关闭 modal。 |
-| `onWheel(event)` | `boolean` | 消费滚轮，避免底层滚动。 |
+| `onWheel(event)` | `boolean` | 滚动弹框正文，阻止底层滚动。 |
 | `hitTest(point, popupContext?)` | `boolean` | 可见时整个 viewport 命中。 |
 | `dispose()` | `void` | 关闭 popup、释放动画和可选上下文。 |
 
@@ -187,8 +192,8 @@ interface ModalButton {
 | 鼠标移入按钮 | 更新 hover 状态并重绘 overlay。 |
 | `Enter` | 触发第一个 `primary` 按钮；没有主按钮时不关闭。 |
 | `Escape` | 关闭并返回 `null`。 |
-| `Tab` | 被消费，用于阻断焦点离开当前阻塞层；当前实现没有内部焦点巡航。 |
-| 滚轮 | 被消费，底层滚动容器不响应。 |
+| `Tab` | 在操作按钮间循环；Shift+Tab 反向循环，焦点不离开弹框。 |
+| 滚轮 | 在正文区域滚动全文，底层滚动容器不响应。 |
 
 Modal 的遮罩点击不会自动关闭，这是为了避免危险确认被误触关闭。需要轻量点击外部关闭的浮层时使用 [Popover](./popover.md) 或 [ContextMenu](./context-menu.md)。
 
@@ -247,7 +252,11 @@ Modal 绘制顺序：
 
 视觉 token 来自 `deriveModalStyle(context.theme)`，包括遮罩、面板、标题栏、按钮、危险按钮、hover/pressed 状态，以及 `shadowColor`、`shadowBlur`、`shadowOffsetX`、`shadowOffsetY` 四个面板阴影字段。Modal、PromptModal 和 LoadingModal 共用这组阴影语义。面板位置每次 paint 会根据 `PopupManager` viewport 居中计算，因此窗口尺寸变化时会自动重新定位。
 
-当前内容文本只按单行绘制，没有内建换行、滚动和富内容布局。长文本应缩短文案、增大 `modalWidth/modalHeight`，或使用支持内容组件的自定义 popup。
+正文按可用宽度换行，默认高度随内容增长，并受视口限制。超长正文保留全文，通过滚轮、滚动条或 PageUp/PageDown 阅读。通常标题和按钮保持可见；特别矮的视口会让按钮加入滚动区，Tab 会把聚焦按钮滚入可见区域。
+
+按钮默认右对齐；总宽度超出可用宽度时纵向排列，长按钮标签换行，绘制和点击使用同一组矩形。标题使用主题标题字号和字重；超长标题在标题栏内省略显示。
+
+标题区使用主题强调色混合出的背景，标题左对齐并加粗；操作按钮右对齐。按钮高度保持 `controlHeight`，正文与按钮使用一致的内边距。
 
 ## 生命周期
 
@@ -276,7 +285,7 @@ modal.show()
 
 - Modal 每次打开只绘制一个 overlay 面板，性能成本低。
 - 按钮 hover/pressed 会请求 overlay 重绘，但不会触发布局树递归。
-- 不要把大文本或复杂结构塞进 `content` 字符串；当前实现不会虚拟化、换行或滚动内容。
+- `content` 支持纯文本换行与滚动；富内容和复杂结构应使用自定义 popup。
 - `show()` 使用 `closeExisting: true`，会关闭已有普通 popup。持久 loading 等特殊 overlay 由 `AppOverlayService` 维护时仍可能保留在更高层。
 
 ## 常见问题
@@ -305,3 +314,18 @@ modal.show()
 - [Prompt 输入对话框](./prompt.md)
 - [Notification 通知](./notification.md)
 - App Context
+
+### 标题语义图标
+
+`RenderModal`、`showModal()`、`alert()`、`confirm()` 支持可选 `intent`。`info` 使用蓝色信息图标，`warning` 使用警告图标，`success` 使用对勾，`error` 使用错误圆圈。图标来自内置图标库，标题统一使用 Filled 实心版本（`info-filled`、`warning-filled`、`check-circle-filled`、`error-circle-filled`）；颜色、尺寸和标题间距由主题统一派生。
+
+```ts
+await overlay.confirm({
+  title: '提交审批',
+  content: '提交后订单将不可修改。',
+  intent: 'info',
+  confirmText: '确认提交',
+})
+```
+
+未指定时显示 `info` 图标，显式传入 `intent: null` 可隐藏；`intent` 只表达信息语义，不隐式改变按钮颜色、返回值或确认行为。破坏性操作的按钮仍通过 `danger` 配置。图标出现后会为标题预留空间，窄屏下标题仍限制在可用区域内。

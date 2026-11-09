@@ -16,6 +16,7 @@ import { RenderTextArea } from '../widgets/text_area'
 import { RenderPlainTextEditor } from '../widgets/plain_text_editor'
 import { TooltipService } from '../widgets/tooltip'
 import { RenderWindow } from '../widgets/window'
+import { RenderSpacer } from '../layout/render_flex'
 import { rgba, type ResolvedTheme } from '../theme/theme'
 import { RuntimeHost } from './runtime_host'
 
@@ -368,6 +369,20 @@ describe('RuntimeHost', () => {
     host.dispose()
   })
 
+  it('centers content-sized windows using measured height rather than their initial height', () => {
+    vi.stubGlobal('OffscreenCanvas', TestOffscreenCanvas)
+    const canvas = document.createElement('canvas')
+    ;(canvas as any).getContext = vi.fn(() => createCanvasContext())
+    const host = new RuntimeHost({ canvas, getViewportSize: () => ({ width: 800, height: 600 }) })
+    const window = new RenderWindow({ title: 'Content dialog', width: 400, height: 240, heightSizing: 'content' })
+    window.setChildren([new RenderSpacer({ height: 400 })])
+    host.centerWindowInViewport(window)
+    expect(window.windowHeight).toBeGreaterThan(400)
+    expect(window.windowY).toBe((600 - window.windowHeight) / 2)
+    expect(window.windowY + window.windowHeight).toBeLessThanOrEqual(600)
+    window.dispose(); host.dispose()
+  })
+
   it('fits an oversized centered window inside the current viewport', () => {
     vi.stubGlobal('OffscreenCanvas', TestOffscreenCanvas)
     const canvas = document.createElement('canvas')
@@ -392,6 +407,50 @@ describe('RuntimeHost', () => {
     expect(window.windowHeight).toBe(240)
     expect(window.offset).toEqual({ x: 0, y: 0 })
 
+    host.dispose()
+  })
+
+  it('refits displaced modals on viewport resize while leaving visible modals in place', () => {
+    vi.stubGlobal('OffscreenCanvas', TestOffscreenCanvas)
+    const canvas = document.createElement('canvas')
+    ;(canvas as any).getContext = vi.fn(() => createCanvasContext())
+    let viewport = { width: 1000, height: 800 }
+    const host = new RuntimeHost({ canvas, getViewportSize: () => viewport })
+    const displaced = new RenderWindow({ title: 'Displaced', width: 500, height: 300 })
+    const visible = new RenderWindow({ title: 'Visible', width: 320, height: 200 })
+    displaced.setWindowBounds({ x: 400, y: 380 })
+    visible.setWindowBounds({ x: 24, y: 32 })
+    host.addRoot(displaced)
+    host.addRoot(visible)
+    host.setModalWindows([displaced, visible])
+
+    viewport = { width: 640, height: 480 }
+    host.resize()
+
+    expect(displaced.offset).toEqual({ x: 70, y: 90 })
+    expect(visible.offset).toEqual({ x: 24, y: 32 })
+    expect(host.modalWindows).toEqual([displaced, visible])
+    host.dispose()
+  })
+
+  it('moves a content-sized modal back inside the viewport after its content grows', () => {
+    vi.stubGlobal('OffscreenCanvas', TestOffscreenCanvas)
+    const canvas = document.createElement('canvas')
+    ;(canvas as any).getContext = vi.fn(() => createCanvasContext())
+    const host = new RuntimeHost({ canvas, getViewportSize: () => ({ width: 800, height: 600 }) })
+    const modal = new RenderWindow({ title: 'Growing dialog', width: 400, heightSizing: 'content' })
+    modal.setChildren([new RenderSpacer({ height: 180 })])
+    host.centerWindowInViewport(modal)
+    host.addRoot(modal)
+    host.setModalWindows([modal])
+    const initialY = modal.windowY
+
+    modal.setChildren([new RenderSpacer({ height: 480 })])
+    host.flushLayout()
+
+    expect(modal.windowY).toBeLessThan(initialY)
+    expect(modal.windowY + modal.windowHeight).toBeLessThanOrEqual(600)
+    expect(host.activeModalWindow).toBe(modal)
     host.dispose()
   })
 

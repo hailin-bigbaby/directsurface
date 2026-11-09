@@ -1,6 +1,14 @@
 // RenderObject: 几何计算 + Canvas 绘制基类
 // 采用 Box Constraint 协议，脏标记驱动局部重算
 
+import {
+  addPointerListener, removePointerListener, hasPointerListeners, disposePointerListeners,
+  type PointerEventType, type PointerEventListener, type PointerEventListenerOptions,
+} from '../gestures/pointer_event_listeners'
+import {
+  addKeyboardListener, removeKeyboardListener, disposeKeyboardListeners,
+  type KeyboardEventType, type KeyboardEventListener, type KeyboardEventListenerOptions,
+} from './keyboard_event'
 import type { PaintContext } from '../rendering/paint_context'
 import { HitTestResult, type HitTestTarget } from '../gestures/hit_test'
 import { PopupManager } from './popup_manager'
@@ -159,6 +167,31 @@ export function looseConstraints(maxWidth: number, maxHeight: number): BoxConstr
 // ---- RenderObject 基类 ----
 
 export abstract class RenderObject {
+  /** Keyboard routes stop at the nearest boundary (RenderWindow). */
+  get isKeyboardEventBoundary(): boolean { return false }
+
+  addKeyboardEventListener(type: KeyboardEventType, listener: KeyboardEventListener, options?: KeyboardEventListenerOptions): () => void {
+    return addKeyboardListener(this, type, listener, options)
+  }
+
+  removeKeyboardEventListener(type: KeyboardEventType, listener: KeyboardEventListener, options?: Pick<KeyboardEventListenerOptions, 'capture'>): void {
+    removeKeyboardListener(this, type, listener, options)
+  }
+
+  /** Pointer routes stop at the nearest RenderWindow, including nested windows. */
+  get isPointerEventBoundary(): boolean { return false }
+
+  /** @internal Includes listener-only nodes in hover hit paths. */
+  get hasPointerEventListeners(): boolean { return hasPointerListeners(this) }
+
+  addPointerEventListener(type: PointerEventType, listener: PointerEventListener, options?: PointerEventListenerOptions): () => void {
+    return addPointerListener(this, type, listener, options)
+  }
+
+  removePointerEventListener(type: PointerEventType, listener: PointerEventListener, options?: Pick<PointerEventListenerOptions, 'capture'>): void {
+    removePointerListener(this, type, listener, options)
+  }
+
   static debugTypeName?: string
   private readonly _debugId = nextRenderDebugId++
   private _parent?: RenderObject
@@ -509,6 +542,8 @@ export abstract class RenderObject {
   }
 
   dispose(): void {
+    disposePointerListeners(this)
+    disposeKeyboardListeners(this)
     const children: RenderObject[] = []
     this.visitChildren(child => children.push(child))
     try {

@@ -94,7 +94,7 @@ export class RenderCommandToolbar extends RenderToolbar {
     if (!manager) return
     this._commandSubscription = manager.subscribe(() => {
       this._lastVersion = -1
-      this.markNeedsLayout()
+      this._syncToolbarGroups()
     })
   }
 
@@ -106,7 +106,24 @@ export class RenderCommandToolbar extends RenderToolbar {
     }
     if (this._lastVersion === manager.version) return
     this._lastVersion = manager.version
-    super.setGroups(this._resolveToolbarGroups(manager))
+    const next = this._resolveToolbarGroups(manager)
+    const sameGeometry = this.groups.length === next.length && next.every((group, index) => {
+      const previous = this.groups[index]!
+      return previous.id === group.id && previous.slot === group.slot && previous.visible === group.visible
+        && previous.items.length === group.items.length && group.items.every((item, itemIndex) => {
+          const old = previous.items[itemIndex]!
+          return old.id === item.id && old.kind === item.kind && old.visible === item.visible
+            && old.showLabel === item.showLabel
+            && (old.kind === 'separator' || item.kind === 'separator'
+              || (old.label === item.label && old.icon === item.icon))
+        })
+    })
+    if (!sameGeometry) { super.setGroups(next); return }
+    // Preserve item references shared by the measured layout and overflow menu.
+    next.forEach((group, index) => group.items.forEach((item, itemIndex) => {
+      Object.assign(this.groups[index]!.items[itemIndex]!, item)
+    }))
+    this.refreshItemStates()
   }
 
   private _resolveToolbarGroups(manager: CommandManager): ToolbarGroup[] {

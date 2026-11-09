@@ -59,6 +59,7 @@ const MONTH_NAMES = [
 ]
 
 export class DateCalendarPanel {
+  selectionPrecision: DateCalendarViewMode = 'day'
   private _viewYear = MIN_YEAR
   private _viewMonth = 1
   private _viewMode: DateCalendarViewMode = 'day'
@@ -131,7 +132,7 @@ export class DateCalendarPanel {
     this._focusedDate = { ...base }
     this._viewYear = base.year
     this._viewMonth = base.month
-    this._viewMode = 'day'
+    this._viewMode = this.selectionPrecision
     this._yearRangeStart = yearRangeStartFor(base.year)
     this._hoveredDate = null
     this._hoveredButton = null
@@ -150,7 +151,7 @@ export class DateCalendarPanel {
       if (options.alignView !== false) {
         this._viewYear = base.year
         this._viewMonth = base.month
-        this._viewMode = 'day'
+        this._viewMode = this.selectionPrecision
         this._yearRangeStart = yearRangeStartFor(base.year)
       }
     }
@@ -160,7 +161,7 @@ export class DateCalendarPanel {
   syncView(year: number, month: number): void {
     this._viewYear = clampYear(year)
     this._viewMonth = Math.max(1, Math.min(12, Math.trunc(month)))
-    this._viewMode = 'day'
+    this._viewMode = this.selectionPrecision
     this._focusedDate = {
       year: this._viewYear,
       month: this._viewMonth,
@@ -205,7 +206,7 @@ export class DateCalendarPanel {
         this._yearRangeStart = yearRangeStartFor(this._viewYear)
         this._hoveredYear = this._viewYear
       } else {
-        this._viewMode = 'day'
+        this._viewMode = this.selectionPrecision
       }
       this._invalidate()
       return null
@@ -230,6 +231,7 @@ export class DateCalendarPanel {
           calendarDaysInMonth(this._viewYear, this._viewMonth),
         ),
       }
+      if (this.selectionPrecision === 'month') { const date = { year: this._viewYear, month: this._viewMonth, day: 1 }; this._selectDate(date); return date }
       this._viewMode = 'day'
       this._invalidate()
       return null
@@ -247,6 +249,7 @@ export class DateCalendarPanel {
         calendarDaysInMonth(year, this._viewMonth),
       ),
     }
+    if (this.selectionPrecision === 'year') { const date = { year: this._viewYear, month: 1, day: 1 }; this._selectDate(date); return date }
     this._viewMode = 'month'
     this._hoveredMonth = this._viewMonth - 1
     this._invalidate()
@@ -294,9 +297,11 @@ export class DateCalendarPanel {
 
   clearHover(): boolean {
     const changed = this._hoveredDate !== null ||
-      this._hoveredButton !== null
+      this._hoveredButton !== null || this._hoveredMonth >= 0 || this._hoveredYear >= MIN_YEAR
     this._hoveredDate = null
     this._hoveredButton = null
+    this._hoveredMonth = -1
+    this._hoveredYear = -1
     if (changed) this._invalidate()
     return changed
   }
@@ -351,6 +356,7 @@ export class DateCalendarPanel {
           calendarDaysInMonth(this._viewYear, this._viewMonth),
         ),
       }
+      if (this.selectionPrecision === 'month') { const date = { year: this._viewYear, month: this._viewMonth, day: 1 }; this._selectDate(date); return { handled: true, activatedDate: date } }
       this._viewMode = 'day'
       this._invalidate()
       return { handled: true }
@@ -369,6 +375,7 @@ export class DateCalendarPanel {
         calendarDaysInMonth(this._viewYear, this._viewMonth),
       ),
     }
+    if (this.selectionPrecision === 'year') { const date = { year: this._viewYear, month: 1, day: 1 }; this._selectDate(date); return { handled: true, activatedDate: date } }
     this._viewMode = 'month'
     this._hoveredMonth = this._viewMonth - 1
     this._invalidate()
@@ -465,9 +472,9 @@ export class DateCalendarPanel {
         options,
       )
     } else if (this._viewMode === 'month') {
-      this._paintMonthView(context, drawList, rect, bodyY, style, popupStyle)
+      this._paintMonthView(context, drawList, rect, bodyY, style, popupStyle, options)
     } else {
-      this._paintYearView(context, drawList, rect, bodyY, style, popupStyle)
+      this._paintYearView(context, drawList, rect, bodyY, style, popupStyle, options)
     }
   }
 
@@ -758,6 +765,7 @@ export class DateCalendarPanel {
     bodyY: number,
     style: DatePickerStyleTokens,
     popupStyle: PopupStyleTokens,
+    options: DateCalendarPanelPaintOptions,
   ): void {
     const cellWidth = (rect.width - style.padding * 2) / 4
     const cellHeight = style.cellSize * 1.5
@@ -769,8 +777,9 @@ export class DateCalendarPanel {
       const y = bodyY + row * cellHeight
       const selected = this._selected?.month === index + 1 &&
         this._selected?.year === this._viewYear
+      const focused = options.active !== false && this._viewMonth === index + 1
       const hovered = this._hoveredMonth === index
-      const background = resolveBgColor(style.cellBg, { selected, hovered })
+      const background = resolveBgColor(style.cellBg, { selected, hovered: !focused && hovered, focused: !selected && focused })
       if (background.a > 0) {
         drawList.fillRect(
           x + 2,
@@ -779,6 +788,12 @@ export class DateCalendarPanel {
           cellHeight - 4,
           background,
           popupStyle.borderRadius,
+        )
+      }
+      if (focused && !selected) {
+        drawList.strokeRect(
+          x + 3, y + 3, cellWidth - 6, cellHeight - 6,
+          context.theme.focusBorder, 2, popupStyle.borderRadius,
         )
       }
       drawList.fillText(
@@ -808,6 +823,7 @@ export class DateCalendarPanel {
     bodyY: number,
     style: DatePickerStyleTokens,
     popupStyle: PopupStyleTokens,
+    options: DateCalendarPanelPaintOptions,
   ): void {
     const cellWidth = (rect.width - style.padding * 2) / 4
     const cellHeight = style.cellSize * 1.5
@@ -821,8 +837,9 @@ export class DateCalendarPanel {
       const x = gridX + col * cellWidth
       const y = bodyY + row * cellHeight
       const selected = this._selected?.year === year
+      const focused = options.active !== false && this._viewYear === year
       const hovered = this._hoveredYear === year
-      const background = resolveBgColor(style.cellBg, { selected, hovered })
+      const background = resolveBgColor(style.cellBg, { selected, hovered: !focused && hovered, focused: !selected && focused })
       if (background.a > 0) {
         drawList.fillRect(
           x + 2,
@@ -831,6 +848,12 @@ export class DateCalendarPanel {
           cellHeight - 4,
           background,
           popupStyle.borderRadius,
+        )
+      }
+      if (focused && !selected) {
+        drawList.strokeRect(
+          x + 3, y + 3, cellWidth - 6, cellHeight - 6,
+          context.theme.focusBorder, 2, popupStyle.borderRadius,
         )
       }
       drawList.fillText(

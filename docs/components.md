@@ -31,3 +31,5 @@ These are the `Render*` values exported from the `directsurface` package entry. 
 `RenderDevToolsWindow`, `RenderLayoutInspectorPanel`, `RenderLayoutInspectorView`, `RenderRuntimeDiagnosticsView`, `RenderRuntimeDiagnosticsPanel`, `RenderRuntimeDiagnosticsSnapshotViewer`.
 
 See [getting started](getting-started.md) and the [component showcase](../examples/basic-app/src/main.ts) for small working examples. Use your editor's TypeScript completion or the built declarations for full options, events, and related controller types.
+
+See the [Modal and Prompt design specification](components/overlay/dialog-design.md) for shared spacing, semantic icons, scrolling and narrow-screen behavior.

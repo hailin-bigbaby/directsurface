@@ -209,7 +209,7 @@ export class TimeSelectionPanel {
     for (let column = 0; column < segments.length; column++) {
       const segment = segments[column]!
       const columnX = rect.x + style.padding + column * columnWidth
-      const active = segment === this.activeSegment
+      const active = options.active !== false && segment === this.activeSegment
       drawList.fillText(
         options.title && column === 0
           ? `${options.title}·${labels[segment]}`

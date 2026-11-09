@@ -5,7 +5,7 @@ import {
   type RenderPlainTextEditorOptions,
 } from './plain_text_editor'
 import type { TextEditSessionApi } from '../core/text_edit_session'
-import type { BoxConstraints, LayoutContext, Offset, Rect, RenderObject } from '../core/render_object'
+import type { BoxConstraints, LayoutContext, Offset, Rect, RenderObject, PipelineOwner } from '../core/render_object'
 import { FocusManager } from '../core/focus_manager'
 import { isPrimaryPointerButton, type PointerEvent, type WheelPointerEvent } from '../gestures/hit_test'
 import { DrawList } from '../rendering/draw_list'
@@ -217,6 +217,11 @@ export interface CodeEditorSignatureHelpContext {
   signal: AbortSignal
 }
 
+export interface CodeEditorInlayHint {
+  position: TextPosition
+  label: string
+}
+
 export interface CodeEditorLanguageAdapter<
   TContext = unknown,
   TCompletionResult extends CodeEditorCompletionResult = CodeEditorCompletionItem[],
@@ -226,6 +231,7 @@ export interface CodeEditorLanguageAdapter<
   completionWordPattern?: RegExp
   signatureTriggerCharacters?: readonly string[]
   signatureRetriggerCharacters?: readonly string[]
+  getInlayHints?(source: string, context: TContext | undefined, request: { signal: AbortSignal }): MaybePromise<readonly CodeEditorInlayHint[]>
   getDiagnostics?(source: string, context: TContext | undefined): MaybePromise<CodeEditorDiagnostic[]>
   getSemanticTokens?(source: string, context: TContext | undefined): MaybePromise<CodeEditorSemanticToken[]>
   getCompletions?(
@@ -258,10 +264,16 @@ export interface RenderCodeEditorOptions<TContext = unknown> extends RenderPlain
   completionWordPattern?: RegExp
   signatureTriggerCharacters?: string[]
   signatureRetriggerCharacters?: string[]
+  /** Allow compact editors to show parameter help within the host popup viewport. */
+  signatureHelpBoundary?: 'editor' | 'viewport'
   signatureHelpDelayMs?: number
+  /** Preview the selected completion suffix as non-document ghost text. */
+  inlineSuggestions?: boolean
   quickSuggestions?: boolean
   quickSuggestionsDelayMs?: number
   acceptSuggestionOnEnter?: CodeEditorAcceptSuggestionOnEnter
+  /** Below the hovered token, with an above fallback, to keep its source line visible. */
+  hoverPlacement?: 'side' | 'below'
   hoverDelayMs?: number
   hoverCardCloseDelayMs?: number
   onDiagnosticsChange?: (diagnostics: CodeEditorDiagnostic[]) => void
@@ -279,6 +291,8 @@ export interface CodeEditorDebugState extends ReturnType<RenderPlainTextEditor['
   semanticTokenCount: number
   completionCount: number
   completionVisible: boolean
+  inlineSuggestionText: string | null
+  inlayHints: readonly CodeEditorInlayHint[]
   selectedCompletionLabel: string | null
   quickSuggestions: boolean
   quickSuggestionsDelayMs: number
@@ -331,6 +345,10 @@ export class RenderCodeEditor<TContext = unknown>
   private _diagnosticsTimer: ReturnType<typeof setTimeout> | null = null
   private _diagnosticsRequestSeq = 0
   private _semanticTokensRequestSeq = 0
+  private _inlayHints: CodeEditorInlayHint[] = []
+  private _inlayRequest?: AbortController
+  private _inlaySequence = 0
+
   private readonly _completionSession = new CodeEditorCompletionSession(COMPLETION_MAX_VISIBLE_ITEMS)
   private readonly _signatureHelpSession = new CodeEditorSignatureHelpSession()
   private _completionContextVersion = 0
@@ -356,12 +374,15 @@ export class RenderCodeEditor<TContext = unknown>
   private _signatureTriggerCharacters: string[]
   private _signatureRetriggerCharacters: string[]
   private readonly _signatureHelpDelayMs: number
+  private readonly _signatureHelpBoundary: 'editor' | 'viewport'
+  private readonly _inlineSuggestions: boolean
   private readonly _quickSuggestions: boolean
   private readonly _quickSuggestionsDelayMs: number
   private readonly _acceptSuggestionOnEnter: CodeEditorAcceptSuggestionOnEnter
   private _suppressNextCompletionTrigger = false
   private _hoverInfo: CodeEditorHover | null = null
   private _hoverAnchor: { range: TextRange; fallbackPosition: TextPosition } | null = null
+  private readonly _hoverPlacement: 'side' | 'below'
   private readonly _hoverDelayMs: number
   private readonly _hoverCardCloseDelayMs: number
   private _hoverTimer: ReturnType<typeof setTimeout> | null = null
@@ -419,9 +440,12 @@ export class RenderCodeEditor<TContext = unknown>
     this._syncCompletionCapabilities()
     this._syncSignatureCapabilities()
     this._signatureHelpDelayMs = Math.max(0, Math.floor(options.signatureHelpDelayMs ?? 0))
+    this._signatureHelpBoundary = options.signatureHelpBoundary ?? 'editor'
+    this._inlineSuggestions = options.inlineSuggestions ?? false
     this._quickSuggestions = options.quickSuggestions ?? false
     this._quickSuggestionsDelayMs = Math.max(0, Math.floor(options.quickSuggestionsDelayMs ?? 100))
     this._acceptSuggestionOnEnter = options.acceptSuggestionOnEnter ?? 'on'
+    this._hoverPlacement = options.hoverPlacement ?? 'side'
     this._hoverDelayMs = Math.max(0, Math.floor(options.hoverDelayMs ?? 300))
     this._hoverCardCloseDelayMs = Math.max(0, Math.floor(options.hoverCardCloseDelayMs ?? 150))
     this._onDiagnosticsChange = options.onDiagnosticsChange
@@ -476,6 +500,76 @@ export class RenderCodeEditor<TContext = unknown>
 
   get completionItems(): CodeEditorCompletionItem[] {
     return cloneCompletionItems([...this._completionSession.items])
+  }
+
+  override get readonly(): boolean { return super.readonly }
+
+  override set readonly(value: boolean) {
+    if (value && this._inlineSuggestions) this.closeCompletion()
+    super.readonly = value
+  }
+
+  /** The exact suffix of the selected candidate; never part of value or selection. */
+  get inlineSuggestionText(): string | null {
+    if (!this._inlineSuggestions || !this.completionVisible || !this.isFocused
+      || !this.visible || this.readonly || this.textInput.composing || this._disposed
+      || this.controller.hasSelection) return null
+    const item = this._completionSession.currentItem
+    const cursor = this.controller.cursor
+    const range = item?.range
+    // Only insert previews: never imply replacement of source after the caret.
+    if (!item || !range || range.start.line !== cursor.line
+      || !positionsEqual(range.end, cursor)) return null
+    const prefix = textBetweenPositions(this.controller.document, range.start, cursor)
+    const insertion = item.insertText ?? item.label
+    if (!prefix || !insertion.startsWith(prefix) || /[\r\n\t]/.test(insertion)) return null
+    return insertion.slice(prefix.length) || null
+  }
+
+  protected override inlineTextPreview(): { position: TextPosition; text: string } | null {
+    const text = this.inlineSuggestionText
+    return text ? { position: this.controller.cursor, text } : null
+  }
+
+  get inlayHints(): readonly CodeEditorInlayHint[] {
+    return this._inlayHints.map(hint => ({ position: { ...hint.position }, label: hint.label }))
+  }
+
+  protected override inlineTextAnnotations(): readonly { position: TextPosition; text: string }[] {
+    if (this.textInput.composing || this._disposed || !this.visible) return []
+    return this._inlayHints.map(hint => ({ position: hint.position, text: ` 〈${hint.label}〉 ` }))
+  }
+
+  clearInlayHints(): void {
+    this._inlayRequest?.abort()
+    this._inlaySequence++
+    this._inlayHints = []
+    this.refreshInlinePresentation()
+  }
+
+  async refreshInlayHints(): Promise<void> {
+    this.clearInlayHints()
+    const provider = this._languageAdapter?.getInlayHints
+    if (!provider || this._disposed || !this.visible) return
+    const sequence = this._inlaySequence, source = this.value, context = this._languageContext
+    const abort = this._inlayRequest = new AbortController()
+    let hints: readonly CodeEditorInlayHint[]
+    try { hints = await provider.call(this._languageAdapter, source, context, { signal: abort.signal }) }
+    catch { hints = [] }
+    if (abort.signal.aborted || sequence !== this._inlaySequence || this._disposed
+      || source !== this.value || context !== this._languageContext || !this.visible) return
+    const seen = new Set<string>()
+    this._inlayHints = hints.filter(hint => {
+      const { line, column } = hint.position
+      const key = `${line}:${column}`
+      if (!Number.isInteger(line) || !Number.isInteger(column) || line < 0
+        || line >= this.controller.document.lineCount || column < 0
+        || column > this.controller.document.getLineLength(line) || !hint.label.trim()
+        || /[\r\n\t]/.test(hint.label) || seen.has(key)) return false
+      seen.add(key)
+      return true
+    }).map(hint => ({ position: { ...hint.position }, label: hint.label }))
+    this.refreshInlinePresentation()
   }
 
   get completionVisible(): boolean {
@@ -594,6 +688,7 @@ export class RenderCodeEditor<TContext = unknown>
     const selectionPolicy = options.selectionPolicy ?? 'preselect-first'
     const documentVersion = this.controller.document.version
     const contextVersion = this._completionContextVersion
+    this._completionCursorPosition = { ...position }
     const handle = this._completionSession.beginRequest({
       documentVersion,
       languageContextVersion: contextVersion,
@@ -955,6 +1050,7 @@ export class RenderCodeEditor<TContext = unknown>
   }
 
   override focusOut(): void {
+    if (this._inlineSuggestions) this.closeCompletion()
     this.closeSignatureHelp()
     super.focusOut()
     const sequence = ++this._hoverFocusCheckSeq
@@ -991,6 +1087,8 @@ export class RenderCodeEditor<TContext = unknown>
       semanticTokenCount: this._semanticTokens.length,
       completionCount: this._completionSession.items.length,
       completionVisible: this.completionVisible,
+      inlineSuggestionText: this.inlineSuggestionText,
+      inlayHints: this.inlayHints,
       selectedCompletionLabel: selectedCompletion?.label ?? null,
       quickSuggestions: this._quickSuggestions,
       quickSuggestionsDelayMs: this._quickSuggestionsDelayMs,
@@ -1042,13 +1140,16 @@ export class RenderCodeEditor<TContext = unknown>
         this.acceptSelectedCompletion()
         return
       }
-      this.closeCompletion()
     }
     if (event.ctrlKey || event.metaKey) {
-      void this.goToDefinition(this.globalPointToPosition(event.position))
+      const position = this.globalPointToPosition(event.position)
+      this.closeCompletion()
+      void this.goToDefinition(position)
       return
     }
+    // Hit-test the displayed suffix before dismissing its visual displacement.
     super.onPointerDown(event)
+    this.closeCompletion()
   }
 
   override onPointerMove(event: PointerEvent): void {
@@ -1080,7 +1181,13 @@ export class RenderCodeEditor<TContext = unknown>
     else this._hardCloseHover()
   }
 
+  override attach(owner: PipelineOwner): void {
+    super.attach(owner)
+    void this.refreshInlayHints()
+  }
+
   override detach(): void {
+    this.clearInlayHints()
     this._invalidateLanguageOperationRequests()
     this.closeCompletion()
     this.closeHover()
@@ -1089,6 +1196,8 @@ export class RenderCodeEditor<TContext = unknown>
   }
 
   protected override onVisibilityChanged(visible: boolean): void {
+    if (visible) void this.refreshInlayHints()
+    else this.clearInlayHints()
     if (!visible) {
       this._invalidateLanguageOperationRequests()
       this.closeCompletion()
@@ -1149,6 +1258,7 @@ export class RenderCodeEditor<TContext = unknown>
   }
 
   override dispose(): void {
+    this.clearInlayHints()
     if (this._disposed) return
     this.closeSignatureHelp()
     this._disposed = true
@@ -1247,7 +1357,7 @@ export class RenderCodeEditor<TContext = unknown>
   }
 
   private _handleCompletionCursorChange(): void {
-    if (!this.completionVisible || !this._completionCursorPosition) return
+    if (!this._completionCursorPosition) return
     if (positionsEqual(this.controller.cursor, this._completionCursorPosition)) return
     this.closeCompletion()
   }
@@ -1302,6 +1412,7 @@ export class RenderCodeEditor<TContext = unknown>
   }
 
   private _refreshLanguageFeatures(options: { debounceDiagnostics: boolean }): void {
+    void this.refreshInlayHints()
     this._languageFeatureVersion++
     void this._requestSemanticTokens(this._languageFeatureVersion)
     if (options.debounceDiagnostics) this._scheduleDiagnostics(this._languageFeatureVersion)
@@ -1373,6 +1484,12 @@ export class RenderCodeEditor<TContext = unknown>
   }
 
   protected override onEditorKeyDown(event: KeyboardEvent, _session: TextEditSessionApi): boolean {
+    if (this._inlineSuggestions && event.key === 'Escape'
+      && (this._quickSuggestionsTimer || this._completionSession.state === 'loading')) {
+      event.preventDefault()
+      this.closeCompletion()
+      return true
+    }
     if ((event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey && event.key === ' ') {
       event.preventDefault()
       void this.triggerSignatureHelp()
@@ -1440,6 +1557,10 @@ export class RenderCodeEditor<TContext = unknown>
         return this.acceptSelectedCompletion()
       }
       if (event.key === 'Tab') {
+        if (this._inlineSuggestions && (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey)) {
+          this.closeCompletion()
+          return false
+        }
         if (!this._completionSession.currentItem) {
           this.closeCompletion()
           return false
@@ -1474,6 +1595,7 @@ export class RenderCodeEditor<TContext = unknown>
   }
 
   protected override onEditorCompositionStart(): void {
+    if (this._inlineSuggestions) this.closeCompletion()
     this.closeHover()
     this.closeSignatureHelp()
   }
@@ -1865,8 +1987,8 @@ export class RenderCodeEditor<TContext = unknown>
           fallbackPosition: { ...hoverAnchor.fallbackPosition },
         },
       },
-      placement: 'right-start',
-      fallbackPlacements: ['left-start', 'bottom-start', 'top-start'],
+      placement: this._hoverPlacement === 'below' ? 'bottom-start' : 'right-start',
+      fallbackPlacements: this._hoverPlacement === 'below' ? ['top-start'] : ['left-start', 'bottom-start', 'top-start'],
       overflowPreference: 'largest-space',
       minWidth: 220,
       maxWidth: 560,
@@ -1904,7 +2026,9 @@ export class RenderCodeEditor<TContext = unknown>
         target: this,
         data: { kind: 'signature', position: { ...anchorPosition } },
       },
-      boundary: { target: this, data: { kind: 'viewport' } },
+      boundary: this._signatureHelpBoundary === 'editor'
+        ? { target: this, data: { kind: 'viewport' } }
+        : undefined,
       placement: 'top-start',
       overflowPreference: 'largest-space',
       maxWidth: 460,

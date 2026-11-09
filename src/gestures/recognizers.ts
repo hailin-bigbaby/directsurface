@@ -1,3 +1,4 @@
+import { dispatchPointerListeners, pointerWindowPath, pointerActivationEntry } from './pointer_event_listeners'
 import { PopupManager } from '../core/popup_manager'
 // EventDispatcher: 基于 HitTestResult 路径的事件分发
 // 事件流：DOM event → normalize → 命中测试 → overlay 优先 → path dispatch
@@ -440,7 +441,7 @@ export class EventDispatcher {
     let firstError: unknown
     try {
       this.sessions.clearHover(pointer, pos, (target, event) => {
-        target.onPointerLeave?.(event)
+        this.pointerDispatcher.dispatchHover(target, event, 'pointerleave')
       })
     } catch (error) {
       firstError = error
@@ -591,10 +592,10 @@ export class EventDispatcher {
   ): void {
     this.sessions.syncHoverEntries(
       pointer,
-      result.interactiveEntries(),
+      pointerWindowPath(result).interactiveEntries(),
       pos,
-      (target, event) => target.onPointerLeave?.(event),
-      (target, event) => target.onPointerEnter?.(event),
+      (target, event) => this.pointerDispatcher.dispatchHover(target, event, 'pointerleave'),
+      (target, event) => this.pointerDispatcher.dispatchHover(target, event, 'pointerenter'),
       this._rootFromResult(result),
     )
   }
@@ -771,6 +772,10 @@ export class EventDispatcher {
       this.pointerDispatcher.clearPointerReferences(pe)
     }
     try {
+      if (!FocusManager.instance.prepareTransition(null, 'pointer', pe.position)) {
+        abortDownSequence()
+        return
+      }
       const route = this.routeArbiter.routePointerDown(pe, selected => {
         if (isDownFrameCurrent()) {
           this.sessions.setRoute(pe, selected.scope, selected.target)
@@ -1347,44 +1352,28 @@ export class EventDispatcher {
       this._armNativeDoubleClickSuppression(event.position, timestamp)
     }
 
-    if (typeof downEntry.target.onPointerActivate === 'function') {
-      this.pointerDispatcher.dispatchActivationToPath(downPath, downEntry, {
-        type: 'activate',
-        pointerId: event.pointerId,
-        pointerType,
-        button,
-        clickCount: result.clickCount,
-        position: { ...event.position },
-        downPosition: { ...session.activationDownPosition },
-        timeStamp: timestamp,
-        ctrlKey: event.ctrlKey,
-        shiftKey: event.shiftKey,
-        metaKey: event.metaKey,
-        altKey: event.altKey,
-      })
-      return
-    }
+    // A default up handler may have opened an overlay over this logical target.
+    if (result.clickCount === 2 && typeof downEntry.target.onPointerActivate !== 'function' &&
+        this.routeArbiter.routePoint(event.position, { notify: false })) return
 
-    if (
-      result.clickCount === 2 &&
-      typeof downEntry.target.onDoubleClick === 'function' &&
-      !this.routeArbiter.routePoint(event.position, { notify: false })
-    ) {
-      downEntry.target.onDoubleClick(event.position)
-    }
+    this.pointerDispatcher.dispatchActivationToPath(downPath, downEntry, {
+      type: 'activate',
+      pointerId: event.pointerId,
+      pointerType,
+      button,
+      clickCount: result.clickCount,
+      position: { ...event.position },
+      downPosition: { ...session.activationDownPosition },
+      timeStamp: timestamp,
+      ctrlKey: event.ctrlKey,
+      shiftKey: event.shiftKey,
+      metaKey: event.metaKey,
+      altKey: event.altKey,
+    })
   }
 
   private _activationEntry(path: HitTestResult): HitTestEntry | undefined {
-    for (let index = path.path.length - 1; index >= 0; index--) {
-      const entry = path.path[index]!
-      if (
-        typeof entry.target.onPointerActivate === 'function' ||
-        typeof entry.target.onDoubleClick === 'function'
-      ) {
-        return entry
-      }
-    }
-    return undefined
+    return pointerActivationEntry(path)
   }
 
   private _armNativeDoubleClickSuppression(position: Offset, timestamp: number): void {
@@ -1552,8 +1541,13 @@ export class EventDispatcher {
       this._setPopupAnchorRoot(result)
       if (!isWheelFrameCurrent()) return
 
-      for (let i = result.path.length - 1; i >= 0; i--) {
-        const target = result.path[i]!.target
+      const route = pointerWindowPath(result)
+      const observed = dispatchPointerListeners(route, 'wheel', we, {
+        isCurrent: () => isWheelFrameCurrent() && this.rootGeneration === hitRootGeneration,
+      })
+      if (observed.defaultPrevented || observed.invalidated || !isWheelFrameCurrent()) return
+      for (let i = route.path.length - 1; i >= 0; i--) {
+        const target = route.path[i]!.target
         if (typeof (target as any).onWheel === 'function') {
           const consumed = (target as any).onWheel(we)
           if (!isWheelFrameCurrent()) return
@@ -1600,13 +1594,20 @@ export class EventDispatcher {
       const pos = this._getCanvasPos(e)
       if (this._consumeNativeDoubleClick(pos, e.timeStamp)) return
       if (this.routeArbiter.routePoint(pos, { notify: false })) return
-      const result = this._hitTest(pos)
+      const result = pointerWindowPath(this._hitTest(pos))
       this._setPopupAnchorRoot(result)
       this._setFocusActiveRoot(result)
       // A typed logical target owns double-click semantics through the
       // ActivationSequencer. Never let a raw canvas dblclick fall through to
       // one of its legacy ancestors.
       if (result.path.some(entry => typeof entry.target.onPointerActivate === 'function')) return
+      const generation = this.rootGeneration
+      const observed = dispatchPointerListeners(result, 'dblclick', {
+        position: pos, pointerType: 'mouse', button: e.button, buttons: e.buttons,
+        clickCount: e.detail, timeStamp: e.timeStamp,
+        ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey,
+      }, { isCurrent: () => !this.disposed && this.rootGeneration === generation })
+      if (observed.defaultPrevented || observed.invalidated) return
       // 从最深目标开始，找第一个实现 onDoubleClick 的
       for (let i = result.path.length - 1; i >= 0; i--) {
         const target = result.path[i]!.target
@@ -1636,14 +1637,21 @@ export class EventDispatcher {
     if (this.disposed) return
     event.preventDefault()
     const pos = this._getCanvasPos(event)
-    this._dispatchContextMenu(pos)
+    this._dispatchContextMenu(pos, event)
   }
 
-  private _dispatchContextMenu(pos: Offset): void {
+  private _dispatchContextMenu(pos: Offset, event: MouseEvent): void {
     if (this.routeArbiter.routePoint(pos)) return
-    const result = this._hitTest(pos)
+    const result = pointerWindowPath(this._hitTest(pos))
     this._setPopupAnchorRoot(result)
     this._setFocusActiveRoot(result)
+    const generation = this.rootGeneration
+    const observed = dispatchPointerListeners(result, 'contextmenu', {
+      position: pos, pointerType: 'mouse', button: event.button, buttons: event.buttons,
+      ctrlKey: event.ctrlKey, shiftKey: event.shiftKey, altKey: event.altKey, metaKey: event.metaKey,
+      timeStamp: event.timeStamp,
+    }, { isCurrent: () => !this.disposed && this.rootGeneration === generation })
+    if (observed.defaultPrevented || observed.invalidated) return
     // 从最深目标开始，找第一个实现并处理 onContextMenu 的目标
     for (let i = result.path.length - 1; i >= 0; i--) {
       const target = result.path[i]!.target

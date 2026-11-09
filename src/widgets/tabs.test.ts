@@ -908,3 +908,23 @@ describe('RenderTabs runtime invalidation', () => {
     tabs.dispose()
   })
 })
+
+
+describe('activation requests', () => {
+  it.each([false, 'defer'] as const)('retains the active tab until the owner accepts %s', decision => {
+    const onTabChange = vi.fn()
+    const request = vi.fn((): boolean | 'defer' => decision)
+    const tabs = new RenderTabs({ tabs: [{ key: 'a', label: 'A' }, { key: 'b', label: 'B' }], activeKey: 'a', onTabChange, onTabActivateRequest: request })
+    tabs.layout(constraints)
+    tabs.onKeyDown(new KeyboardEvent('keydown', { key: 'ArrowRight' }))
+    expect(request).toHaveBeenCalledWith('b')
+    expect(tabs.activeKey).toBe('a')
+    expect(onTabChange).not.toHaveBeenCalled()
+    request.mockReturnValue(true)
+    tabs.onKeyDown(new KeyboardEvent('keydown', { key: 'ArrowRight' }))
+    expect(tabs.activeKey).toBe('b')
+    expect(onTabChange).toHaveBeenCalledTimes(1)
+    expect(onTabChange).toHaveBeenCalledWith('b')
+    tabs.dispose()
+  })
+})

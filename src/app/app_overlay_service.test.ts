@@ -978,3 +978,17 @@ describe('AppOverlayService performance overlay', () => {
     service.dispose()
   })
 })
+
+it('passes semantic intent through confirm and defaults Prompt to info', async () => {
+  PopupManager.instance.setContextProvider(() => ({ theme: ImGuiDarkTheme, viewport }))
+  const service = new AppOverlayService()
+  const result = service.confirm({ title: 'Submit', content: 'Proceed?', intent: 'info' })
+  expect(service.activeModal?.intent).toBe('info')
+  service.closeModal('ok')
+  expect(await result).toBe(true)
+  const value = service.prompt({ content: 'Name' })
+  expect(service.activeModal?.intent).toBe('info')
+  service.closeModal('cancel')
+  expect(await value).toBeNull()
+  service.dispose()
+})

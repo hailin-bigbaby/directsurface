@@ -4,21 +4,16 @@ import {
   APP_CONTEXT_PROVIDER,
   AppContextRegistry,
 } from '../core/app_context'
-import { DrawList } from '../rendering/draw_list'
 import { AnimationController } from '../animation/animation_controller'
 import { Curves } from '../animation/curves'
 import { isPrimaryPointerButton, type PointerEvent, type WheelPointerEvent } from '../gestures/hit_test'
 import { PopupManager, type Popup, type PopupContext } from '../core/popup_manager'
 import type { PaintContext } from '../rendering/paint_context'
 import type { BoxConstraints, Offset } from '../core/render_object'
-import { TextMeasurer } from '../core/text_measurer'
-import { ellipsizeText } from '../core/text_overflow'
-import {
-  deriveModalStyle,
-  resolveBgColor,
-  resolveTextColor,
-} from '../theme/component_styles'
+import { DialogScroller, resolveDialogLayout, paintDialog, dialogButtonAt } from './dialog_layout'
 import { DefaultThemeMotion, resolveThemeMotion } from '../theme/theme'
+
+export type DialogIntent = 'info' | 'warning' | 'success' | 'error'
 
 export interface ModalButton {
   label: string
@@ -32,6 +27,7 @@ export class RenderModal extends RenderBox implements Popup {
   private static readonly _emptyAppContext = new AppContextRegistry()
 
   title: string
+  intent?: DialogIntent | null
   content: string
   buttons: ModalButton[]
   onClose?: (buttonKey: string | null) => void
@@ -42,6 +38,8 @@ export class RenderModal extends RenderBox implements Popup {
   overlayLayer = 'overlay' as const
 
   private _fadeAnim: AnimationController
+  private readonly _scroller = new DialogScroller()
+  private _focusIndex = -1
   private _hoveredButton = ''
   private _pressedButton = ''
   private _appContext?: AppContextRegistry
@@ -49,6 +47,7 @@ export class RenderModal extends RenderBox implements Popup {
 
   constructor(opts: {
     title: string
+    intent?: DialogIntent | null
     content: string
     buttons?: ModalButton[]
     visible?: boolean
@@ -60,6 +59,7 @@ export class RenderModal extends RenderBox implements Popup {
   }) {
     super()
     this.title = opts.title
+    this.intent = opts.intent === undefined ? 'info' : opts.intent
     this.content = opts.content
     this.buttons = opts.buttons ?? [
       { label: '取消', key: 'cancel' },
@@ -67,7 +67,7 @@ export class RenderModal extends RenderBox implements Popup {
     ]
     this.visible = opts.visible ?? false
     this.modalWidth = opts.modalWidth ?? 360
-    this.modalHeight = opts.modalHeight ?? 180
+    this.modalHeight = opts.modalHeight ?? 0
     this._appContext = opts.appContext
     this._disposeAppContextOnDispose = opts.disposeAppContextOnDispose ?? false
     this.onClose = opts.onClose
@@ -121,28 +121,31 @@ export class RenderModal extends RenderBox implements Popup {
   }
 
   onKeyDown(event: KeyboardEvent): boolean {
-    if (!this.visible) return false
+    if (!this.visible || event.isComposing || event.keyCode === 229) return false
+    const layout = this._resolveLayout(PopupManager.instance.context, { x: PopupManager.instance.context.viewport.x ?? 0, y: PopupManager.instance.context.viewport.y ?? 0 }, 1)
+    if (this._scroller.key(event, layout)) return true
     if (event.key === 'Tab') {
       event.preventDefault()
-      return true
-    }
-    if (event.key === 'Enter') {
-      const primary = this.buttons.find(b => b.primary)
-      if (primary) {
-        event.preventDefault()
-        this.hide(primary.key)
-        return true
+      const count = this.buttons.length
+      if (count) {
+        this._focusIndex = this._focusIndex < 0
+          ? (event.shiftKey ? count - 1 : 0)
+          : (this._focusIndex + (event.shiftKey ? -1 : 1) + count) % count
+        this._scroller.ensure(layout.buttons[this._focusIndex]!, layout)
       }
-    }
-    if (event.key === 'Escape') {
-      event.preventDefault()
-      this.hide(null)
+      PopupManager.instance.requestPaint()
       return true
     }
+    if (event.key === 'Enter' || (event.key === ' ' && this._focusIndex >= 0)) {
+      const button = this.buttons[this._focusIndex] ?? this.buttons.find(b => b.primary)
+      if (button) { event.preventDefault(); this.hide(button.key); return true }
+    }
+    if (event.key === 'Escape') { event.preventDefault(); this.hide(null); return true }
     return false
   }
 
-  onWheel(_event: WheelPointerEvent, _popupContext?: PopupContext): boolean {
+  onWheel(event: WheelPointerEvent, context = PopupManager.instance.context): boolean {
+    this._scroller.wheel(event, this._resolveLayout(context, { x: context.viewport.x ?? 0, y: context.viewport.y ?? 0 }, 1))
     return true
   }
 
@@ -151,6 +154,9 @@ export class RenderModal extends RenderBox implements Popup {
   show(): void {
     if (this.visible) return
     this.visible = true
+    this._scroller.reset()
+    this._focusIndex = -1
+    this._hoveredButton = this._pressedButton = ''
     this._fadeAnim.duration = resolveThemeMotion(PopupManager.instance.context.theme).normalDuration
     this._fadeAnim.resetValue(0)
     this._fadeAnim.forward()
@@ -171,6 +177,7 @@ export class RenderModal extends RenderBox implements Popup {
   onPointerDown(event: PointerEvent, popupContext: PopupContext = PopupManager.instance.context): void {
     if (!isPrimaryPointerButton(event)) return
     if (!this.visible) return
+    if (this._scroller.pointer('down', event, this._resolveLayout(popupContext, { x: popupContext.viewport.x ?? 0, y: popupContext.viewport.y ?? 0 }, 1), popupContext)) return
     const btn = this._buttonAt(event.position, popupContext)
     if (btn !== this._pressedButton) {
       this._pressedButton = btn
@@ -180,6 +187,7 @@ export class RenderModal extends RenderBox implements Popup {
 
   onPointerMove(event: PointerEvent, popupContext: PopupContext = PopupManager.instance.context): void {
     if (!this.visible) return
+    if (this._scroller.pointer('move', event, this._resolveLayout(popupContext, { x: popupContext.viewport.x ?? 0, y: popupContext.viewport.y ?? 0 }, 1), popupContext)) return
     const btn = this._buttonAt(event.position, popupContext)
     if (btn !== this._hoveredButton) {
       this._hoveredButton = btn
@@ -190,6 +198,7 @@ export class RenderModal extends RenderBox implements Popup {
   onPointerUp(event: PointerEvent, popupContext: PopupContext = PopupManager.instance.context): void {
     if (!isPrimaryPointerButton(event)) return
     if (!this.visible) return
+    if (this._scroller.pointer('up', event, this._resolveLayout(popupContext, { x: popupContext.viewport.x ?? 0, y: popupContext.viewport.y ?? 0 }, 1), popupContext)) return
     const btn = this._buttonAt(event.position, popupContext)
     const shouldClose = !!btn && btn === this._pressedButton
     const hadPressed = !!this._pressedButton
@@ -214,233 +223,22 @@ export class RenderModal extends RenderBox implements Popup {
 
   performPaint(context: PaintContext, offset: Offset): void {
     if (!this.visible && this._fadeAnim.value === 0) return
-    const alpha = this._fadeAnim.value
-    const dl = new DrawList(context)
-    const { x, y } = offset
-    const { width: w, height: h } = this.size
-    const s = deriveModalStyle(context.theme)
-
-    // 遮罩层
-    dl.fillRect(x, y, w, h, { ...s.overlayBg, a: s.overlayBg.a * alpha }, 0)
-
-    const layout = this._resolveLayout(PopupManager.instance.context, { x, y }, alpha)
-    const mw = layout.panelW
-    const mh = layout.panelH
-    const mx = layout.panelX
-    const my = layout.panelY
-
-    // 弹窗阴影
-    dl.outerShadow(
-      mx,
-      my,
-      mw,
-      mh,
-      s.shadowBlur,
-      { ...s.shadowColor, a: s.shadowColor.a * alpha },
-      s.borderRadius,
-      s.shadowOffsetX,
-      s.shadowOffsetY,
-    )
-
-    // 弹窗背景
-    const bgColor = { ...s.panelBg, a: s.panelBg.a * alpha }
-    dl.fillRect(mx, my, mw, mh, bgColor, s.borderRadius)
-    dl.strokeRect(mx, my, mw, mh, { ...s.panelBorder, a: s.panelBorder.a * alpha }, 1, s.borderRadius)
-
-    // 标题栏
-    const titleH = s.titleHeight
-    const ctx = context.ctx
-    ctx.save()
-    ctx.globalAlpha = alpha
-    ctx.beginPath()
-    ctx.roundRect(mx, my, mw, titleH, [s.borderRadius, s.borderRadius, 0, 0])
-    ctx.fillStyle = `rgba(${s.titleBg.r},${s.titleBg.g},${s.titleBg.b},${s.titleBg.a})`
-    ctx.fill()
-    ctx.restore()
-
-    dl.fillText(this.title, mx + mw / 2, my + titleH / 2,
-      { ...s.titleText, a: s.titleText.a * alpha }, s.fontSize, s.fontFamily, 'center', 'middle')
-    dl.line(mx, my + titleH, mx + mw, my + titleH, { ...s.separator, a: alpha }, 1)
-
-    // 内容文字
-    let lineY = layout.contentY + layout.lineHeight / 2
-    for (const line of layout.contentLines) {
-      if (line) {
-        dl.fillText(line, mx + s.padding, lineY,
-          { ...s.text, a: alpha }, s.fontSize, s.fontFamily, 'left', 'middle')
-      }
-      lineY += layout.lineHeight
-    }
-
-    // 按钮行
-    const btnH = s.buttonHeight
-    const btnY = layout.buttonY
-    const btnSpacing = s.buttonSpacing
-    const totalBtnW = this.buttons.reduce((sum, btn) => {
-      return sum + Math.max(s.buttonMinWidth, TextMeasurer.measureWidth(btn.label, s.fontSize, s.fontFamily) + s.padding * 2)
-    }, 0) + btnSpacing * (this.buttons.length - 1)
-
-    let btnX = mx + (mw - totalBtnW) / 2
-    for (const btn of this.buttons) {
-      const bw = Math.max(s.buttonMinWidth, TextMeasurer.measureWidth(btn.label, s.fontSize, s.fontFamily) + s.padding * 2)
-      const isHovered = btn.key === this._hoveredButton
-      const isPressed = btn.key === this._pressedButton
-      const state = isPressed ? 'pressed' : isHovered ? 'hovered' : 'normal'
-      const bgTokens = btn.danger ? s.dangerButtonBg : btn.primary ? s.primaryButtonBg : s.secondaryButtonBg
-      const textTokens = btn.danger ? s.dangerButtonText : btn.primary ? s.primaryButtonText : s.secondaryButtonText
-
-      const bg = resolveBgColor(bgTokens, state)
-      const bgWithAlpha = { ...bg, a: bg.a * alpha }
-      dl.fillRect(btnX, btnY, bw, btnH, bgWithAlpha, s.buttonRadius)
-      if (!btn.primary && !btn.danger) {
-        const border = resolveBgColor(s.secondaryButtonBorder, state)
-        dl.strokeRect(btnX, btnY, bw, btnH, { ...border, a: border.a * alpha }, 1, s.buttonRadius)
-      }
-      dl.fillText(btn.label, btnX + bw / 2, btnY + btnH / 2,
-        { ...resolveTextColor(textTokens, state), a: alpha }, s.fontSize, s.fontFamily, 'center', 'middle')
-
-      btnX += bw + btnSpacing
-    }
+    const popup = PopupManager.instance.context
+    const layout = this._resolveLayout(popup, offset, this._fadeAnim.value)
+    paintDialog(context, popup, layout, this.title, this._fadeAnim.value, this._scroller, this._hoveredButton, this._pressedButton, this.buttons[this._focusIndex]?.key ?? '', this.intent)
   }
 
-  private _buttonAt(p: Offset, popupContext: PopupContext): string {
-    const s = deriveModalStyle(popupContext.theme)
-    const layout = this._resolveLayout(popupContext, { x: popupContext.viewport.x ?? 0, y: popupContext.viewport.y ?? 0 }, 1)
-    const btnH = s.buttonHeight
-    const btnY = layout.buttonY
-    const btnSpacing = s.buttonSpacing
-    const totalBtnW = this.buttons.reduce((sum, btn) => {
-      return sum + Math.max(s.buttonMinWidth, TextMeasurer.measureWidth(btn.label, s.fontSize, s.fontFamily) + s.padding * 2)
-    }, 0) + btnSpacing * (this.buttons.length - 1)
-
-    let btnX = layout.panelX + (layout.panelW - totalBtnW) / 2
-    for (const btn of this.buttons) {
-      const bw = Math.max(s.buttonMinWidth, TextMeasurer.measureWidth(btn.label, s.fontSize, s.fontFamily) + s.padding * 2)
-      if (p.x >= btnX && p.x <= btnX + bw && p.y >= btnY && p.y <= btnY + btnH) return btn.key
-      btnX += bw + btnSpacing
-    }
-    return ''
+  private _buttonAt(point: Offset, context: PopupContext): string {
+    return dialogButtonAt(point, this._resolveLayout(context, { x: context.viewport.x ?? 0, y: context.viewport.y ?? 0 }, 1))
   }
 
-  private _resolveLayout(popupContext: PopupContext, offset: Offset, alpha: number): {
-    panelX: number
-    panelY: number
-    panelW: number
-    panelH: number
-    contentY: number
-    buttonY: number
-    lineHeight: number
-    contentLines: string[]
-  } {
-    const s = deriveModalStyle(popupContext.theme)
-    const viewportWidth = this.size.width || popupContext.viewport.width
-    const viewportHeight = this.size.height || popupContext.viewport.height
-    const minPanelWidth = 240
-    const maxPanelWidth = Math.max(minPanelWidth, viewportWidth - s.padding * 2)
-    const panelW = Math.min(this.modalWidth, maxPanelWidth)
-    const contentWidth = Math.max(0, panelW - s.padding * 2)
-    const lineHeight = Math.ceil(TextMeasurer.lineHeight(s.fontSize))
-    const wrappedLines = this._wrapContentLines(contentWidth, s.fontSize, s.fontFamily)
-    const contentHeight = Math.max(lineHeight, wrappedLines.length * lineHeight)
-    const minPanelHeight = s.titleHeight + s.padding + lineHeight + s.padding + s.buttonHeight + s.padding
-    const desiredPanelHeight = s.titleHeight + s.padding + contentHeight + s.padding + s.buttonHeight + s.padding
-    const maxPanelHeight = Math.max(minPanelHeight, viewportHeight - s.padding * 2)
-    const panelH = Math.min(Math.max(this.modalHeight, desiredPanelHeight), maxPanelHeight)
-    const panelX = offset.x + (viewportWidth - panelW) / 2
-    const panelY = offset.y + (viewportHeight - panelH) / 2 - 20 * (1 - alpha)
-    const contentY = panelY + s.titleHeight + s.padding
-    const buttonY = panelY + panelH - s.buttonHeight - s.padding
-    const availableContentHeight = Math.max(0, buttonY - contentY - s.padding)
-    const maxVisibleLines = Math.max(1, Math.floor(availableContentHeight / lineHeight))
-    const contentLines = this._fitContentLines(wrappedLines, maxVisibleLines, contentWidth, s.fontSize, s.fontFamily)
-    return { panelX, panelY, panelW, panelH, contentY, buttonY, lineHeight, contentLines }
+  private _resolveLayout(context: PopupContext, offset: Offset, _alpha: number) {
+    return resolveDialogLayout(context, this.modalWidth, this.modalHeight, this.content, this.buttons, 0, this._scroller.offset, offset)
   }
 
-  private _wrapContentLines(maxWidth: number, fontSize: number, fontFamily: string): string[] {
-    if (!this.content) return ['']
-    const lines: string[] = []
-    const paragraphs = this.content.replace(/\r\n?/g, '\n').split('\n')
-    for (const paragraph of paragraphs) {
-      if (!paragraph) {
-        lines.push('')
-        continue
-      }
-      lines.push(...this._wrapParagraph(paragraph, maxWidth, fontSize, fontFamily))
-    }
-    return lines.length > 0 ? lines : ['']
-  }
-
-  private _wrapParagraph(text: string, maxWidth: number, fontSize: number, fontFamily: string): string[] {
-    if (maxWidth <= 0) return [text]
-    const measure = (value: string) => TextMeasurer.measureWidth(value, fontSize, fontFamily)
-    const tokens = text.match(/\s+|[A-Za-z0-9_./:@#%+~-]+|./gu) ?? []
-    const lines: string[] = []
-    let line = ''
-    let pendingSpace = ''
-
-    for (const token of tokens) {
-      if (/^\s+$/.test(token)) {
-        if (line) pendingSpace = ' '
-        continue
-      }
-      const nextToken = line && pendingSpace ? `${pendingSpace}${token}` : token
-      pendingSpace = ''
-      if (!line) {
-        if (measure(token) <= maxWidth) {
-          line = token
-        } else {
-          const broken = this._breakLongToken(token, maxWidth, fontSize, fontFamily)
-          lines.push(...broken.slice(0, -1))
-          line = broken[broken.length - 1] ?? ''
-        }
-        continue
-      }
-      const candidate = `${line}${nextToken}`
-      if (measure(candidate) <= maxWidth) {
-        line = candidate
-        continue
-      }
-      lines.push(line.trimEnd())
-      line = ''
-      if (measure(token) <= maxWidth) {
-        line = token
-      } else {
-        const broken = this._breakLongToken(token, maxWidth, fontSize, fontFamily)
-        lines.push(...broken.slice(0, -1))
-        line = broken[broken.length - 1] ?? ''
-      }
-    }
-
-    if (line) lines.push(line.trimEnd())
-    return lines.length > 0 ? lines : ['']
-  }
-
-  private _breakLongToken(token: string, maxWidth: number, fontSize: number, fontFamily: string): string[] {
-    const measure = (value: string) => TextMeasurer.measureWidth(value, fontSize, fontFamily)
-    const lines: string[] = []
-    let line = ''
-    for (const char of Array.from(token)) {
-      const candidate = `${line}${char}`
-      if (line && measure(candidate) > maxWidth) {
-        lines.push(line)
-        line = char
-      } else {
-        line = candidate
-      }
-    }
-    if (line) lines.push(line)
-    return lines.length > 0 ? lines : [token]
-  }
-
-  private _fitContentLines(lines: string[], maxLines: number, maxWidth: number, fontSize: number, fontFamily: string): string[] {
-    if (lines.length <= maxLines) return lines
-    const visible = lines.slice(0, maxLines)
-    const lastIndex = visible.length - 1
-    if (lastIndex >= 0) {
-      const measure = (value: string) => TextMeasurer.measureWidth(value, fontSize, fontFamily)
-      visible[lastIndex] = ellipsizeText(`${visible[lastIndex]}...`, maxWidth, measure)
-    }
-    return visible
+  onPointerCancel(_event: PointerEvent): void {
+    this._scroller.cancel(); this._pressedButton = this._hoveredButton = ''
+    PopupManager.instance.requestPaint()
   }
 
   hitTest(point: Offset, popupContext: PopupContext = PopupManager.instance.context): boolean {

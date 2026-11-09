@@ -187,7 +187,15 @@ export class MultiSelectDropdownPopup extends PopupShell {
   private _onClose?: () => void
   private _searchInput = new PopupTextInput(() => PopupManager.instance.requestPaint())
 
+  constructor(private readonly hostSurface?: { context: () => PopupContext; repaint: () => void }) { super() }
+  protected override get popupContext(): PopupContext { return this.hostSurface?.context() ?? super.popupContext }
+  protected override requestPopupPaint(fallback?: () => void): void { if (this.hostSurface) this.hostSurface.repaint(); else super.requestPopupPaint(fallback) }
+  private _ownerInput = false
+  private _preserveSelectionOrder = false
+  private _onDraftChange?: (values: string[], change: { value: string; selected: boolean }) => void
+
   debugState(): {
+    layout: DropdownPopupLayout; itemHeight: number; contentY: number; footerY: number
     filteredOptions: DropdownOption[]
     rows: MultiSelectPopupRow[]
     keyboardIndex: number
@@ -198,6 +206,8 @@ export class MultiSelectDropdownPopup extends PopupShell {
     hoveredFooterAction: MultiSelectFooterAction | null
   } {
     return {
+      layout: this._popupLayout(this.popupContext), itemHeight: this._listMetrics(this.popupContext).itemHeight, contentY: this._listMetrics(this.popupContext).contentY,
+      footerY: this._listMetrics(this.popupContext).contentY + this._listMetrics(this.popupContext).listHeight + derivePopupStyle(this.popupContext.theme).padding,
       filteredOptions: [...this._filteredOptions],
       rows: this._popupRows(),
       keyboardIndex: this._keyboardIndex,
@@ -218,6 +228,9 @@ export class MultiSelectDropdownPopup extends PopupShell {
     minPopupWidth?: number
     maxPopupWidth?: number
     commitOnChange?: boolean
+    ownerInput?: boolean
+    preserveSelectionOrder?: boolean
+    onDraftChange?: (values: string[], change: { value: string; selected: boolean }) => void
     showFooter?: boolean
     onChange: (values: string[], options: DropdownOption[]) => void
     onConfirm?: (values: string[], options: DropdownOption[]) => void
@@ -229,12 +242,14 @@ export class MultiSelectDropdownPopup extends PopupShell {
     this._searchInput.endSession()
     this._options = opts.options
     this._filteredOptions = [...opts.options]
-    this._selectedValues = new Set(normalizeSelectedValues(opts.options, opts.selectedValues))
+    this._preserveSelectionOrder = opts.preserveSelectionOrder ?? false
+    this._selectedValues = new Set(this._preserveSelectionOrder ? opts.selectedValues.filter(value => opts.options.some(o => o.value === value)) : normalizeSelectedValues(opts.options, opts.selectedValues))
     this._anchor = opts.anchor
     this._searchable = opts.searchable
     this._maxVisibleItems = opts.maxVisibleItems
     this._minPopupWidth = opts.minPopupWidth
     this._maxPopupWidth = opts.maxPopupWidth
+    this._ownerInput = opts.ownerInput ?? false; this._onDraftChange = opts.onDraftChange
     this._commitOnChange = opts.commitOnChange ?? true
     this._showFooter = opts.showFooter ?? false
     this._onChange = opts.onChange
@@ -249,7 +264,7 @@ export class MultiSelectDropdownPopup extends PopupShell {
     this._keyboardIndex = this._firstEnabledIndex()
     this._scrollOffset = 0
     this._scrollToKeyboard()
-    this.openPopup({ owner: resolvePopupAnchorTarget(opts.anchor) })
+    this.openPopup({ owner: resolvePopupAnchorTarget(opts.anchor), ...(this._ownerInput ? { interactionMode: 'nonmodal' as const } : {}) })
     if (previousFocus) FocusManager.instance.setFocus(previousFocus)
 
     if (this._searchable) {
@@ -279,12 +294,12 @@ export class MultiSelectDropdownPopup extends PopupShell {
   }
 
   get selectedValues(): string[] {
-    return resolveSelectedOptions(this._options, [...this._selectedValues]).map(option => option.value)
+    return this._preserveSelectionOrder ? [...this._selectedValues].filter(v => this._options.some(o => o.value === v)) : resolveSelectedOptions(this._options, [...this._selectedValues]).map(option => option.value)
   }
 
   updateOptions(options: DropdownOption[], selectedValues: string[]): void {
     this._options = options
-    this._selectedValues = new Set(normalizeSelectedValues(options, selectedValues))
+    this._selectedValues = new Set(this._preserveSelectionOrder ? selectedValues.filter(value => options.some(o => o.value === value)) : normalizeSelectedValues(options, selectedValues))
     this._filterOptions()
     this._hoveredValue = ''
     this._hoveredRowKind = 'none'
@@ -296,13 +311,14 @@ export class MultiSelectDropdownPopup extends PopupShell {
   }
 
   updateSelectedValues(selectedValues: string[]): void {
-    this._selectedValues = new Set(normalizeSelectedValues(this._options, selectedValues))
+    this._selectedValues = new Set(this._preserveSelectionOrder ? selectedValues.filter(value => this._options.some(o => o.value === value)) : normalizeSelectedValues(this._options, selectedValues))
     this.requestPopupPaint()
   }
 
   private _handleKeyDown(event: KeyboardEvent): boolean {
     if (!this.visible) return false
     if (isImeCompositionKey(event) || this._searchInput.composing) return false
+    if (this._ownerInput && (!['ArrowDown', 'ArrowUp', 'Enter', ' ', 'Escape'].includes(event.key) || (event.key === 'Enter' || event.key === ' ') && !this._keyboardActiveVisible)) return false
     if (event.key === 'Tab') {
       this.close()
       return false
@@ -418,7 +434,7 @@ export class MultiSelectDropdownPopup extends PopupShell {
     if (this._keyboardIndex < 0) return
     const rowIndex = this._rowIndexForOptionIndex(this._keyboardIndex)
     if (rowIndex < 0) return
-    const visibleRows = Math.max(1, this._popupLayout(PopupManager.instance.context).visibleRows)
+    const visibleRows = Math.max(1, this._popupLayout(this.popupContext).visibleRows)
     if (rowIndex < this._scrollOffset) {
       this._scrollOffset = rowIndex
     } else if (rowIndex >= this._scrollOffset + visibleRows) {
@@ -428,7 +444,7 @@ export class MultiSelectDropdownPopup extends PopupShell {
   }
 
   private _maxScrollOffset(): number {
-    const visibleRows = this._popupLayout(PopupManager.instance.context).visibleRows
+    const visibleRows = this._popupLayout(this.popupContext).visibleRows
     return Math.max(0, this._popupRows().length - Math.max(1, visibleRows))
   }
 
@@ -442,7 +458,7 @@ export class MultiSelectDropdownPopup extends PopupShell {
     const pointer = this._scrollbarPointerKey
     this._scrollbarDragging = false
     this._scrollbarPointerKey = undefined
-    const metrics = point ? this._scrollbarMetrics(PopupManager.instance.context) : null
+    const metrics = point ? this._scrollbarMetrics(this.popupContext) : null
     const changed = point && metrics
       ? this._scrollbarController.endPointer(point, metrics.geometry, pointer).stateChanged
       : this._scrollbarController.cancelPointer(pointer)
@@ -500,12 +516,12 @@ export class MultiSelectDropdownPopup extends PopupShell {
   }
 
   private _emitChange(): void {
-    const selectedOptions = resolveSelectedOptions(this._options, this.selectedValues)
+    const selectedOptions = this.selectedValues.map(v => this._options.find(o => o.value === v)!).filter(Boolean)
     this._onChange?.(selectedOptions.map(option => option.value), selectedOptions)
   }
 
   private _confirmSelection(): void {
-    const selectedOptions = resolveSelectedOptions(this._options, this.selectedValues)
+    const selectedOptions = this.selectedValues.map(v => this._options.find(o => o.value === v)!).filter(Boolean)
     const values = selectedOptions.map(option => option.value)
     runCleanupSteps([
       () => {
@@ -532,6 +548,7 @@ export class MultiSelectDropdownPopup extends PopupShell {
     } else {
       this._selectedValues.add(option.value)
     }
+    this._onDraftChange?.(this.selectedValues, { value: option.value, selected: this._selectedValues.has(option.value) })
     if (this._commitOnChange) this._emitChange()
     this.requestPopupPaint()
   }
@@ -878,7 +895,7 @@ export class MultiSelectDropdownPopup extends PopupShell {
 
   paint(context: PaintContext): void {
     if (!this.visible) return
-    const popupContext = PopupManager.instance.context
+    const popupContext = this.popupContext
     const dropdown = deriveDropdownStyle(context.theme)
     const checkbox = deriveCheckboxStyle(context.theme)
     const scrollbarStyle = deriveScrollbarStyle(context.theme)
@@ -1062,6 +1079,7 @@ export class MultiSelectDropdownPopup extends PopupShell {
     this._onConfirm = undefined
     this._onClear = undefined
     this._onClose = undefined
+    this._onDraftChange = undefined
   }
 
   protected override onPopupClose(): void {

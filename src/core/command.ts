@@ -19,6 +19,7 @@ export interface CommandExecutionContext {
   source?: RenderObject
   trigger: CommandTrigger
   event?: unknown
+  signal?: AbortSignal
 }
 
 export interface AppCommand<TResult = unknown> {
@@ -53,6 +54,9 @@ export interface CommandExecuteOptions {
   source?: RenderObject
   trigger?: CommandTrigger
   event?: unknown
+  signal?: AbortSignal
+  /** Recheck the originating binding/target after asynchronous guards. */
+  canContinue?: () => boolean
 }
 
 export interface CommandEvaluateOptions {
@@ -198,7 +202,7 @@ export class CommandManager implements Disposable {
   private _permissionService: PermissionService
   private readonly _listeners = new Set<() => void>()
   private readonly _interceptors = new Set<CommandInterceptor>()
-  private readonly _executing = new Set<AppCommand>()
+  private readonly _executing = new Map<AppCommand, symbol>()
   private _version = 0
   private _disposed = false
 
@@ -305,20 +309,40 @@ export class CommandManager implements Disposable {
       source: options.source,
       trigger: options.trigger ?? 'api',
       event: options.event,
+      signal: options.signal,
     })
-    const state = this._evaluateCommand(command, context)
-    if (!state.visible || !state.enabled) {
-      context.appContext.dispose()
-      return undefined
-    }
-    this._executing.add(command)
+    const executionId = Symbol(commandId)
+    const guarded = options.signal !== undefined || options.canContinue !== undefined
+    const sourceIsCurrent = guarded ? this._captureSourceValidity(options.source) : () => true
+    let acquired = false
     const isCurrent = () => !this._disposed && !scope.disposed && scope.get(commandId) === command
+      && (!acquired || this._executing.get(command) === executionId)
+      && (!guarded || (!options.signal?.aborted && sourceIsCurrent() && (options.canContinue?.() ?? true)))
     let failed = false
     try {
+      if (!isCurrent()) return undefined
+      const state = this._evaluateCommand(command, context)
+      if (!state.visible || !state.enabled || !isCurrent() || this._executing.has(command)) return undefined
+      this._executing.set(command, executionId)
+      acquired = true
       this.invalidate()
       if (!isCurrent()) return undefined
-      const shouldContinue = await this._runBeforeExecute(command, context)
+      const shouldContinue = await this._runBeforeExecute(command, context, isCurrent)
       if (!shouldContinue || !isCurrent()) return undefined
+      if (guarded) {
+        const currentContext = this.createExecutionContext({
+          source: options.source,
+          trigger: options.trigger ?? 'api',
+          event: options.event,
+          signal: options.signal,
+        })
+        try {
+          const currentState = this._evaluateCommand(command, currentContext, executionId)
+          if (!currentState.visible || !currentState.enabled || !isCurrent()) return undefined
+        } finally {
+          currentContext.appContext.dispose()
+        }
+      }
       const result = await command.execute(context) as TResult
       await this._runAfterExecute(command, context, result)
       return result
@@ -327,9 +351,9 @@ export class CommandManager implements Disposable {
       await this._runExecuteError(command, context, error)
       throw error
     } finally {
-      this._executing.delete(command)
+      if (this._executing.get(command) === executionId) this._executing.delete(command)
       try {
-        this._safeInvalidate()
+        if (acquired) this._safeInvalidate()
       } catch (error) {
         if (!failed) throw error
       } finally {
@@ -341,6 +365,7 @@ export class CommandManager implements Disposable {
   createExecutionContext(options: Required<Pick<CommandExecuteOptions, 'trigger'>> & {
     source?: RenderObject
     event?: unknown
+    signal?: AbortSignal
   }): CommandExecutionContext {
     return {
       appContext: this.createAppContextSnapshot(options.source),
@@ -348,6 +373,7 @@ export class CommandManager implements Disposable {
       source: options.source,
       trigger: options.trigger,
       event: options.event,
+      ...(options.signal ? { signal: options.signal } : {}),
     }
   }
 
@@ -398,7 +424,7 @@ export class CommandManager implements Disposable {
     this.rootScope.dispose()
   }
 
-  private _evaluateCommand(command: AppCommand, context: CommandExecutionContext): CommandState {
+  private _evaluateCommand(command: AppCommand, context: CommandExecutionContext, executionId?: symbol): CommandState {
     const executing = this._executing.has(command)
     const baseState: CommandState = {
       id: command.id,
@@ -415,7 +441,7 @@ export class CommandManager implements Disposable {
     if (!this._hasPermission(command, context)) {
       return { ...baseState, enabled: false, reason: '权限不足' }
     }
-    if (executing) return { ...baseState, enabled: false, reason: '正在执行' }
+    if (executing && this._executing.get(command) !== executionId) return { ...baseState, enabled: false, reason: '正在执行' }
     if (command.enabled && !command.enabled(context)) {
       return { ...baseState, enabled: false, reason: this._resolveDisabledReason(command, context) }
     }
@@ -436,10 +462,11 @@ export class CommandManager implements Disposable {
     return command.disabledReason?.(context) ?? '当前状态不可用'
   }
 
-  private async _runBeforeExecute(command: AppCommand, context: CommandExecutionContext): Promise<boolean> {
+  private async _runBeforeExecute(command: AppCommand, context: CommandExecutionContext, isCurrent: () => boolean): Promise<boolean> {
     for (const interceptor of [...this._interceptors]) {
+      if (!isCurrent()) return false
       const result = await interceptor.beforeExecute?.(command, context)
-      if (result === false) return false
+      if (result === false || !isCurrent()) return false
     }
     return true
   }
@@ -474,6 +501,26 @@ export class CommandManager implements Disposable {
       seen.add(key)
       target.set(key as never, source.getOwn(key as never))
     }
+  }
+
+  private _captureSourceValidity(source?: RenderObject): () => boolean {
+    if (!source) return () => true
+    const owner = source.owner
+    const ancestry: Array<{ node: RenderObject; parent: RenderObject | undefined }> = []
+    const contexts = new Map<AppContextRegistry, number>()
+    const rememberContext = (registry: AppContextRegistry): void => {
+      for (let current: AppContextRegistry | undefined = registry; current; current = current.parent) {
+        contexts.set(current, current.revision)
+      }
+    }
+    for (let node: RenderObject | undefined = source; node; node = node.parent) {
+      ancestry.push({ node, parent: node.parent })
+      if (isAppContextProvider(node)) rememberContext(node[APP_CONTEXT_PROVIDER]())
+    }
+    if (owner?.appContext) rememberContext(owner.appContext)
+    return () => owner !== undefined && source.owner === owner
+      && ancestry.every(({ node, parent }) => node.parent === parent && node.visible)
+      && [...contexts].every(([registry, revision]) => !registry.disposed && registry.revision === revision)
   }
 
   private _assertActive(): void {

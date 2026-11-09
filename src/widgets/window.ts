@@ -112,6 +112,8 @@ function resolveRenderWindowBoxOptions(opts: RenderWindowOptions): RenderBoxOpti
 }
 
 export class RenderWindow extends RenderBox implements InteractiveRenderObject, Focusable {
+  override get isPointerEventBoundary(): boolean { return true }
+  override get isKeyboardEventBoundary(): boolean { return true }
   static override debugTypeName = 'RenderWindow'
   private static readonly _emptyAppContext = new AppContextRegistry()
 

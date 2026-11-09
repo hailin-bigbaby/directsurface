@@ -330,3 +330,7 @@ Canvas runtime 会在 canvas bounds 内抑制浏览器原生 contextmenu，并�
 - [Toolbar](../command/toolbar.md)
 - [Tabs](../navigation/tabs.md)
 - [DockWorkspace](../navigation/dock-workspace.md)
+
+## 长菜单与选择状态
+
+菜单超出视口时会限制高度并允许滚轮滚动，键盘移动会使当前项目进入可见区域。Home / End 跳到首尾可选项目。项目的 `checked` 可为 `true`、`false` 或 `'mixed'`，用来显示选择或混合状态。

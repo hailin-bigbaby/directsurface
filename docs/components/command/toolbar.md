@@ -481,3 +481,9 @@ function enterReadonlyMode(toolbar: RenderToolbar): void {
 - [ContextMenu](../overlay/context-menu.md)
 - [MenuBar](../navigation/menu-bar.md)
 - [主题与状态](../../themes.md)
+
+## 溢出、焦点和动作请求
+
+工具栏在窄空间中优先按项目收纳，`overflow: 'group'` 的组保持整体收纳；超宽单项不会挤掉所有普通兄弟项。隐藏、卸载或更新项目状态时会关闭失效菜单。
+
+`onActionRequest` 接收动作 id 与来源（`'pointer'` 或 `'keyboard'`），返回 `false` 可拒绝动作。`preserveFocusOnPointerDown` 用于保留当前编辑焦点，默认行为保持不变。

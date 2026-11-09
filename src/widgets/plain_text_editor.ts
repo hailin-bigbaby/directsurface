@@ -61,6 +61,7 @@ export type PlainTextEditorDecorationKind = 'error' | 'warning' | 'info' | 'high
 export interface PlainTextEditorDecoration {
   range: TextRange
   kind?: PlainTextEditorDecorationKind
+  appearance?: 'underline' | 'background'
   message?: string
 }
 
@@ -394,6 +395,45 @@ export class RenderPlainTextEditor extends RenderBox implements InteractiveRende
     return this._hitPosition(position)
   }
 
+  /** A visual insertion only; subclasses keep source and history unchanged. */
+  protected inlineTextPreview(): { position: TextPosition; text: string } | null { return null }
+
+  protected inlineTextAnnotations(): readonly { position: TextPosition; text: string }[] { return [] }
+
+  protected refreshInlinePresentation(): void {
+    this._clampScroll()
+    if (this._focused) this._updateComposerPosition()
+    this.markNeedsPaint()
+  }
+
+  private _inlinePreviewGeometry(line: number, context?: PaintContext) {
+    const preview = this.inlineTextPreview()
+    const entries = [...(preview ? [preview] : []), ...this.inlineTextAnnotations()]
+      .filter(item => item.position.line === line)
+      .sort((a, b) => a.position.column - b.position.column)
+    return entries.map(item => ({
+      column: item.position.column,
+      text: item.text,
+      x: this._measureTextPrefix(this.controller.document.getLine(line), item.position.column, context),
+      width: this._measureText(item.text, context),
+    }))
+  }
+
+  private _inlineShift(line: number, column: number, context?: PaintContext): number {
+    return this._inlinePreviewGeometry(line, context).reduce((width, item) =>
+      width + (column > item.column ? item.width : 0), 0)
+  }
+
+  private _sourceXFromPreview(line: number, x: number): number {
+    let shift = 0
+    for (const item of this._inlinePreviewGeometry(line)) {
+      if (x <= item.x + shift) break
+      if (x <= item.x + shift + item.width) return item.x
+      shift += item.width
+    }
+    return x - shift
+  }
+
   positionToGlobalRect(position: TextPosition, context?: PaintContext): Rect | null {
     const line = Math.max(0, Math.min(this.controller.document.lineCount - 1, Math.floor(position.line)))
     const clamped = {
@@ -406,7 +446,7 @@ export class RenderPlainTextEditor extends RenderBox implements InteractiveRende
     const lineHeight = this._lineHeight(context)
     const g = this.globalOffset
     return {
-      x: g.x + this._gutterWidth(context) + this._foldLaneWidth() - this._scrollX +
+      x: this._inlineShift(line, clamped.column, context) + g.x + this._gutterWidth(context) + this._foldLaneWidth() - this._scrollX +
         this._measureTextPrefix(lineText, clamped.column, context),
       y: g.y + visibleLine * lineHeight - this._scrollY,
       width: 1,
@@ -701,7 +741,7 @@ export class RenderPlainTextEditor extends RenderBox implements InteractiveRende
     }
   }
 
-  private _selectionViewportBounds(): { left: number; top: number; right: number; bottom: number } {
+  protected _selectionViewportBounds(): { left: number; top: number; right: number; bottom: number } {
     const g = this.globalOffset
     return {
       left: g.x + this._gutterWidth() + this._foldLaneWidth(),
@@ -809,10 +849,33 @@ export class RenderPlainTextEditor extends RenderBox implements InteractiveRende
     }
     if (this.showIndentGuides) this._paintIndentGuides(dl, context, logicalLine, textX, y, lineHeight)
     if (this.folding) this._paintFoldMarker(dl, context, logicalLine, textX, y, lineHeight)
-    this._paintSelectionForLine(dl, context, logicalLine, textX, y, lineHeight, lineText)
-    this._paintSearchMatchesForLine(dl, context, logicalLine, textX, y, lineHeight)
-    this._paintTokens(dl, context, logicalLine, lineText, textX, centerY, fontSize, fontFamily, syntax, selectionRange)
-    this._paintDecorationsForLine(dl, context, logicalLine, lineText, textX, y, lineHeight)
+    const paintText = (originX: number) => {
+      this._paintDecorationsForLine(dl, context, logicalLine, lineText, originX, y, lineHeight, true)
+      this._paintSelectionForLine(dl, context, logicalLine, originX, y, lineHeight, lineText)
+      this._paintSearchMatchesForLine(dl, context, logicalLine, originX, y, lineHeight)
+      this._paintTokens(dl, context, logicalLine, lineText, originX, centerY, fontSize, fontFamily, syntax, selectionRange)
+      this._paintDecorationsForLine(dl, context, logicalLine, lineText, originX, y, lineHeight)
+    }
+    const insertions = this._inlinePreviewGeometry(logicalLine, context)
+    if (!insertions.length) paintText(textX)
+    else {
+      const left = x + gutterWidth, right = x + this._viewW
+      let shift = 0, segmentLeft = left
+      for (const item of insertions) {
+        const splitX = textX + item.x + shift
+        dl.pushClip(segmentLeft, y, Math.max(0, Math.min(right, splitX) - segmentLeft), lineHeight)
+        paintText(textX + shift)
+        dl.popClip()
+        dl.pushClip(left, y, Math.max(0, right - left), lineHeight)
+        dl.fillText(item.text, splitX, centerY, theme.textPlaceholder, fontSize, fontFamily, 'left', 'middle')
+        dl.popClip()
+        shift += item.width
+        segmentLeft = Math.max(left, splitX + item.width)
+      }
+      dl.pushClip(segmentLeft, y, Math.max(0, right - segmentLeft), lineHeight)
+      paintText(textX + shift)
+      dl.popClip()
+    }
   }
 
   private _paintIndentGuides(
@@ -888,9 +951,11 @@ export class RenderPlainTextEditor extends RenderBox implements InteractiveRende
     textX: number,
     y: number,
     lineHeight: number,
+    backgrounds = false,
   ): void {
     if (this._decorations.length === 0) return
     for (const decoration of this._decorations) {
+      if ((decoration.appearance === 'background') !== backgrounds) continue
       if (!lineIntersectsSelection(line, decoration.range)) continue
       const startColumn = line === decoration.range.start.line ? decoration.range.start.column : 0
       const endColumn = line === decoration.range.end.line ? decoration.range.end.column : lineText.length
@@ -901,7 +966,9 @@ export class RenderPlainTextEditor extends RenderBox implements InteractiveRende
       const x0 = textX + this._measureTextPrefix(lineText, clampedStart, context)
       const x1 = textX + this._measureTextPrefix(lineText, clampedEnd, context)
       const underlineY = y + lineHeight - 4
-      this._paintDecorationUnderline(dl, x0, underlineY, Math.max(4, x1 - x0), this._decorationColor(decoration.kind, context))
+      const color = this._decorationColor(decoration.kind, context)
+      if (backgrounds) dl.fillRect(x0, y, Math.max(4, x1 - x0), lineHeight, { ...color, a: 0.14 }, 0)
+      else this._paintDecorationUnderline(dl, x0, underlineY, Math.max(4, x1 - x0), color)
     }
   }
 
@@ -1050,7 +1117,7 @@ export class RenderPlainTextEditor extends RenderBox implements InteractiveRende
     const lineText = this._lineTextForPaint(this.controller.cursor.line)
     const lineHeight = this._lineHeight(context)
     return {
-      x: origin.x + this._gutterWidth(context) + this._foldLaneWidth() - this._scrollX +
+      x: this._inlineShift(this.controller.cursor.line, this._visualCursorColumn(), context) + origin.x + this._gutterWidth(context) + this._foldLaneWidth() - this._scrollX +
         this._measureTextPrefix(lineText, this._visualCursorColumn(), context),
       y: origin.y + visibleLine * lineHeight - this._scrollY + 3,
       height: lineHeight - 6,
@@ -1609,7 +1676,7 @@ export class RenderPlainTextEditor extends RenderBox implements InteractiveRende
     const lineTop = visibleLine * lineHeight
     if (lineTop < this._scrollY) this._scrollY = lineTop
     else if (lineTop + lineHeight > this._scrollY + this._viewH) this._scrollY = lineTop + lineHeight - this._viewH
-    const caretX = this._measureTextPrefix(this._lineTextForPaint(this.controller.cursor.line), this._visualCursorColumn()) + this._gutterWidth() + this._foldLaneWidth()
+    const caretX = this._inlineShift(this.controller.cursor.line, this._visualCursorColumn()) + this._measureTextPrefix(this._lineTextForPaint(this.controller.cursor.line), this._visualCursorColumn()) + this._gutterWidth() + this._foldLaneWidth()
     if (caretX < this._scrollX + this._gutterWidth()) this._scrollX = Math.max(0, caretX - this._gutterWidth())
     else if (caretX > this._scrollX + this._viewW - 24) this._scrollX = caretX - this._viewW + 24
     this._clampScroll()
@@ -1630,7 +1697,7 @@ export class RenderPlainTextEditor extends RenderBox implements InteractiveRende
     const lineText = this._lineTextForPaint(this.controller.cursor.line)
     const g = this.globalOffset
     this.textInput.updateComposerPosition(
-      g.x + this._gutterWidth() + this._foldLaneWidth() - this._scrollX + this._measureTextPrefix(lineText, this._visualCursorColumn()),
+      this._inlineShift(this.controller.cursor.line, this._visualCursorColumn()) + g.x + this._gutterWidth() + this._foldLaneWidth() - this._scrollX + this._measureTextPrefix(lineText, this._visualCursorColumn()),
       g.y + visibleLine * this._lineHeight() - this._scrollY,
     )
   }
@@ -1641,7 +1708,7 @@ export class RenderPlainTextEditor extends RenderBox implements InteractiveRende
     const visibleLine = Math.max(0, Math.floor((localY + this._scrollY) / this._lineHeight()))
     const line = this.controller.toLogicalLine(visibleLine)
     const text = this.controller.document.getLine(line)
-    const localX = Math.max(0, position.x - g.x - this._gutterWidth() - this._foldLaneWidth() + this._scrollX)
+    const localX = this._sourceXFromPreview(line, Math.max(0, position.x - g.x - this._gutterWidth() - this._foldLaneWidth() + this._scrollX))
     return { line, column: this._hitColumn(text, localX) }
   }
 
@@ -1671,7 +1738,7 @@ export class RenderPlainTextEditor extends RenderBox implements InteractiveRende
 
     const line = this.controller.toLogicalLine(visibleLine)
     const text = this.controller.document.getLine(line)
-    const localX = position.x - g.x - this._gutterWidth() - this._foldLaneWidth() + this._scrollX
+    const localX = this._sourceXFromPreview(line, position.x - g.x - this._gutterWidth() - this._foldLaneWidth() + this._scrollX)
     if (text.length === 0 || localX < 0) return null
 
     if (text.length > LONG_LINE_EXACT_LIMIT) {
@@ -1959,7 +2026,10 @@ export class RenderPlainTextEditor extends RenderBox implements InteractiveRende
   }
 
   private get _contentW(): number {
-    return Math.max(0, this._contentWidth, this._compositionContentWidth())
+    const annotationWidths = new Map<number, number>()
+    for (const hint of this.inlineTextAnnotations()) annotationWidths.set(hint.position.line,
+      (annotationWidths.get(hint.position.line) ?? 0) + this._measureText(hint.text))
+    return Math.max(0, this._contentWidth + Math.max(0, ...annotationWidths.values()), this._compositionContentWidth())
   }
 
   private get _showVBar(): boolean {
@@ -2049,11 +2119,11 @@ export class RenderPlainTextEditor extends RenderBox implements InteractiveRende
     })
   }
 
-  private _fontSize(context?: PaintContext): number {
+  protected _fontSize(context?: PaintContext): number {
     return this.fontSize ?? context?.theme.fontSize ?? this.currentTheme.fontSize
   }
 
-  private _fontFamily(context?: PaintContext): string {
+  protected _fontFamily(context?: PaintContext): string {
     const theme = context?.theme ?? this.currentTheme
     return this.fontFamily ?? resolveThemeTypography(theme).monoFontFamily
   }

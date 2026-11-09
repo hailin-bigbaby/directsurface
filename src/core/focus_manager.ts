@@ -3,7 +3,8 @@
 // 通过 FocusScope 支持普通焦点、模态陷阱、弹出层临时焦点
 // keydown 事件通过 FocusScope 栈分发，替代全局优先级注册
 
-import { DisposableBag, runCleanupSteps } from './disposable'
+import { DisposableBag, runCleanupSteps, type DisposeFn } from './disposable'
+import { dispatchKeyboardEvent } from './keyboard_event'
 import { RenderObject } from './render_object'
 import { ClipboardController, isCopyShortcut, isCopyableSelection } from './clipboard'
 
@@ -16,6 +17,15 @@ export interface Focusable {
 }
 
 export type FocusInputModality = 'keyboard' | 'pointer'
+
+export interface FocusTransitionRequest {
+  from: Focusable | null
+  to: Focusable | null
+  reason: 'focus' | 'pointer' | 'blur' | 'forced'
+  position?: { x: number; y: number }
+}
+
+export type FocusTransitionGuard = (request: FocusTransitionRequest) => boolean
 
 const focusNavigationKeys = new Set([
   'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
@@ -213,12 +223,38 @@ export class FocusManager {
   private readonly _auxiliaryRoots = new Map<RenderObject, number>()
   private _previousNonAuxiliaryFocus: Focusable | null = null
   private _inputModality: FocusInputModality = 'keyboard'
+  private readonly _transitionGuards = new Set<{ root: RenderObject; guard: FocusTransitionGuard }>()
+  private _checkingTransition = false
+
+  registerTransitionGuard(root: RenderObject, guard: FocusTransitionGuard): DisposeFn {
+    const entry = { root, guard }
+    this._transitionGuards.add(entry)
+    return () => { this._transitionGuards.delete(entry) }
+  }
+
+  prepareTransition(to: Focusable | null, reason: FocusTransitionRequest['reason'], position?: { x: number; y: number }): boolean {
+    const from = this.current
+    if (reason === 'focus' && from === to) return true
+    if (this._checkingTransition) return false
+    this._checkingTransition = true
+    try {
+      for (const { root, guard } of [...this._transitionGuards]) {
+        if (!from || !this._isWithinRoot(from, root)) continue
+        if (!guard({ from, to, reason, position }) && reason !== 'forced') return false
+        if (this.current !== from) return false
+      }
+      return true
+    } finally {
+      this._checkingTransition = false
+    }
+  }
 
   private constructor() {
     this._keyHandler = (e: KeyboardEvent) => {
       this.handleKeyDownEvent(e)
     }
     this._disposables.listen(window, 'keydown', this._keyHandler, true)
+    this._disposables.listen(window, 'keyup', event => this.handleKeyUpEvent(event), true)
     const pointerInput = () => this.notifyPointerInput()
     this._disposables.listen(window, 'pointerdown', pointerInput, true)
     this._disposables.listen(window, 'mousedown', pointerInput, true)
@@ -341,6 +377,7 @@ export class FocusManager {
   }
 
   clearFocus(): void {
+    if (!this.prepareTransition(null, 'blur')) return
     for (const scope of this._scopeStack) {
       scope.clearFocus()
     }
@@ -356,14 +393,17 @@ export class FocusManager {
   }
 
   clearFocusWithin(root: RenderObject): void {
-    for (const scope of this._scopeStack) {
-      const current = scope.current
-      if (current && this._isWithinRoot(current, root)) scope.clearFocus()
-    }
-    if (this._previousNonAuxiliaryFocus && this._isWithinRoot(this._previousNonAuxiliaryFocus, root)) {
-      this._previousNonAuxiliaryFocus = null
-    }
-    this._clearStaleAuxiliaryRestoreCandidate()
+    runCleanupSteps([
+      () => { if (this.current && this._isWithinRoot(this.current, root)) this.prepareTransition(null, 'forced') },
+      ...this._scopeStack.map(scope => () => {
+        const current = scope.current
+        if (current && this._isWithinRoot(current, root)) scope.clearFocus()
+      }),
+      () => {
+        if (this._previousNonAuxiliaryFocus && this._isWithinRoot(this._previousNonAuxiliaryFocus, root)) this._previousNonAuxiliaryFocus = null
+        this._clearStaleAuxiliaryRestoreCandidate()
+      },
+    ])
   }
 
   focusablesWithinRoots(roots: readonly RenderObject[]): Focusable[] {
@@ -447,8 +487,52 @@ export class FocusManager {
     this.popScope(restore)
   }
 
+  private readonly _routedKeyboardEvents = new WeakMap<KeyboardEvent, boolean>()
+
   handleKeyDownEvent(e: KeyboardEvent): boolean {
+    return this._routeKeyboardEvent(e, () => this._handleDefaultKeyDown(e))
+  }
+
+  handleKeyUpEvent(e: KeyboardEvent): boolean {
+    return this._routeKeyboardEvent(e, () => false)
+  }
+
+  private _routeKeyboardEvent(e: KeyboardEvent, defaultAction: () => boolean): boolean {
+    const previous = this._routedKeyboardEvents.get(e)
+    if (previous !== undefined) return previous
+    this._routedKeyboardEvents.set(e, false)
     this._clearInactiveFocus()
+    const scope = this._activeScope
+    const focused = scope.current
+    const target = focused instanceof RenderObject ? focused
+      : scope === this._defaultScope ? this._activeRoot : scope.focusRoots[0]
+    const boundary = target ? scope.focusRoots.find(root => this._isWithinRoot(target, root)) : undefined
+    let handled = false
+    try {
+      const route = target ? dispatchKeyboardEvent(target, e, boundary) : undefined
+      // Closing a window or moving focus during capture must not send the same key
+      // to the newly focused control through legacy default actions.
+      const invalidated = route?.invalidated || scope !== this._activeScope || focused !== scope.current
+      handled = route?.defaultPrevented || invalidated || false
+      if (!handled) handled = defaultAction()
+    } catch (error) {
+      // DOM dispatch continues after a listener throws. An aborted framework
+      // dispatch must not fall through to InputComposer and submit/edit anyway.
+      handled = true
+      throw error
+    } finally {
+      if (handled || e.defaultPrevented) {
+        handled = true
+        e.preventDefault()
+        e.stopImmediatePropagation()
+      }
+      this._routedKeyboardEvents.set(e, handled)
+    }
+    return handled
+  }
+
+  private _handleDefaultKeyDown(e: KeyboardEvent): boolean {
+    if (e.isComposing || e.keyCode === 229) return false
     if (this.current?.shouldIgnoreKeyDown?.(e) === true) return false
     if (!e.isComposing && e.keyCode !== 229 && e.key && e.key !== 'Process' && !modifierKeys.has(e.key) &&
       (focusNavigationKeys.has(e.key) || (!e.ctrlKey && !e.metaKey && !e.altKey))) {
@@ -506,6 +590,7 @@ export class FocusManager {
         handleUnhandledEnterFromDescendant?: (target: Focusable, event: KeyboardEvent) => boolean | void
       }).handleUnhandledEnterFromDescendant
       if (typeof handler === 'function' && handler.call(node, widget, event) === true) return true
+      if (node.isKeyboardEventBoundary) break
       node = node.parent
     }
     return false
@@ -519,6 +604,7 @@ export class FocusManager {
         handleUnhandledKeyDownFromDescendant?: (target: Focusable, event: KeyboardEvent) => boolean | void
       }).handleUnhandledKeyDownFromDescendant
       if (typeof handler === 'function' && handler.call(node, widget, event) === true) return true
+      if (node.isKeyboardEventBoundary) break
       node = node.parent
     }
     return false
@@ -605,6 +691,7 @@ export class FocusManager {
 
   private _setFocusInScope(scope: FocusScope, widget: Focusable): void {
     if (!this._isFocusableActiveInScope(scope, widget)) return
+    if (!this.prepareTransition(widget, 'focus')) return
     if (scope === this._defaultScope && widget instanceof RenderObject) {
       const auxiliaryRoot = this._auxiliaryRootFor(widget)
       const current = scope.current
@@ -765,16 +852,20 @@ export class FocusManager {
   }
 
   dispose(): void {
-    for (const scope of this._scopeStack) {
-      scope.clearFocus()
-    }
-    this._defaultScope = new FocusScope(FocusScopeType.Normal)
-    this._scopeStack = [this._defaultScope]
-    this._rootResolver = undefined
-    this._activeRoot = undefined
-    this._auxiliaryRoots.clear()
-    this._previousNonAuxiliaryFocus = null
-    this._disposables.dispose()
-    FocusManager._instance = null
+    runCleanupSteps([
+      () => { this.prepareTransition(null, 'forced') },
+      () => this._transitionGuards.clear(),
+      ...this._scopeStack.map(scope => () => scope.clearFocus()),
+      () => {
+        this._defaultScope = new FocusScope(FocusScopeType.Normal)
+        this._scopeStack = [this._defaultScope]
+        this._rootResolver = undefined
+        this._activeRoot = undefined
+        this._auxiliaryRoots.clear()
+        this._previousNonAuxiliaryFocus = null
+      },
+      () => this._disposables.dispose(),
+      () => { FocusManager._instance = null },
+    ])
   }
 }

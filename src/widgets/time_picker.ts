@@ -103,8 +103,14 @@ export class TimePickerPopup extends PopupSurfaceShell implements Popup {
   private _validate?: (value: string) => string
   private _onSelect?: (value: string) => TimePickerPopupSubmitResult
   private _onClose?: () => void
+  private _ownerInput = false
+  private _candidateActivated = false
+  private _panelInput = false
+  private _confirmOnEnter = true
+  protected override get popupContext(): PopupContext { return this.hostSurface?.context() ?? super.popupContext }
+  protected override requestPopupPaint(fallback?: () => void): void { if (this.hostSurface) this.hostSurface.repaint(); else super.requestPopupPaint(fallback) }
 
-  constructor() {
+  constructor(private readonly hostSurface?: { context: () => PopupContext; repaint: () => void }) {
     super()
     this._panel = new TimeSelectionPanel({
       invalidate: () => this.requestPopupPaint(),
@@ -137,6 +143,8 @@ export class TimePickerPopup extends PopupSurfaceShell implements Popup {
     minuteStep: number
     secondStep: number
     clearable?: boolean
+    ownerInput?: boolean
+    confirmOnEnter?: boolean
     validate?: (value: string) => string
     onSelect: (value: string) => TimePickerPopupSubmitResult
     onClose: () => void
@@ -145,6 +153,8 @@ export class TimePickerPopup extends PopupSurfaceShell implements Popup {
     this._anchor = options.anchor
     this._precision = options.precision
     this._clearable = options.clearable ?? false
+    this._ownerInput = options.ownerInput ?? false; this._candidateActivated = false; this._panelInput = false
+    this._confirmOnEnter = options.confirmOnEnter ?? true
     this._validationMessage = ''
     this._panel.configure({
       precision: options.precision,
@@ -158,7 +168,7 @@ export class TimePickerPopup extends PopupSurfaceShell implements Popup {
     this._onSelect = options.onSelect
     this._onClose = options.onClose
     this.resetPopupSurface()
-    this.openPopup({ owner: resolvePopupAnchorTarget(options.anchor) })
+    this.openPopup({ owner: resolvePopupAnchorTarget(options.anchor), ...(this._ownerInput ? { interactionMode: 'nonmodal' as const } : {}) })
   }
 
   syncValue(value: string): void {
@@ -220,17 +230,21 @@ export class TimePickerPopup extends PopupSurfaceShell implements Popup {
     panelY: number
     panelW: number
     panelH: number
+    footerHeight: number
+    ownerInput: boolean
     value: string
     clearable: boolean
     validationMessage: string
     panel: ReturnType<TimeSelectionPanel['debugState']>
   } {
-    const layout = this._layout(PopupManager.instance.context)
+    const layout = this._layout(this.popupContext)
     return {
       panelX: layout.panelX,
       panelY: layout.panelY,
       panelW: layout.panelW,
       panelH: layout.panelH,
+      footerHeight: layout.footerHeight,
+      ownerInput: this._ownerInput,
       value: this._panel.value,
       clearable: this._clearable,
       validationMessage: this._validationMessage,
@@ -257,11 +271,20 @@ export class TimePickerPopup extends PopupSurfaceShell implements Popup {
     return true
   }
 
+  get ownsTextInput(): boolean { return this.visible && this._ownerInput && this._panelInput }
+
   onKeyDown(event: KeyboardEvent): boolean {
     if (!this.visible) return false
+    if (this._ownerInput) {
+      if (event.isComposing || event.keyCode === 229 || !this._panelInput && !['ArrowUp', 'ArrowDown', 'Enter', 'Escape'].includes(event.key)) return false
+      if (event.key === 'Enter' && !this._candidateActivated) return false
+      if (event.key === 'Escape') return this.onEscape(event)
+      this._candidateActivated = true
+    }
     if (event.key === 'Enter' && !event.ctrlKey && !event.metaKey && !event.altKey) {
       event.preventDefault()
-      this.commitSelection()
+      if (this._confirmOnEnter) this.commitSelection()
+      else { this._panel.commitPending(); this.requestPopupPaint() }
       return true
     }
     const handled = this._panel.handleKeyDown(event)
@@ -282,8 +305,9 @@ export class TimePickerPopup extends PopupSurfaceShell implements Popup {
 
   private _handleSurfacePointerDown(
     event: PopupPointerEvent,
-    popupContext: PopupContext = PopupManager.instance.context,
+    popupContext: PopupContext = this.popupContext,
   ): void {
+    this._candidateActivated = true
     const layout = this._layout(popupContext)
     const footer = this._footerButtonAt(event.position, layout)
     if (footer === 'now') {
@@ -304,12 +328,12 @@ export class TimePickerPopup extends PopupSurfaceShell implements Popup {
       return
     }
     this._validationMessage = ''
-    this._panel.handlePointerDown(event.position, this._panelRect(layout), layout.style)
+    this._panelInput = this._panel.handlePointerDown(event.position, this._panelRect(layout), layout.style)
   }
 
   private _handleSurfacePointerMove(
     event: PopupPointerEvent,
-    popupContext: PopupContext = PopupManager.instance.context,
+    popupContext: PopupContext = this.popupContext,
   ): void {
     const layout = this._layout(popupContext)
     const footer = this._footerButtonAt(event.position, layout)
@@ -325,11 +349,11 @@ export class TimePickerPopup extends PopupSurfaceShell implements Popup {
 
   private _handleSurfaceWheel(
     event: WheelPointerEvent,
-    popupContext: PopupContext = PopupManager.instance.context,
+    popupContext: PopupContext = this.popupContext,
   ): boolean {
     const layout = this._layout(popupContext)
     const handled = this._panel.handleWheel(event, this._panelRect(layout), layout.style)
-    if (handled) this._validationMessage = ''
+    if (handled) { this._validationMessage = ''; this._candidateActivated = true }
     return handled
   }
 
@@ -404,12 +428,12 @@ export class TimePickerPopup extends PopupSurfaceShell implements Popup {
   }
 
   private _paintSurface(context: PaintContext, offset: Offset): void {
-    const layout = this._layout(PopupManager.instance.context)
+    const layout = this._layout(this.popupContext)
     const dl = new DrawList(context)
     const x = offset.x
     const y = offset.y
     drawPopupPanel(dl, x, y, layout.panelW, layout.panelH, layout.popupStyle)
-    const inputStyle = deriveTextInputStyle(PopupManager.instance.context.theme)
+    const inputStyle = deriveTextInputStyle(this.popupContext.theme)
     const hasValidationMessage = this._validationMessage.length > 0
     paintSingleLineText(dl, {
       text: this._validationMessage || '待确认',

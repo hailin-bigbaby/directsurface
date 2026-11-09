@@ -30,6 +30,93 @@ class CommandScopeBox extends TestBox implements CommandScopeProvider {
 }
 
 describe('CommandManager', () => {
+  it('keeps its own guarded execution lock while rejecting duplicates', async () => {
+    const manager = new CommandManager()
+    const abort = new AbortController()
+    let release!: () => void
+    const execute = vi.fn(context => { expect(context.signal).toBe(abort.signal); return 'saved' })
+    manager.register({ id: 'save', title: 'Save', execute })
+    manager.addInterceptor({ beforeExecute: () => new Promise<void>(resolve => { release = resolve }) })
+    const pending = manager.execute('save', { signal: abort.signal, canContinue: () => true })
+    manager.invalidate()
+    await expect(manager.execute('save', { signal: abort.signal })).resolves.toBeUndefined()
+    expect(manager.evaluate('save')).toMatchObject({ executing: true, enabled: false })
+    release()
+    await expect(pending).resolves.toBe('saved')
+    expect(execute).toHaveBeenCalledOnce()
+    expect(manager.evaluate('save')).toMatchObject({ executing: false, enabled: true })
+    manager.dispose()
+  })
+
+  it.each(['abort', 'binding', 'permission', 'enabled', 'context', 'detach', 'reparent'] as const)(
+    'abandons a guarded request after %s without running later interceptors or leaking its lock', async change => {
+      const context = new AppContextRegistry(undefined, { document: 'A' })
+      const source = new TestBox()
+      source.attach(new PipelineOwner({ appContext: context }))
+      const abort = new AbortController()
+      let valid = true, allowed = true, enabled = true
+      const manager = new CommandManager({ permissionService: { has: () => allowed } })
+      const execute = vi.fn()
+      const afterExecute = vi.fn()
+      let release!: () => void
+      const later = vi.fn()
+      manager.register({ id: 'save', title: 'Save', permission: 'write', enabled: () => enabled, execute })
+      manager.addInterceptor({ beforeExecute: () => new Promise<void>(resolve => { release = resolve }), afterExecute })
+      manager.addInterceptor({ beforeExecute: later })
+      const snapshots = vi.spyOn(manager, 'createAppContextSnapshot')
+      const pending = manager.execute('save', { source, signal: abort.signal, canContinue: () => valid })
+      if (change === 'abort') abort.abort()
+      if (change === 'binding') valid = false
+      if (change === 'permission') allowed = false
+      if (change === 'enabled') enabled = false
+      if (change === 'context') context.set('document', 'B')
+      if (change === 'detach') source.detach()
+      if (change === 'reparent') source.parent = new TestBox()
+      release()
+      await expect(pending).resolves.toBeUndefined()
+      expect(execute).not.toHaveBeenCalled()
+      expect(afterExecute).not.toHaveBeenCalled()
+      if (change !== 'permission' && change !== 'enabled') expect(later).not.toHaveBeenCalled()
+      expect(manager.evaluate('save').executing).toBe(false)
+      for (const snapshot of snapshots.mock.results) expect(snapshot.value.disposed).toBe(true)
+      source.dispose(); context.dispose(); manager.dispose()
+    },
+  )
+
+  it('cleans up when the continuation predicate throws after an asynchronous guard', async () => {
+    const manager = new CommandManager()
+    let release!: () => void, fail = false
+    const execute = vi.fn(), onError = vi.fn()
+    manager.register({ id: 'save', title: 'Save', execute })
+    manager.addInterceptor({ beforeExecute: () => new Promise<void>(resolve => { release = resolve }), onError })
+    const pending = manager.execute('save', { canContinue: () => { if (fail) throw Error('target failed'); return true } })
+    fail = true; release()
+    await expect(pending).rejects.toThrow('target failed')
+    expect(execute).not.toHaveBeenCalled()
+    expect(onError).toHaveBeenCalledOnce()
+    expect(manager.evaluate('save').executing).toBe(false)
+    manager.dispose()
+  })
+
+  it('passes cancellation to an already running executor without reporting its effects as undone', async () => {
+    const manager = new CommandManager(), abort = new AbortController()
+    let finish!: () => void
+    const afterExecute = vi.fn()
+    const execute = vi.fn(context => new Promise<string>(resolve => {
+      expect(context.signal).toBe(abort.signal)
+      finish = () => resolve('already saved')
+    }))
+    manager.register({ id: 'save', title: 'Save', execute })
+    manager.addInterceptor({ afterExecute })
+    const pending = manager.execute('save', { signal: abort.signal })
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce())
+    abort.abort(); finish()
+    await expect(pending).resolves.toBe('already saved')
+    expect(afterExecute).toHaveBeenCalledOnce()
+    expect(manager.evaluate('save').executing).toBe(false)
+    manager.dispose()
+  })
+
   it('evaluates command permission and canExecute from render app context', () => {
     const dirtyKey = createAppContextKey<boolean>('dirty')
     const rootContext = new AppContextRegistry(undefined, [[dirtyKey, true]])

@@ -530,3 +530,7 @@ TextBox 是单行输入，聚焦后需要同步共享 textarea、测量光标和
 - [ComboBox](../selector/combo-box.md)：单选下拉。
 - [DataGrid](../data/data-grid.md)：查询结果表格。
 - [MarkdownViewer](../visualization/markdown-viewer.md)：文档搜索和阅读。
+
+## 提交与插入校验
+
+`blurOnSubmit` 默认为 `true`；设为 `false` 可在 Enter 提交后保留焦点。`isComposing` 表示组合输入状态。`inputAdapter.acceptInsertion(text)` 可以在单行规范化之前拒绝原始插入文本，例如拒绝包含换行的粘贴；返回 `false` 时原值和选区保持不变。

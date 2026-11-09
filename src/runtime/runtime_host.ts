@@ -542,6 +542,11 @@ export class RuntimeHost {
   centerWindowInViewport(window: RenderWindow): void {
     const viewport = this._canvasViewport()
     const width = Math.min(viewport.width, window.windowWidth)
+    if (window.heightSizing === 'content') {
+      // Measure at the fitted width before centering: the initial height is only a placeholder.
+      window.setHostManagedBounds({ x: window.windowX, y: window.windowY, width, height: window.windowHeight })
+      window.layout({ minWidth: 0, maxWidth: viewport.width, minHeight: 0, maxHeight: viewport.height }, true, { theme: this.pipelineOwner.theme })
+    }
     const height = Math.min(viewport.height, window.windowHeight)
     window.setHostManagedBounds({
       x: viewport.x + Math.max(0, (viewport.width - width) / 2),
@@ -951,6 +956,17 @@ export class RuntimeHost {
 
   flushLayout(): void {
     this.pipelineOwner.flushLayout()
+    const viewport = this._canvasViewport()
+    if (viewport.width <= 0 || viewport.height <= 0) return
+    for (const modal of this._modalWindows) {
+      if (modal.disposed || modal.heightSizing !== 'content') continue
+      const { windowX, windowY, windowWidth, windowHeight } = modal
+      const x = Math.max(0, Math.min(windowX, viewport.width - windowWidth))
+      const y = Math.max(0, Math.min(windowY, viewport.height - windowHeight))
+      if (x !== windowX || y !== windowY) {
+        modal.setHostManagedBounds({ x, y, width: windowWidth, height: windowHeight })
+      }
+    }
   }
 
   flushPaint(context: PaintContext): void {
@@ -1116,6 +1132,15 @@ export class RuntimeHost {
     const size = this._resizeCanvasElement()
     this.performanceMonitor.setViewport(size)
     this.compositor.resize(size.width, size.height, size.dpr)
+    if (size.width > 0 && size.height > 0) {
+      for (const modal of this._modalWindows) {
+        if (modal.disposed) continue
+        if (modal.windowX < 0 || modal.windowY < 0 ||
+          modal.windowX + modal.windowWidth > size.width || modal.windowY + modal.windowHeight > size.height) {
+          this.centerWindowInViewport(modal)
+        }
+      }
+    }
     for (const root of this.getRoots()) {
       this.pipelineOwner.recordLayoutConstraints(root, this._defaultRootConstraints())
       root.markNeedsLayout()

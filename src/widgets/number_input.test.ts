@@ -200,3 +200,33 @@ describe('NumberInput wheel policies', () => {
     input.dispose()
   })
 })
+
+describe('strict optional numeric values',()=>{
+  it('keeps mixed and empty separate from zero without publishing untouched focus',()=>{
+    const changed=vi.fn(),input=new RenderNumberInput({value:7,valueState:'mixed',allowEmpty:true,commitMode:'strict',onValueStateChange:changed})
+    expect(input.getNullableValue()).toBeUndefined();input.focusIn();input.focusOut();expect(input.valueState).toBe('mixed');expect(changed).not.toHaveBeenCalled()
+    input.setDraftText('');expect(input.commitEdit()).toBe(true);expect(input.getNullableValue()).toBeNull();expect(changed).toHaveBeenLastCalledWith('empty',undefined)
+    input.setDraftText('0');expect(input.commitEdit()).toBe(true);expect(input.getNullableValue()).toBe(0);expect(input.valueState).toBe('value');input.dispose()
+  })
+  it.each(['12mm','1e','0x10','Infinity','1e309','1e-999','11','-1','1.25'])('rejects complete invalid integer/range input %s without clamping or changing committed state',raw=>{
+    const changed=vi.fn(),input=new RenderNumberInput({value:3,integer:true,min:0,max:10,commitMode:'strict',onValueStateChange:changed})
+    input.setDraftText(raw);expect(input.validateEdit()).toBe(false);expect(input.commitEdit()).toBe(false);expect(input.value).toBe(3);expect(input.draftText).toBe(raw);expect(changed).not.toHaveBeenCalled();input.dispose()
+  })
+  it('preserves decimal values and supports a complete custom font-size parser',()=>{
+    const input=new RenderNumberInput({value:1,commitMode:'strict'});input.setDraftText('0.3333333333333333');expect(input.commitEdit()).toBe(true);expect(input.value).toBe(.3333333333333333)
+    input.parseText=s=>s==='小四'?12:undefined;input.setDraftText('小四');expect(input.commitEdit()).toBe(true);expect(input.value).toBe(12);input.dispose()
+  })
+  it('strict disable cancels a pending draft and external value/state updates stay silent',()=>{
+    const onChange=vi.fn(),state=vi.fn(),input=new RenderNumberInput({value:2,commitMode:'strict',allowEmpty:true,onChange,onValueStateChange:state})
+    input.setDraftText('5');input.disabled=true;expect(input.value).toBe(2);expect(input.isEditing).toBe(false);expect(onChange).not.toHaveBeenCalled();input.setNullableValue(null);input.setNullableValue(undefined);input.setValue(0);expect(input.getNullableValue()).toBe(0);expect(state).not.toHaveBeenCalled();input.dispose()
+  })
+})
+
+it('strict stepping preserves decimal precision and establishes an explicit value from mixed state',()=>{
+ const input=new RenderNumberInput({value:.3333333333333333,step:.1,commitMode:'strict'});input.focusIn();inputElement().dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp'}));expect(input.value).toBe(.4333333333333333);input.dispose()
+ const mixed=new RenderNumberInput({value:19,valueState:'mixed',min:10,max:20,commitMode:'strict'});mixed.focusIn();inputElement().dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp'}));expect(mixed.getNullableValue()).toBe(10);mixed.dispose()
+})
+it('explicit deletion of a mixed placeholder clears it, and stepping a blank optional draft starts a value',()=>{
+ const input=new RenderNumberInput({value:8,valueState:'mixed',allowEmpty:true,commitMode:'strict'});input.focusIn();inputElement().dispatchEvent(new KeyboardEvent('keydown',{key:'Backspace'}));expect(input.commitEdit()).toBe(true);expect(input.getNullableValue()).toBeNull()
+ input.focusIn();inputElement().dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp'}));expect(input.getNullableValue()).toBe(1);input.dispose()
+})

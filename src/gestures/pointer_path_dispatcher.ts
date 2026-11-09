@@ -1,3 +1,4 @@
+import { dispatchPointerListeners, pointerWindowPath, pointerTargetPath } from './pointer_event_listeners'
 import type { GestureArenaMember } from './gesture_arena'
 import {
   DispatchPhase,
@@ -45,53 +46,103 @@ export class PointerPathDispatcher {
       this._sessions.isDispatchFrameCurrent(frameToken) &&
       this._sessions.isTokenCurrent(sequenceToken, allowEnding)
     const capturedPath = this._sessions.getCapturePath(event, sequenceToken)
-    if (capturedPath && this._sessions.getCapture(event, sequenceToken) === target) {
-      this.dispatchToPath(capturedPath, event)
-      return
-    }
-
     const capturedEntry = this._sessions.getCaptureEntry(event, sequenceToken)
-    const localPosition = capturedEntry
-      ? this._resolveLocalPosition(
-        capturedEntry,
-        event.position,
-        event.type === 'down',
-        event,
-      )
-      : this._resolveTargetLocalPosition(target, event.position)
     if (!isFrameCurrent()) return
-    const handler = this._pointerBubbleHandlerName(event.type)
-    const callback = target[handler]
-    if (!isFrameCurrent() || typeof callback !== 'function') return
-    callback.call(target, {
-      ...event,
-      phase: DispatchPhase.Target,
-      localPosition,
-      hitTestEntry: capturedEntry,
-      stopPropagation: () => {},
-      preventActivation: () => {
-        if (sequenceToken) this._sessions.preventActivation(event, sequenceToken)
-      },
-      setPointerCapture: () => {
-        if (sequenceToken) {
-          this._sessions.setCapture(event, target, undefined, capturedEntry, sequenceToken)
-        }
-      },
-      releasePointerCapture: () => {
-        if (sequenceToken) this._sessions.releaseCapture(event, sequenceToken)
-      },
-      hasPointerCapture: () =>
-        !!sequenceToken &&
-        this._sessions.getCapture(event, sequenceToken) === target,
-      gestureArena: this._sessions.gestureArena,
-      joinGestureArena: member => sequenceToken
-        ? this._sessions.joinGestureArena(event, member, sequenceToken)
-        : this._sessions.rejectGestureArenaMember(event, member),
-    })
+    const entry = capturedEntry ?? capturedPath?.path.find(item => item.target === target)
+    const path = capturedPath && entry
+      ? capturedPath.through(entry)
+      : pointerTargetPath(target, entry ?? { target, localPosition: this._resolveTargetLocalPosition(target, event.position) })
+    this.dispatchToPath(path, event)
   }
 
   dispatchToPath(result: HitTestResult, event: PointerEvent): void {
-    const dispatchPath = result.snapshot()
+    const path = pointerWindowPath(result)
+    const sequenceToken = this._sequenceTokenForDispatch(event)
+    const frameToken = this._sessions.dispatchFrameToken(event)
+    const isCurrent = (): boolean => this._sessions.isDispatchFrameCurrent(frameToken) &&
+      this._sessions.isTokenCurrent(sequenceToken, event.type === 'up' || event.type === 'cancel')
+    if (event.type === 'down') {
+      for (const entry of path.path) {
+        this._resolveLocalPosition(entry, event.position, true, event)
+        if (!isCurrent()) return
+      }
+    }
+    let outcome
+    try {
+      outcome = dispatchPointerListeners(path, `pointer${event.type}`, event, {
+        isCurrent,
+        localPosition: entry => this._resolveLocalPosition(entry, event.position, false, event),
+        controls: entry => ({
+          preventActivation: () => {
+            if (sequenceToken) this._sessions.preventActivation(event, sequenceToken)
+          },
+          setPointerCapture: () => {
+            if (sequenceToken) this._sessions.setCapture(event, entry.target, path, entry, sequenceToken)
+          },
+          releasePointerCapture: () => {
+            if (sequenceToken) this._sessions.releaseCapture(event, sequenceToken)
+          },
+          hasPointerCapture: () => {
+            const captured = this._sessions.getCaptureEntry(event, sequenceToken)
+            return captured ? sameHitTestEntryIdentity(captured, entry)
+              : this._sessions.getCapture(event, sequenceToken) === entry.target
+          },
+        }),
+      })
+    } catch (error) {
+      // Terminal observer failures must not strand a pressed control or a drag.
+      if ((event.type === 'up' || event.type === 'cancel') && isCurrent()) {
+        try { this._dispatchDefaultToPath(path, { ...event, type: 'cancel' }) } catch { /* Preserve listener failure. */ }
+      }
+      throw error
+    }
+    if (!isCurrent()) return
+    if (outcome.invalidated) {
+      // A hidden/reparented path still owns control state from down. Cancel that
+      // state before dropping the route; do not affect a newer reentrant frame.
+      if (sequenceToken) this._sessions.preventActivation(event, sequenceToken)
+      const termination = this._sessions.beginTermination(event, 'cancel')
+      try {
+        this._dispatchDefaultToPath(path, { ...event, type: 'cancel' })
+      } finally {
+        if (termination) {
+          if (this._sessions.isTokenCurrent(sequenceToken, true)) this.clearPointerReferences(event)
+          this._sessions.finishTermination(termination)
+        }
+      }
+      return
+    }
+    if (outcome.defaultPrevented && event.type !== 'cancel') {
+      if (event.type !== 'down') this._dispatchDefaultToPath(path, { ...event, type: 'cancel' })
+      return
+    }
+    this._dispatchDefaultToPath(path, event)
+  }
+
+  dispatchHover(target: HitTestTarget, event: PointerEvent, type: 'pointerenter' | 'pointerleave'): void {
+    const session = this._sessions.get(event)
+    const generation = session?.hoverGeneration
+    const frame = this._sessions.dispatchFrameToken(event)
+    const isCurrent = (): boolean => this._sessions.isDispatchFrameCurrent(frame) &&
+      this._sessions.get(event) === session && session?.hoverGeneration === generation
+    let outcome
+    try {
+      outcome = dispatchPointerListeners(pointerTargetPath(target, event.hitTestEntry), type, event, { isCurrent })
+    } catch (error) {
+      if (type === 'pointerleave' && isCurrent()) {
+        try { target.onPointerLeave?.(event) } catch { /* Preserve listener failure. */ }
+      }
+      throw error
+    }
+    if (!isCurrent()) return
+    // A hidden/reparented target still needs its terminal hover cleanup. Only a
+    // newer hover transition may supersede this leave, not path invalidation.
+    if (type === 'pointerleave') target.onPointerLeave?.(event)
+    else if (!outcome.invalidated && !outcome.defaultPrevented) target.onPointerEnter?.(event)
+  }
+
+  private _dispatchDefaultToPath(result: HitTestResult, event: PointerEvent): void {
+    const dispatchPath = pointerWindowPath(result)
     const entries = dispatchPath.path
     if (entries.length === 0) return
     const sequenceToken = this._sequenceTokenForDispatch(event)
@@ -235,7 +286,7 @@ export class PointerPathDispatcher {
     targetEntry: HitTestEntry,
     event: PointerActivationPayload,
   ): void {
-    const route = result.through(targetEntry).snapshot()
+    const route = pointerWindowPath(result.through(targetEntry))
     const entries = route.path
     if (entries.length === 0) return
     const resolvedTargetEntry = entries[entries.length - 1]!
@@ -245,6 +296,17 @@ export class PointerPathDispatcher {
     const isFrameCurrent = (): boolean =>
       this._sessions.isDispatchFrameCurrent(frameToken) &&
       this._sessions.isTokenCurrent(sequenceToken, true)
+
+    const observed = dispatchPointerListeners(route, 'pointeractivate', event, { isCurrent: isFrameCurrent })
+    if (observed.invalidated || observed.defaultPrevented || !isFrameCurrent()) return
+    if (event.clickCount === 2) {
+      const doubleClick = dispatchPointerListeners(route, 'dblclick', event, { isCurrent: isFrameCurrent })
+      if (doubleClick.invalidated || doubleClick.defaultPrevented || !isFrameCurrent()) return
+    }
+    if (typeof resolvedTargetEntry.target.onPointerActivate !== 'function') {
+      if (event.clickCount === 2) resolvedTargetEntry.target.onDoubleClick?.(event.position)
+      return
+    }
 
     const dispatch = (
       entry: HitTestEntry,

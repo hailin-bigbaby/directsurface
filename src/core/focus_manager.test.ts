@@ -91,6 +91,45 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+it('preflights registered subtree transitions before blur and leaves other roots unaffected', () => {
+  const manager = FocusManager.instance, root = new FocusNode(), first = new FocusNode(), second = new FocusNode()
+  root.addChild(first); root.addChild(second)
+  manager.register(first); manager.register(second)
+  manager.setFocus(first)
+  const blur = vi.spyOn(first, 'focusOut'), guard = vi.fn(() => false)
+  const release = manager.registerTransitionGuard(root, guard)
+  manager.setFocus(second)
+  expect(manager.current).toBe(first)
+  expect(blur).not.toHaveBeenCalled()
+  release()
+  manager.setFocus(second)
+  expect(manager.current).toBe(second)
+  expect(blur).toHaveBeenCalledOnce()
+  root.dispose()
+})
+
+it('runs forced cancellation before clearing a guarded subtree even if its guard rejects', () => {
+  const manager = FocusManager.instance, root = new FocusNode(), child = new FocusNode(), order: string[] = []
+  root.addChild(child); manager.register(child); manager.setFocus(child)
+  const original = child.focusOut.bind(child)
+  child.focusOut = () => { order.push('blur'); original() }
+  const release = manager.registerTransitionGuard(root, request => { order.push(request.reason); return false })
+  manager.clearFocusWithin(root)
+  expect(order).toEqual(['forced', 'blur'])
+  expect(manager.current).toBeNull()
+  release(); root.dispose()
+})
+
+it('still releases focus when a forced transition guard throws', () => {
+  const manager = FocusManager.instance, root = new FocusNode(), child = new FocusNode()
+  root.addChild(child); manager.register(child); manager.setFocus(child)
+  const release = manager.registerTransitionGuard(root, () => { throw Error('cancel failed') })
+  expect(() => manager.clearFocusWithin(root)).toThrow('cancel failed')
+  expect(manager.current).toBeNull()
+  expect(child.isFocused).toBe(false)
+  release(); root.dispose()
+})
+
 describe('FocusManager lifecycle', () => {
   it('switches focus visibility without blurring the current control or repeating invalidation', () => {
     const manager = FocusManager.instance

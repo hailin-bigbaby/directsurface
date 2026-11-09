@@ -254,6 +254,52 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
     this.markNeedsPaint()
   }
 
+  /** Replace leaves of a mounted node. The caller owns the tree's unique keys. */
+  replaceLeafChildren(parent: TreeNode<T>, children: TreeNode<T>[]): void {
+    const previous = parent.children ?? []
+    if (this._selectionMode !== 'single' || this._checkedLeafKeys.size ||
+      previous.some(node => node.children?.length) || children.some(node => node.children?.length)) {
+      parent.children = children
+      this._syncTreeState()
+      this.markNeedsPaint()
+      return
+    }
+    const index = this._flatNodes.findIndex(row => row.node === parent)
+    const keys = new Set(children.map(node => node.key))
+    const removed = (key: string) => !keys.has(key) && previous.some(node => node.key === key)
+    if (removed(this._selectedKey)) this._selectedKey = ''
+    if (removed(this._hoveredKey)) this._hoveredKey = ''
+    parent.children = children
+    if (index < 0) return
+    const row = this._flatNodes[index]!
+    const hadChildren = row.hasChildren
+    const hasChildren = children.length > 0
+    if (!row.expanded && hadChildren === hasChildren) return
+    this._ensureViewport()
+    const removedRows = row.expanded ? previous.length : 0
+    const focused = this._flatNodes[this._focusedIndex]?.node.key
+    const rows = row.expanded ? children.map((node, i): FlatNode<T> => ({
+      node, depth: row.depth + 1, hasChildren: false, expanded: this._expanded.has(node.key), isLast: i === children.length - 1,
+    })) : []
+    // Avoid spreading arbitrary child counts into splice's argument list.
+    this._flatNodes = this._flatNodes.slice(0, index + 1).concat(rows, this._flatNodes.slice(index + 1 + removedRows))
+    row.hasChildren = hasChildren
+    if (this._focusedIndex > index + removedRows) this._focusedIndex += rows.length - removedRows
+    else if (this._focusedIndex > index) {
+      const retained = rows.findIndex(child => child.node.key === focused)
+      this._focusedIndex = index + retained + 1
+    }
+    const theme = this.currentTheme, style = this._treeTokens(theme)
+    const extents = [row, ...rows].map(child => this._measureRowExtent(child, theme, style))
+    this._rowExtents = this._rowExtents.slice(0, index).concat(extents, this._rowExtents.slice(index + 1 + removedRows))
+    this._totalW = this._rowExtents.reduce((width, extent) => Math.max(width, extent.right), 0)
+    this._widthRevision = ++this._flatRevision
+    this._clearPaintedVisibleNodes()
+    this.tooltip = undefined
+    this._ensureViewport()
+    this.markNeedsPaint()
+  }
+
   get indentWidth(): number { return this._indentWidth }
 
   get expandedKeys(): string[] { return [...this._expanded] }
@@ -462,6 +508,15 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
   private get _scrollY(): number { return this._scroll.offset }
   private get _scrollX(): number { return this._horizontalScroll.offset }
 
+  private _measureRowExtent(flat: FlatNode<T>, theme: ResolvedTheme, style: ReturnType<RenderTreeView<T>['_treeTokens']>) {
+    const row = this._rowLayout(flat, 0, 0, theme)
+    const textWidth = flat.node.labelTokens?.length
+      ? flat.node.labelTokens.reduce((width, token) => width + TextMeasurer.measureWidth(token.text, style.fontSize, style.fontFamily), 0)
+      : TextMeasurer.measureWidth(flat.node.label, style.fontSize, style.fontFamily)
+    const right = Math.max(row.textX + textWidth, flat.hasChildren ? row.arrowX + this.indentWidth / 2 : 0) + this._framePadding
+    return { left: flat.depth * this.indentWidth + this._framePadding, right, textWidth }
+  }
+
   private _ensureViewport(theme: ResolvedTheme = this.currentTheme): void {
     this._syncThemeMetrics(theme)
     if (this._widthRevision !== this._flatRevision || this._widthTheme !== theme ||
@@ -469,13 +524,9 @@ export class RenderTreeView<T = any> extends RenderBox implements InteractiveRen
       const style = this._treeTokens(theme)
       this._totalW = 0
       this._rowExtents = this._flatNodes.map(flat => {
-        const row = this._rowLayout(flat, 0, 0, theme)
-        const textWidth = flat.node.labelTokens?.length
-          ? flat.node.labelTokens.reduce((width, token) => width + TextMeasurer.measureWidth(token.text, style.fontSize, style.fontFamily), 0)
-          : TextMeasurer.measureWidth(flat.node.label, style.fontSize, style.fontFamily)
-        const right = Math.max(row.textX + textWidth, flat.hasChildren ? row.arrowX + this.indentWidth / 2 : 0) + this._framePadding
-        this._totalW = Math.max(this._totalW, right)
-        return { left: flat.depth * this.indentWidth + this._framePadding, right, textWidth }
+        const extent = this._measureRowExtent(flat, theme, style)
+        this._totalW = Math.max(this._totalW, extent.right)
+        return extent
       })
       this._widthRevision = this._flatRevision
       this._widthTheme = theme

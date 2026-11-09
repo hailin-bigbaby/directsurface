@@ -1,7 +1,7 @@
 import { DrawList } from '../rendering/draw_list'
 import type { PaintContext } from '../rendering/paint_context'
 import type { Offset, Rect } from '../core/render_object'
-import type { PointerEvent } from '../gestures/hit_test'
+import type { PointerEvent, WheelPointerEvent } from '../gestures/hit_test'
 import {
   deriveContextMenuStyle,
   derivePopupStyle,
@@ -23,6 +23,7 @@ export interface ContextMenuItem {
   icon?: string
   shortcut?: string
   disabled?: boolean
+  checked?: boolean | 'mixed'
   danger?: boolean
   items?: ContextMenuEntry[]
   separator?: false
@@ -62,6 +63,7 @@ interface MenuPopupLayoutItem {
 interface MenuPopupLayout {
   pos: Offset
   totalHeight: number
+  contentHeight: number
   menuWidth: number
   itemHeight: number
   separatorHeight: number
@@ -87,6 +89,7 @@ export type MenuPopupPositionProvider = (popupContext: PopupContext, metrics: Me
 interface MenuPopupOptions {
   items: ContextMenuEntry[]
   onSelect: (key: string) => void
+  onSelectRequest?: (key: string, source: 'pointer' | 'keyboard') => boolean
   bounds: MenuPopupBoundsProvider
   position?: MenuPopupPositionProvider
   owner?: object
@@ -101,6 +104,7 @@ export class MenuPopup extends PopupSurfaceShell implements Popup {
 
   private readonly _items: ContextMenuEntry[]
   private readonly _onSelect: (key: string) => void
+  private readonly _onSelectRequest?: (key: string, source: 'pointer' | 'keyboard') => boolean
   private readonly _bounds: MenuPopupBoundsProvider
   private readonly _position?: MenuPopupPositionProvider
   private readonly _owner?: object
@@ -115,11 +119,13 @@ export class MenuPopup extends PopupSurfaceShell implements Popup {
   private _childParentKey = ''
   private _paintedItems: ContextMenuItemDebugTarget[] = []
   private _paintSnapshot: MenuPopupPaintSnapshot | null = null
+  private _scrollOffset = 0
 
   constructor(opts: MenuPopupOptions) {
     super()
     this._items = opts.items
     this._onSelect = opts.onSelect
+    this._onSelectRequest = opts.onSelectRequest
     this._bounds = opts.bounds
     this._position = opts.position
     this._owner = opts.owner
@@ -218,7 +224,7 @@ export class MenuPopup extends PopupSurfaceShell implements Popup {
       this._openChild(item.entry.key, item.entry.items)
       return
     }
-    this._onSelect(item.entry.key)
+    if (this._onSelectRequest?.(item.entry.key, 'pointer') !== false) this._onSelect(item.entry.key)
   }
 
   private _handleSurfaceHoverExit(_event: PointerEvent): void {
@@ -261,6 +267,12 @@ export class MenuPopup extends PopupSurfaceShell implements Popup {
       this._stepKeyboard(-1)
       return true
     }
+    if (event.key === 'Home' || event.key === 'End') {
+      event.preventDefault()
+      this._keyboardIndex = -1
+      this._stepKeyboard(event.key === 'Home' ? 1 : -1)
+      return true
+    }
     if (event.key === 'ArrowRight') {
       const item = this._currentSelectableItem()
       if (!item || !hasContextSubmenu(item)) return false
@@ -281,7 +293,7 @@ export class MenuPopup extends PopupSurfaceShell implements Popup {
       if (hasContextSubmenu(item)) {
         this._openChild(item.key, item.items)
       } else {
-        this._onSelect(item.key)
+        if (this._onSelectRequest?.(item.key, 'keyboard') !== false) this._onSelect(item.key)
       }
       return true
     }
@@ -295,7 +307,14 @@ export class MenuPopup extends PopupSurfaceShell implements Popup {
     return true
   }
 
-  onWheel(): boolean {
+  onWheel(event?: WheelPointerEvent): boolean {
+    if (event && this.visible) {
+      const layout = this._layout(PopupManager.instance.context)
+      const next = Math.max(0, Math.min(layout.contentHeight - layout.totalHeight, this._scrollOffset + event.deltaY))
+      if (next !== this._scrollOffset) {
+        this._scrollOffset = next; this._closeChild(); this._clearPaintedItems(); PopupManager.instance.requestPaint()
+      }
+    }
     return true
   }
 
@@ -305,6 +324,7 @@ export class MenuPopup extends PopupSurfaceShell implements Popup {
     this._keyboardIndex = -1
     this._child = null
     this._childParentKey = ''
+    this._scrollOffset = 0
     this._clearPaintedItems()
     this._onClose?.()
   }
@@ -321,7 +341,8 @@ export class MenuPopup extends PopupSurfaceShell implements Popup {
 
     drawPopupPanel(dl, x, y, w, layout.totalHeight, layout.popupStyle)
 
-    let curY = y + s.padding
+    dl.pushClip(x, y + s.padding, w, Math.max(0, layout.totalHeight - s.padding * 2))
+    let curY = y + s.padding - this._scrollOffset
     for (const entry of this._items) {
       if (isContextMenuSeparator(entry)) {
         const sepY = curY + layout.separatorHeight / 2
@@ -340,6 +361,13 @@ export class MenuPopup extends PopupSurfaceShell implements Popup {
       }
 
       let textX = x + s.padding * 2
+      if (entry.checked !== undefined) {
+        const size = Math.max(12, Math.min(s.fontSize + 2, layout.itemHeight - 8))
+        const color = resolveTextColor(s.itemText, state)
+        if (entry.checked === true) paintIconGlyph(context, { name: 'check', x: textX, y: curY + (layout.itemHeight - size) / 2, size, color })
+        else if (entry.checked === 'mixed') dl.line(textX + 2, curY + layout.itemHeight / 2, textX + size - 2, curY + layout.itemHeight / 2, color, 2)
+        textX += size + s.iconGap
+      }
       if (entry.icon) {
         const iconColor = resolveTextColor(s.itemText, state)
         if (isIconName(entry.icon)) {
@@ -389,6 +417,13 @@ export class MenuPopup extends PopupSurfaceShell implements Popup {
 
       curY += layout.itemHeight
     }
+    dl.popClip()
+    if (layout.contentHeight > layout.totalHeight && layout.totalHeight > s.padding * 2) {
+      const track = layout.totalHeight - s.padding * 2
+      const thumb = Math.max(8, track * layout.totalHeight / layout.contentHeight)
+      const top = this._scrollOffset / (layout.contentHeight - layout.totalHeight) * Math.max(0, track - thumb)
+      dl.fillRect(x + w - 3, y + s.padding + top, 2, Math.min(track, thumb), s.separator, 1)
+    }
     this._paintedItems = layout.itemLayouts.map(item => ({
       key: item.entry.key,
       path: [...pathPrefix, item.entry.key],
@@ -413,11 +448,14 @@ export class MenuPopup extends PopupSurfaceShell implements Popup {
     const bounds = this._bounds(popupContext)
     const itemHeight = style.itemHeight
     const separatorHeight = style.separatorHeight
-    const menuWidth = style.menuWidth
-    let totalHeight = style.padding * 2
+    const insetX = Math.min(4, Math.max(0, bounds.width / 2)), insetY = Math.min(4, Math.max(0, bounds.height / 2))
+    const menuWidth = Math.min(style.menuWidth, Math.max(0, bounds.width - insetX * 2))
+    let contentHeight = style.padding * 2
     for (const item of this._items) {
-      totalHeight += isContextMenuSeparator(item) ? separatorHeight : itemHeight
+      contentHeight += isContextMenuSeparator(item) ? separatorHeight : itemHeight
     }
+    const totalHeight = Math.min(contentHeight, Math.max(0, bounds.height - insetY * 2))
+    this._scrollOffset = Math.max(0, Math.min(this._scrollOffset, contentHeight - totalHeight))
 
     let x = 0
     let y = 0
@@ -434,32 +472,31 @@ export class MenuPopup extends PopupSurfaceShell implements Popup {
       y = pos.y
     }
 
-    const minX = bounds.x + 4
-    const minY = bounds.y + 4
-    const maxX = Math.max(minX, bounds.x + bounds.width - menuWidth - 4)
-    const maxY = Math.max(minY, bounds.y + bounds.height - totalHeight - 4)
+    const minX = bounds.x + insetX
+    const minY = bounds.y + insetY
+    const maxX = Math.max(minX, bounds.x + bounds.width - menuWidth - insetX)
+    const maxY = Math.max(minY, bounds.y + bounds.height - totalHeight - insetY)
     if (x > maxX) x = maxX
     if (y > maxY) y = maxY
     if (x < minX) x = minX
     if (y < minY) y = minY
 
     const itemLayouts: MenuPopupLayoutItem[] = []
-    let curY = y + style.padding
+    let curY = y + style.padding - this._scrollOffset
     for (const entry of this._items) {
       if (isContextMenuSeparator(entry)) {
         curY += separatorHeight
         continue
       }
-      itemLayouts.push({
-        entry,
-        rect: { x: x + 2, y: curY, width: menuWidth - 4, height: itemHeight },
-      })
+      const top = Math.max(curY, y + style.padding), bottom = Math.min(curY + itemHeight, y + totalHeight - style.padding)
+      if (bottom > top) itemLayouts.push({ entry, rect: { x: x + 2, y: top, width: Math.max(0, menuWidth - 4), height: bottom - top } })
       curY += itemHeight
     }
 
     return {
       pos: { x, y },
       totalHeight,
+      contentHeight,
       menuWidth,
       itemHeight,
       separatorHeight,
@@ -516,9 +553,24 @@ export class MenuPopup extends PopupSurfaceShell implements Popup {
     this._keyboardIndex = nextIndex
     this._hoveredKey = selectable[nextIndex]!.key
     const current = selectable[nextIndex]!
+    this._revealItem(current.key)
     const branchChanged = hasContextSubmenu(current) ? this._openChild(current.key, current.items) : this._closeChild()
     PopupManager.instance.requestPaint()
     if (branchChanged) PopupManager.instance.requestPaint()
+  }
+
+  private _revealItem(key: string): void {
+    const layout = this._layout(PopupManager.instance.context)
+    let top = 0
+    for (const item of this._items) {
+      if (isContextMenuItem(item) && item.key === key) break
+      top += isContextMenuSeparator(item) ? layout.separatorHeight : layout.itemHeight
+    }
+    const viewport = Math.max(0, layout.totalHeight - layout.style.padding * 2)
+    if (top < this._scrollOffset) this._scrollOffset = top
+    else if (top + layout.itemHeight > this._scrollOffset + viewport) this._scrollOffset = top + layout.itemHeight - viewport
+    this._scrollOffset = Math.max(0, Math.min(this._scrollOffset, layout.contentHeight - layout.totalHeight))
+    this._clearPaintedItems()
   }
 
   private _openChild(parentKey: string, items: ContextMenuEntry[]): boolean {
@@ -527,6 +579,7 @@ export class MenuPopup extends PopupSurfaceShell implements Popup {
     const child = new MenuPopup({
       items,
       onSelect: this._onSelect,
+      onSelectRequest: this._onSelectRequest,
       bounds: this._bounds,
       owner: this._owner,
       parentMenu: this,

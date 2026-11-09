@@ -77,7 +77,7 @@ export function createWorkbenchView(app: ProcurementWorkbench, services: ViewSer
   commands.register({ id: 'order.submit', title: '提交审批', shortcut: ['Ctrl+Enter', 'Meta+Enter'], canExecute: canWrite, execute: async () => {
     if (!flush() || !app.activeId) return
     const id = app.activeId
-    if (await overlay.confirm({ title: '提交审批', content: '提交后订单不可修改，并占用对应申购需求的可采购量。此演示到提交审批为止。', confirmText: '确认提交' })) await app.write(id, 'submit')
+    if (await overlay.confirm({ title: '提交审批', intent: 'info', content: '提交后订单不可修改，并占用对应申购需求的可采购量。此演示到提交审批为止。', confirmText: '确认提交' })) await app.write(id, 'submit')
   } })
   const shortcuts = new CommandShortcutController({ commandManager: commands, source: () => documents.get(app.activeId ?? '')?.grid ?? root, priority: 100 })
   // Register command shortcuts before creating focusable selector fields.
@@ -318,7 +318,7 @@ export function createWorkbenchView(app: ProcurementWorkbench, services: ViewSer
           view.version = version
         }
         const readonly = app.resetPending || !!doc.pending || doc.record?.status === 'submitted'
-        view.grid.readonly = readonly; view.supplier.readonly = readonly; view.supplier.disabled = app.resetPending || !!doc.pending; view.remark.readonly = readonly
+        view.grid.readonly = readonly; view.supplier.readonly = readonly; view.remark.readonly = readonly
         manager.updateItem(id, { title: doc.record?.number ?? '新采购订单', dirty: app.dirty(doc) })
       }
       const active = app.active

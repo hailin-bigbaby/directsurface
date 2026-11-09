@@ -84,3 +84,15 @@ The browser input controller uses a session port with explicit session identity 
 `ClipboardController` accepts an optional object with `readText()` and `writeText(text)` methods, while its default behavior continues to use the browser clipboard. `dispose()` prevents further reads/writes and ignores pending results that complete afterward. Dispose controllers owned by your application when their scope ends; do not dispose the framework's shared singleton as a per-control cleanup action.
 
 The visible performance panel repaints the union of its previous and current bounds when updated, moved, minimized or hidden. Hidden idle panels produce no further panel damage. This optimization preserves the same display and interaction behavior.
+
+## 输入会话与窗口边界
+
+`InputComposer` 的 `onSessionEnd` 在会话失去所有权后通知调用方；`ownsSession(token)` 可检查令牌是否仍有效。原生输入消费者可使用 `onBeforeInput`、`onNativeInput` 和 `onNativeCompositionEnd`；原生回调与对应的简化回调不会重复触发。`isolateNativeEvents` 会在释放时更换原生输入载体，隔离排队中的旧事件。只读输入仍在聚焦之前设置只读状态。
+
+按内容高度布局的窗口在居中之前完成测量；宿主缩小时会修正越出可见范围的模态窗口位置。事件监听的传播边界和清理规则见 [Event routing](event-routing.md)。
+
+## Browser file service
+
+Import `applicationFiles` and the `ApplicationFilePort`, `SaveFileOptions`, and `SaveFileResult` types from `directsurface`. `applicationFiles()` returns the shared browser service for `pickFiles`, `readDataUrl`, and `saveBytes`.
+
+`saveBytes(bytes, { name, type, signal })` starts a browser download and returns `status: 'download-started'`; this is not confirmation that an operating-system save completed. An already-aborted signal rejects before creating a download. `readDataUrl(file)` reads the supplied File bytes as a data URI.

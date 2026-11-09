@@ -1,5 +1,7 @@
 # Prompt 输入对话框
 
+统一视觉与布局规则见 [Modal 与 Prompt 统一设计规范](dialog-design.md)。
+
 > **通用布局能力**：`RenderPromptModal` 继承 `RenderBox` 的尺寸、min/max、`margin` 和槽位对齐属性；作为 modal 打开时，viewport 居中和默认面板尺寸仍由 Prompt 规则控制。详见[组件通用布局属性](../common-layout-properties.md)。
 
 `RenderPromptModal` 是单行输入型模态对话框。它在 [Modal](./modal.md) 的阻断式遮罩和按钮区基础上内置一个 `RenderTextBox`，适合快速收集一段简短文本。
@@ -96,7 +98,7 @@ overlayService.prompt({
 | `buttons` | `ModalButton[]` | 取消/确认 | 底部按钮列表。 |
 | `visible` | `boolean` | `false` | 初始可见状态。直接传 `true` 不等同于调用 `show()` 注册 popup 和启动输入会话。 |
 | `modalWidth` | `number` | `420` | 面板宽度。 |
-| `modalHeight` | `number` | `220` | 面板高度。 |
+| `modalHeight` | `number` | `0` | 最小面板高度；默认按说明、输入框和操作区自适应。 |
 | `appContext` | `AppContextRegistry` | `undefined` | modal 局部上下文。 |
 | `disposeAppContextOnDispose` | `boolean` | `false` | dispose 时是否释放局部上下文。 |
 | `onClose` | `(buttonKey: string \| null, value: string) => void` | `undefined` | 关闭回调。 |
@@ -127,7 +129,7 @@ overlayService.prompt({
 | `confirmText` | `string` | `'确认'` | 确认按钮文本。 |
 | `cancelText` | `string` | `'取消'` | 取消按钮文本。 |
 | `modalWidth` | `number` | `420` | 面板宽度。 |
-| `modalHeight` | `number` | `220` | 面板高度。 |
+| `modalHeight` | `number` | `0` | 最小面板高度；默认按说明、输入框和操作区自适应。 |
 
 `prompt()` 会先 `closeModal()`，因此会关闭当前 active Modal/Prompt，然后打开新的 prompt。
 
@@ -149,10 +151,10 @@ overlayService.prompt({
 | `show()` | `void` | 打开 prompt，注册 popup，启动输入会话并聚焦输入框。 |
 | `hide(buttonKey?)` | `void` | 关闭 prompt，结束输入焦点，触发 `onClose`。 |
 | `close()` | `void` | 等同于 `hide(null)`。 |
-| `onKeyDown(event)` | `boolean` | 处理 Tab、Enter、Escape。 |
+| `onKeyDown(event)` | `boolean` | 处理 Tab、Shift+Tab、Enter、Space、Escape、PageUp 和 PageDown。 |
 | `onEscape(event)` | `boolean` | 关闭并返回 `null`。 |
 | `onOutsidePointerDown(event)` | `boolean` | 消费遮罩点击但不关闭。 |
-| `onWheel(event)` | `boolean` | 消费滚轮，阻止底层滚动。 |
+| `onWheel(event)` | `boolean` | 滚动说明内容，阻止底层滚动。 |
 | `hitTest(point, context?)` | `boolean` | 可见时整个 viewport 命中。 |
 | `dispose()` | `void` | 关闭 popup、释放动画、输入框和可选上下文。 |
 
@@ -166,11 +168,11 @@ overlayService.prompt({
 | 点击输入框 | 指针事件转发给内部 `RenderTextBox`。 |
 | 点击按钮 | 按下和抬起都在同一按钮上时关闭，并返回按钮 key 和当前 value。 |
 | 点击遮罩 | 被消费，prompt 保持打开。 |
-| `Enter` | 确认，等同于 `hide('ok')`。 |
-| 输入框 submit | 确认，等同于 `hide('ok')`。 |
+| `Enter` | 执行当前聚焦按钮；输入框聚焦时执行主按钮。 |
+| 输入框 submit | 执行主按钮，返回该按钮的 key。 |
 | `Escape` | 取消，等同于 `hide(null)`。 |
-| `Tab` | 被消费，用于阻断焦点离开当前 overlay；当前实现不做内部焦点巡航。 |
-| 滚轮 | 被消费，底层不滚动。 |
+| `Tab` | 在输入框和操作按钮间循环；Shift+Tab 反向循环。 |
+| 滚轮 | 滚动说明全文，底层不滚动。 |
 
 当前实现没有按钮级禁用，也没有内置校验失败阻止关闭的机制。业务需要校验时，应在 Promise 返回后处理，或实现自定义输入对话框。
 
@@ -185,7 +187,9 @@ Prompt 使用 Modal 的视觉 token：
 5. 单行输入框。
 6. 底部按钮。
 
-默认面板尺寸是 `420 x 220`。输入框位置由标题栏高度、modal padding 和 `deriveTextInputStyle(theme).height` 计算。每次 paint 前会同步 viewport 尺寸和输入框布局，因此窗口尺寸变化后仍保持居中。
+默认宽度为 `420`，宽度受视口限制，高度根据内容自适应。Prompt 与 Modal 共用浅蓝标题区、主题标题排版、内边距和操作区布局。说明支持换行与滚动，通常输入框和按钮固定在说明下方；按钮放不下时纵向排列并允许标签换行。特别矮的视口中整个内容区滚动，Tab 会把输入框或按钮滚入可见区域。
+
+每次绘制同步输入框位置，确保滚动、缩放后仍可正确输入。PageUp/PageDown 滚动说明，Escape 取消，Enter 确认当前聚焦按钮；输入框聚焦时 Enter 使用主按钮。
 
 ## App Context
 
@@ -260,7 +264,7 @@ Prompt 继承阻断式对话框语义，遮罩点击只消费事件，不关闭�
 
 ### Enter 是否总是确认？
 
-是。Prompt 的 `onKeyDown` 和内部输入框 submit 都会以 `ok` 关闭。
+不是。输入框聚焦时 Enter 执行主按钮；Tab 聚焦操作按钮后，Enter/Space 执行该按钮。输入法组字期间不会由弹框抢先确认。
 
 ### 能放多个输入框吗？
 
@@ -273,3 +277,7 @@ Prompt 继承阻断式对话框语义，遮罩点击只消费事件，不关闭�
 - [Drawer 抽屉](./drawer.md)
 - [TextBox / TextBox](../input/text-box.md)
 - App Context
+
+### 可选语义图标
+
+Prompt 默认显示蓝色 `info` 图标；显式传入 `intent: null` 可隐藏。直接构造 `RenderPromptModal` 或调用 `AppOverlayService.prompt()` 时，可显式传入 `intent: 'info' | 'warning' | 'success' | 'error'`。图标、主题颜色和标题对齐规则与 Modal 相同，不改变输入和确认行为。

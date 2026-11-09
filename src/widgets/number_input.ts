@@ -61,6 +61,20 @@ export interface NumberInputValueChangeDetail {
   readonly direction: 1 | -1
 }
 
+// Decimal stepping uses the shortest decimal spellings without an arbitrary precision cutoff.
+function addDecimalStep(base: number, step: number, direction: number): number {
+  const parts = (value: number) => {
+    const [mantissa, exponent = '0'] = String(value).split('e')
+    return { coefficient: BigInt(mantissa!.replace('.', '')), exponent: Number(exponent) - (mantissa!.split('.')[1]?.length ?? 0) }
+  }
+  const a = parts(base), b = parts(step), exponent = Math.min(a.exponent, b.exponent)
+  const coefficient = a.coefficient * 10n ** BigInt(a.exponent - exponent) + BigInt(direction) * b.coefficient * 10n ** BigInt(b.exponent - exponent)
+  return Number(`${coefficient}e${exponent}`)
+}
+
+export type NumberInputValueState = 'value' | 'empty' | 'mixed'
+export type NumberInputCommitMode = 'normalize' | 'strict'
+
 export class RenderNumberInput extends RenderBox implements
   InteractiveRenderObject,
   Focusable,
@@ -68,6 +82,18 @@ export class RenderNumberInput extends RenderBox implements
   ValueEditor<number, NumberInputValueChangeReason, NumberInputValueChangeDetail> {
   static override debugTypeName = 'RenderNumberInput'
   readonly preventsPointerActivationOnAccept = true
+  private _valueState: NumberInputValueState = 'value'
+  private _draftChanged = false
+  allowEmpty: boolean
+  commitMode: NumberInputCommitMode
+  emptyText: string
+  mixedText: string
+  /** Strict integer fields reject fractions; decimal fields retain the finite value without rounding. */
+  integer: boolean
+  parseText?: (text: string) => number | undefined
+  onDraftChange?: (text: string) => void
+  onValueStateChange?: (state: NumberInputValueState, value: number | undefined) => void
+  onKeyDown?: (event: KeyboardEvent) => boolean | void
   private _value: number
   min: number
   max: number
@@ -76,6 +102,8 @@ export class RenderNumberInput extends RenderBox implements
   wheelMode: NumberInputWheelMode
   label: string
   onChange?: (value: number) => void
+  /** Optional coordinator for native Enter/blur. Explicit commitEdit remains direct. */
+  onCommitRequest?: () => boolean
   private _disabled: boolean
   private _readonly: boolean
   private _status: FormFieldStatus
@@ -122,6 +150,16 @@ export class RenderNumberInput extends RenderBox implements
 
   constructor(opts: {
     value?: number
+    valueState?: NumberInputValueState
+    allowEmpty?: boolean
+    commitMode?: NumberInputCommitMode
+    integer?: boolean
+    parseText?: (text: string) => number | undefined
+    emptyText?: string
+    mixedText?: string
+    onDraftChange?: (text: string) => void
+    onValueStateChange?: (state: NumberInputValueState, value: number | undefined) => void
+    onKeyDown?: (event: KeyboardEvent) => boolean | void
     min?: number
     max?: number
     step?: number
@@ -137,6 +175,16 @@ export class RenderNumberInput extends RenderBox implements
     suffixText?: string
   }) {
     super()
+    this.commitMode = opts.commitMode ?? 'normalize'
+    this.allowEmpty = opts.allowEmpty ?? false
+    this.integer = opts.integer ?? false
+    this.parseText = opts.parseText
+    this.emptyText = opts.emptyText ?? '未设置'
+    this.mixedText = opts.mixedText ?? '混合值（未修改）'
+    this._valueState = opts.valueState ?? 'value'
+    this.onValueStateChange = opts.onValueStateChange
+    this.onDraftChange = opts.onDraftChange
+    this.onKeyDown = opts.onKeyDown
     this.min = opts.min ?? -Infinity
     this.max = opts.max ?? Infinity
     this.step = opts.step ?? 1
@@ -154,10 +202,29 @@ export class RenderNumberInput extends RenderBox implements
     this._syncFocusRegistration()
   }
 
+  get valueState(): NumberInputValueState { return this._valueState }
+  set valueState(value: NumberInputValueState) {
+    if (!['value','empty','mixed'].includes(value)) throw Error('invalid-number-value-state')
+    if (value === this._valueState) return
+    this.cancelEdit(); this._valueState = value; this.markNeedsPaint()
+  }
+  getNullableValue(): number | null | undefined { return this.valueState === 'mixed' ? undefined : this.valueState === 'empty' ? null : this.value }
+  setNullableValue(value: number | null | undefined): void {
+    this.cancelEdit()
+    if (value === null || value === undefined) this.valueState = value === null ? 'empty' : 'mixed'
+    else this.value = value
+  }
+  /** Pending lexical input is available to transactional property forms without coercion. */
+  setDraftText(text: string): void {
+    this.cancelEdit(); this._editText = text; this._editing = true; this._draftChanged = true; this.markNeedsPaint()
+  }
+  get hasPendingEdit(): boolean { return this._editing }
+
   get value(): number { return this._value }
   set value(value: number) {
     const nextValue = this._normalizeValue(value)
-    if (this._value === nextValue) return
+    if (this._value === nextValue && this._valueState === 'value') return
+    this._valueState = 'value'
     this._value = nextValue
     if (!this._editing) this._editText = this._formattedValue()
     this.markNeedsPaint()
@@ -169,7 +236,7 @@ export class RenderNumberInput extends RenderBox implements
 
   setValue(value: number): void {
     const nextValue = this._normalizeValue(value)
-    if (Object.is(this._value, nextValue)) return
+    if (Object.is(this._value, nextValue) && this.valueState === 'value') return
     this.cancelEdit()
     this.value = nextValue
   }
@@ -201,7 +268,10 @@ export class RenderNumberInput extends RenderBox implements
           this._hoveredBtn = null
           this._pressedBtn = null
         },
-        () => { committed = this.commitEdit() },
+        () => {
+          if (this.onCommitRequest || this.commitMode === 'strict') this.cancelEdit()
+          else committed = this.commitEdit()
+        },
         () => {
           if (!committed) this.cancelEdit()
           else if (this._focused) this._endEdit()
@@ -275,12 +345,24 @@ export class RenderNumberInput extends RenderBox implements
   visitChildren(_visitor: (child: RenderObject) => void): void {}
 
   get isFocused(): boolean { return this._focused }
+  get isEditing(): boolean { return this._editing }
+  get isComposing(): boolean { return this._textInput.composing }
+  shouldIgnoreKeyDown(event: KeyboardEvent): boolean { return event.isComposing || event.keyCode === 229 || this.isComposing }
+  get draftText(): string { return this._editText }
+  validateEdit(): boolean {
+    if (!this._editing) return true
+    if (this.isComposing) return false
+    if (!this._draftChanged && this.valueState !== 'value') return true
+    const raw = this._editText.trim()
+    if (!raw) return this.allowEmpty
+    return this.commitMode === 'strict' ? this._parseStrict(raw) !== undefined : Number.isFinite(Number(raw))
+  }
   focusIn(): void { this._startEdit() }
   focusOut(): void {
     if (!this._focused) return
     let committed = true
     runCleanupSteps([
-      () => { committed = this.commitEdit() },
+      () => { committed = this.onCommitRequest ? this.onCommitRequest() : this.commitEdit() },
       () => {
         if (!committed) this._suspendEdit()
         else if (this._focused) this._endEdit()
@@ -330,7 +412,7 @@ export class RenderNumberInput extends RenderBox implements
   }
 
   private _normalizeValue(value: number): number {
-    return this._clamp(this._round(value))
+    return this.commitMode === 'strict' ? value : this._clamp(this._round(value))
   }
 
   private _displayText(): string {
@@ -339,7 +421,8 @@ export class RenderNumberInput extends RenderBox implements
   }
 
   private _formattedValue(): string {
-    return this._round(this.value).toFixed(this.decimals)
+    if (this.valueState !== 'value') return this.valueState === 'mixed' ? this.mixedText : this.emptyText
+    return this.commitMode === 'strict' ? String(this.value) : this._round(this.value).toFixed(this.decimals)
   }
 
   // 文字区域的起始 x（全局坐标）和宽度
@@ -385,7 +468,7 @@ export class RenderNumberInput extends RenderBox implements
     const stepper = deriveNumberStepperStyle(context.theme)
     const bw = resolveNumberStepperWidth(w, stepper.width)
     const fieldHeight = s.height
-    const textColor = resolveFormFieldTextColor(s, this.disabled)
+    const textColor = !this._editing && this.valueState !== 'value' && !this.disabled ? s.placeholderText : resolveFormFieldTextColor(s, this.disabled)
     paintFormFieldShell(context, offset, w, fieldHeight, {
       focused: this._focused,
       hovered: this._hovered,
@@ -534,7 +617,8 @@ export class RenderNumberInput extends RenderBox implements
     if (this._focused && this._textInput.hasSession) return
     if (!this._editing) {
       this._editing = true
-      this._editText = this._round(this.value).toFixed(this.decimals)
+      this._draftChanged = false
+      this._editText = this.valueState === 'value' ? this._formattedValue() : ''
     }
     this._focused = true
     this._textInput.setScrollX(0)
@@ -547,22 +631,28 @@ export class RenderNumberInput extends RenderBox implements
       },
       refreshOnStart: true,
       onInput: (value, session) => {
+        this._draftChanged = true
         this._editText = value
+        this.onDraftChange?.(value)
         session.refresh({ syncSelectionFromComposer: true })
       },
       onCompositionUpdate: (_text, session) => {
         session.refresh({ resetBlink: true })
       },
       onCompositionEnd: (value, session) => {
+        this._draftChanged = true
         this._editText = value
+        this.onDraftChange?.(value)
         session.refresh({ syncSelectionFromComposer: true })
       },
       onKeyDown: (e, session) => {
         if (e.isComposing || e.keyCode === 229 || this._textInput.composing) return
+        if (this.onKeyDown?.(e)) return
+        if (['Backspace','Delete'].includes(e.key) && !this._editText && this.valueState !== 'value') { this._draftChanged = true; this.onDraftChange?.('') }
         if (e.key === 'Enter') {
           e.preventDefault()
-          this.commitEdit()
-          FocusManager.instance.dispatchUnhandledEnterFrom(this, e)
+          const committed = this.onCommitRequest ? this.onCommitRequest() : this.commitEdit()
+          if (committed) FocusManager.instance.dispatchUnhandledEnterFrom(this, e)
         }
         else if (e.key === 'Escape') { e.preventDefault(); this.cancelEdit() }
         else if (e.key === 'ArrowUp') { e.preventDefault(); this._step(1) }
@@ -574,10 +664,26 @@ export class RenderNumberInput extends RenderBox implements
     })
   }
 
+  private _parseStrict(text: string): number | undefined {
+    if (!this.parseText && !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(text)) return
+    const value = this.parseText ? this.parseText(text) : Number(text)
+    if (value === undefined || !this.parseText && value === 0 && /[1-9]/.test(text.split(/[eE]/)[0]!)) return
+    if (!Number.isFinite(value) || value < this.min || value > this.max || this.integer && !Number.isSafeInteger(value)) return
+    return value
+  }
   commitEdit(): boolean {
     if (!this._editing) return true
-    const parsed = parseFloat(this._editText)
-    if (Number.isFinite(parsed)) {
+    if (this._textInput.composing) return false
+    if (!this._draftChanged && (this.valueState !== 'value' || this.commitMode === 'strict')) { this._endEdit(); return true }
+    const raw = this._editText.trim()
+    if (!raw && this.allowEmpty) {
+      const changed = this.valueState !== 'empty'
+      this._valueState = 'empty'; this._endEdit(); this.markNeedsPaint()
+      if (changed) this.onValueStateChange?.('empty', undefined)
+      return true
+    }
+    const parsed = this.commitMode === 'strict' ? this._parseStrict(raw) : parseFloat(raw)
+    if (parsed !== undefined && Number.isFinite(parsed)) {
       const nextValue = this._normalizeValue(parsed)
       if (!Number.isFinite(nextValue)) return false
       const previousValue = this.value
@@ -630,10 +736,16 @@ export class RenderNumberInput extends RenderBox implements
 
   private _step(dir: 1 | -1): void {
     if (this.disabled || this.readonly || this._textInput.composing) return
-    const base = this._editing ? parseFloat(this._editText) : this.value
-    if (!Number.isFinite(base)) return
+    const raw = this._editText.trim()
+    const base = this._editing && !raw && this.allowEmpty ? 0 : this._editing && (this._draftChanged || this.valueState === 'value') ? this.commitMode === 'strict' ? this._parseStrict(raw) : parseFloat(raw) : this.valueState === 'value' ? this.value : 0
+    if (base === undefined || !Number.isFinite(base)) return
     const previousValue = this.value
-    this.value = this._clamp(this._round(base + dir * this.step))
+    if (!Number.isFinite(this.step)) return
+    const stepped = this.commitMode === 'strict' ? addDecimalStep(base, this.step, dir) : this._round(base + dir * this.step)
+    if (this.commitMode === 'strict' && !Number.isFinite(stepped)) return
+    const nextValue = this._clamp(stepped)
+    if (!Number.isFinite(nextValue) || this.commitMode === 'strict' && this.integer && !Number.isSafeInteger(nextValue)) return
+    this.value = nextValue
     if (this._editing) {
       const nextText = this._formattedValue()
       this._editText = nextText
@@ -662,6 +774,7 @@ export class RenderNumberInput extends RenderBox implements
   ): void {
     const steps: DisposeFn[] = [
       () => this.onChange?.(this.value),
+      () => this.onValueStateChange?.(this.valueState, this.value),
     ]
     if (!Object.is(previousValue, this.value)) {
       steps.push(() => this._valueEditorEvents.emitValueChange({
@@ -857,6 +970,7 @@ export class RenderNumberInput extends RenderBox implements
         }
       },
       () => this._valueEditorEvents.dispose(),
+      () => { this.onCommitRequest = undefined },
       () => super.dispose(),
     )
   }

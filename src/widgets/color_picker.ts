@@ -814,6 +814,14 @@ export class RenderColorPicker extends FocusableControl implements
   static override debugTypeName = 'RenderColorPicker'
   color: Color
   label: string
+  private _valueState: 'value' | 'empty' | 'mixed' = 'value'
+  get valueState() { return this._valueState }
+  set valueState(value: 'value' | 'empty' | 'mixed') {
+    if (value === this._valueState) return
+    this._valueState = value; this.markNeedsLayout(); this.markNeedsPaint()
+  }
+  emptyText: string
+  private get valueText() { return this.valueState === 'empty' ? this.emptyText : this.valueState === 'mixed' ? '混合颜色（未修改）' : colorToHex(this.color, true).toUpperCase() }
   onChange?: (color: Color) => void
 
   private _disabled = false
@@ -832,6 +840,8 @@ export class RenderColorPicker extends FocusableControl implements
   constructor(opts: {
     color?: Color
     label?: string
+    valueState?: 'value' | 'empty' | 'mixed'
+    emptyText?: string
     disabled?: boolean
     readonly?: boolean
     status?: FormFieldStatus
@@ -843,6 +853,8 @@ export class RenderColorPicker extends FocusableControl implements
     super({ disabled: opts.disabled ?? false })
     this.color = opts.color ?? { r: 100, g: 149, b: 237, a: 1 }
     this.label = opts.label ?? ''
+    this._valueState = opts.valueState ?? 'value'
+    this.emptyText = opts.emptyText ?? '无颜色'
     this._disabled = opts.disabled ?? false
     this._readonly = opts.readonly ?? false
     this._status = opts.status ?? 'default'
@@ -955,7 +967,7 @@ export class RenderColorPicker extends FocusableControl implements
     const input = this._inputTokens(context.theme)
     const s = this._styleTokens(context.theme)
     const swatchW = this._triggerSwatchWidth(input, s)
-    const valueText = colorToHex(this.color, true).toUpperCase()
+    const valueText = this.valueText
     const labelW = this.label
       ? TextMeasurer.measureWidth(this.label, input.fontSize, input.fontFamily)
       : 0
@@ -993,7 +1005,7 @@ export class RenderColorPicker extends FocusableControl implements
       reserveTrailingWidth: this._triggerSwatchWidth(input, s),
     })
 
-    const valueText = colorToHex(this.color, true).toUpperCase()
+    const valueText = this.valueText
     const textColor = this.disabled
       ? input.textDisabled
       : input.text
@@ -1029,7 +1041,7 @@ export class RenderColorPicker extends FocusableControl implements
     ctx.fillStyle = '#aaa'; ctx.fillRect(innerX + cs, innerY + cs, innerW - cs, innerH - cs)
     ctx.restore()
     const color = this.disabled || readonlyVisual ? { ...this.color, a: Math.max(0.34, this.color.a * 0.58) } : this.color
-    dl.fillRect(innerX, innerY, innerW, innerH, color, s.innerBorderRadius)
+    if (this.valueState === 'value') dl.fillRect(innerX, innerY, innerW, innerH, color, s.innerBorderRadius)
     dl.strokeRect(innerX, innerY, innerW, innerH, s.borderColor, 1, s.innerBorderRadius)
   }
 
@@ -1043,6 +1055,7 @@ export class RenderColorPicker extends FocusableControl implements
         const nextValue = { ...color }
         const valueChanged = !sameColor(previousValue, nextValue)
         this.color = nextValue
+        this.valueState = 'value'
         runCleanupSteps([
           () => this.onChange?.({ ...nextValue }),
           () => {

@@ -487,3 +487,7 @@ PlainTextEditor 的性能策略：
 - [TreeView](../data/tree-view.md)：文件树、对象树或目录树。
 - [CommandToolbar](../command/command-toolbar.md)：编辑器工具栏。
 - [Runtime Diagnostics](../../lifecycle.md)：性能诊断。
+
+## 背景标记
+
+文本 decoration 的 `appearance` 可设为 `'background'`，在源文本范围绘制背景；默认仍是 `'underline'`。标记只影响显示，不改变文档内容。子类可通过 `inlineTextPreview()` 与 `inlineTextAnnotations()` 提供不写入文档的行内显示，并调用 `refreshInlinePresentation()` 更新滚动与绘制。

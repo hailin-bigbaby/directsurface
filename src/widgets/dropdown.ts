@@ -162,11 +162,18 @@ export class DropdownPopup extends PopupShell {
   private _searchInput = new PopupTextInput(() => PopupManager.instance.requestPaint())
   private _disposables = new DisposableBag()
 
-  constructor() {
+  constructor(private readonly hostSurface?: { context: () => PopupContext; repaint: () => void }) {
     super()
   }
+  protected override get popupContext(): PopupContext { return this.hostSurface?.context() ?? super.popupContext }
+  protected override requestPopupPaint(fallback?: () => void): void { if (this.hostSurface) this.hostSurface.repaint(); else super.requestPopupPaint(fallback) }
+  private _ownerInput = false
+  private _candidateActivated = false
 
   debugState(): {
+    layout: DropdownPopupLayout
+    itemHeight: number
+    contentY: number
     filteredOptions: DropdownOption[]
     keyboardIndex: number
     scrollOffset: number
@@ -175,6 +182,7 @@ export class DropdownPopup extends PopupShell {
     clearable: boolean
   } {
     return {
+      layout: this._popupLayout(this.popupContext), itemHeight: this._listMetrics(this.popupContext).itemHeight, contentY: this._listMetrics(this.popupContext).contentY,
       filteredOptions: [...this._filteredOptions],
       keyboardIndex: this._keyboardIndex,
       scrollOffset: this._scrollOffset,
@@ -194,6 +202,7 @@ export class DropdownPopup extends PopupShell {
     maxPopupWidth?: number
     clearable?: boolean
     keepOpenOnAnchorPointerDown?: boolean
+    ownerInput?: boolean
     onSelect: (value: string, option: DropdownOption) => boolean | void
     onClear?: () => boolean | void
     onTab?: (direction: 1 | -1) => void
@@ -216,12 +225,13 @@ export class DropdownPopup extends PopupShell {
     this._onClear = opts.onClear
     this._onTab = opts.onTab
     this._onClose = opts.onClose
+    this._ownerInput = opts.ownerInput ?? false; this._candidateActivated = false
     this._searchText = ''
     this._hoveredValue = ''
     this._keyboardIndex = this._filteredOptions.findIndex(o => o.value === opts.selectedValue)
     this._scrollOffset = 0
     this._scrollToKeyboard()
-    this.openPopup({ owner: resolvePopupAnchorTarget(opts.anchor) })
+    this.openPopup({ owner: resolvePopupAnchorTarget(opts.anchor), ...(this._ownerInput ? { interactionMode: 'nonmodal' as const } : {}) })
     if (previousFocus) FocusManager.instance.setFocus(previousFocus)
 
     if (this._searchable) {
@@ -269,6 +279,11 @@ export class DropdownPopup extends PopupShell {
   private _handleKeyDown(event: KeyboardEvent): boolean {
     if (!this.visible) return false
     if (isImeCompositionKey(event) || this._searchInput.composing) return false
+    if (this._ownerInput) {
+      if (!['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(event.key)) return false
+      if (event.key === 'Enter' && !this._candidateActivated) return false
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') this._candidateActivated = true
+    }
     if (event.key === 'Tab') {
       if (this._onTab) {
         event.preventDefault()
@@ -286,6 +301,11 @@ export class DropdownPopup extends PopupShell {
       event.preventDefault()
       this.close()
       return true
+    }
+    // Keyboard navigation takes ownership from the last stationary mouse hover.
+    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)
+      || (!this._searchable && event.key.length === 1 && /\S/.test(event.key))) {
+      this._hoveredValue = ''
     }
     if (event.key === 'ArrowDown') {
       event.preventDefault()
@@ -382,7 +402,7 @@ export class DropdownPopup extends PopupShell {
 
   private _scrollToKeyboard(): void {
     if (this._keyboardIndex < 0) return
-    const visibleRows = Math.max(1, this._popupLayout(PopupManager.instance.context).visibleRows)
+    const visibleRows = Math.max(1, this._popupLayout(this.popupContext).visibleRows)
     if (this._keyboardIndex < this._scrollOffset) {
       this._scrollOffset = this._keyboardIndex
     } else if (this._keyboardIndex >= this._scrollOffset + visibleRows) {
@@ -392,7 +412,7 @@ export class DropdownPopup extends PopupShell {
   }
 
   private _maxScrollOffset(): number {
-    const visibleRows = this._popupLayout(PopupManager.instance.context).visibleRows
+    const visibleRows = this._popupLayout(this.popupContext).visibleRows
     return Math.max(0, this._filteredOptions.length - Math.max(1, visibleRows))
   }
 
@@ -406,7 +426,7 @@ export class DropdownPopup extends PopupShell {
     const pointer = this._scrollbarPointerKey
     this._scrollbarDragging = false
     this._scrollbarPointerKey = undefined
-    const metrics = point ? this._scrollbarMetrics(PopupManager.instance.context) : null
+    const metrics = point ? this._scrollbarMetrics(this.popupContext) : null
     const changed = point && metrics
       ? this._scrollbarController.endPointer(point, metrics.geometry, pointer).stateChanged
       : this._scrollbarController.cancelPointer(pointer)
@@ -753,7 +773,7 @@ export class DropdownPopup extends PopupShell {
 
   paint(context: PaintContext): void {
     if (!this.visible) return
-    const popupContext = PopupManager.instance.context
+    const popupContext = this.popupContext
     const dropdown = deriveDropdownStyle(context.theme)
     const scrollbarStyle = deriveScrollbarStyle(context.theme)
     const popupStyle = derivePopupStyle(context.theme)
@@ -794,7 +814,7 @@ export class DropdownPopup extends PopupShell {
       const optY = contentY + vi * itemH
       const isSelected = opt.value === this._selectedValue
       const isHovered = opt.value === this._hoveredValue
-      const isKbSelected = i === this._activeIndex()
+      const isKbSelected = !this._hoveredValue && i === this._keyboardIndex
       const itemState = {
         disabled: !!opt.disabled,
         selected: isSelected,
@@ -806,6 +826,9 @@ export class DropdownPopup extends PopupShell {
         dl.fillRect(r.x, optY, r.w, itemH, itemBg, 0)
       }
 
+      if (isKbSelected && !opt.disabled) {
+        dl.strokeRect(r.x + 2, optY + 2, r.w - 4, itemH - 4, context.theme.focusBorder, 2)
+      }
       const textColor = resolveTextColor(dropdown.itemText, itemState)
       const displayLabel = ellipsizeText(
         opt.label,

@@ -82,6 +82,8 @@ export function resolveHitTestLocalPosition(entry: HitTestEntry, globalPosition:
 // ---- HitTestTarget: 参与命中测试与事件分发的节点接口 ----
 // RenderObject 默认实现 hitTestPath，InteractiveRenderObject 实现事件回调
 export interface HitTestTarget {
+  readonly isPointerEventBoundary?: boolean
+  readonly hasPointerEventListeners?: boolean
   readonly preservesCurrentFocusOnPointerDown?: boolean
   onPointerEnter?(event: PointerEvent): void
   onPointerLeave?(event: PointerEvent): void
@@ -261,7 +263,8 @@ export class HitTestResult {
   interactiveEntries(): HitTestEntry[] {
     return this._path.filter(entry => {
       const target = entry.target
-      return typeof target.onPointerEnter === 'function' ||
+      return target.hasPointerEventListeners === true ||
+             typeof target.onPointerEnter === 'function' ||
              typeof target.onPointerLeave === 'function' ||
              typeof target.onPointerDownCapture === 'function' ||
              typeof target.onPointerMoveCapture === 'function' ||

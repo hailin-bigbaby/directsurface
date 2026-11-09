@@ -1,3 +1,4 @@
+import { dispatchPointerListeners, pointerWindowPath, pointerActivationEntry } from '../gestures/pointer_event_listeners'
 import type { AnimationClock } from '../animation/animation_clock'
 import { popupViewportRect, type PopupContext } from './popup_manager'
 import type { Offset, Rect, RenderObject } from './render_object'
@@ -388,7 +389,10 @@ export class PopupRenderHost {
     this._sessions.rememberPosition(event, event.position)
     this._sessions.preventActivation(event)
     this._activationSequencer.cancel(event)
-    const result = this._hitTest(event.position)
+    const result = pointerWindowPath(this._hitTest(event.position))
+    const epoch = this._lifecycleEpoch
+    const observed = dispatchPointerListeners(result, 'wheel', event, { isCurrent: () => this._lifecycleEpoch === epoch })
+    if (observed.defaultPrevented || observed.invalidated) return true
     for (let i = result.path.length - 1; i >= 0; i--) {
       const target = result.path[i]!.target
       if (typeof target.onWheel === 'function') {
@@ -549,43 +553,24 @@ export class PopupRenderHost {
       nativeClickCountHint: session.activationNativeClickCountHint,
     })
 
-    if (typeof downEntry.target.onPointerActivate === 'function') {
-      this._pointerDispatcher.dispatchActivationToPath(downPath, downEntry, {
-        type: 'activate',
-        pointerId: event.pointerId,
-        pointerType,
-        button,
-        clickCount: result.clickCount,
-        position: { ...event.position },
-        downPosition: { ...session.activationDownPosition },
-        timeStamp: event.timeStamp ?? this._now(),
-        ctrlKey: event.ctrlKey,
-        shiftKey: event.shiftKey,
-        metaKey: event.metaKey,
-        altKey: event.altKey,
-      })
-      return
-    }
-
-    if (
-      result.clickCount === 2 &&
-      typeof downEntry.target.onDoubleClick === 'function'
-    ) {
-      downEntry.target.onDoubleClick(event.position)
-    }
+    this._pointerDispatcher.dispatchActivationToPath(downPath, downEntry, {
+      type: 'activate',
+      pointerId: event.pointerId,
+      pointerType,
+      button,
+      clickCount: result.clickCount,
+      position: { ...event.position },
+      downPosition: { ...session.activationDownPosition },
+      timeStamp: event.timeStamp ?? this._now(),
+      ctrlKey: event.ctrlKey,
+      shiftKey: event.shiftKey,
+      metaKey: event.metaKey,
+      altKey: event.altKey,
+    })
   }
 
   private _activationEntry(path: HitTestResult): HitTestEntry | undefined {
-    for (let index = path.path.length - 1; index >= 0; index--) {
-      const entry = path.path[index]!
-      if (
-        typeof entry.target.onPointerActivate === 'function' ||
-        typeof entry.target.onDoubleClick === 'function'
-      ) {
-        return entry
-      }
-    }
-    return undefined
+    return pointerActivationEntry(path)
   }
 
   private _now(): number {
@@ -603,10 +588,10 @@ export class PopupRenderHost {
     try {
       return this._sessions.syncHoverEntries(
         pointer,
-        result.interactiveEntries(),
+        pointerWindowPath(result).interactiveEntries(),
         position,
-        (target, event) => target.onPointerLeave?.(event),
-        (target, event) => target.onPointerEnter?.(event),
+        (target, event) => this._pointerDispatcher.dispatchHover(target, event, 'pointerleave'),
+        (target, event) => this._pointerDispatcher.dispatchHover(target, event, 'pointerenter'),
         this,
       )
     } finally {
@@ -620,7 +605,7 @@ export class PopupRenderHost {
     this._hoverDispatchPointers.add(key)
     try {
       this._sessions.clearHover(pointer, position, (target, event) => {
-        target.onPointerLeave?.(event)
+        this._pointerDispatcher.dispatchHover(target, event, 'pointerleave')
       })
     } finally {
       this._hoverDispatchPointers.delete(key)

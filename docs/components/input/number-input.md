@@ -421,3 +421,9 @@ const price = new RenderNumberInput({
 - [焦点与输入](../../lifecycle.md)
 - [事件路由](../../lifecycle.md)
 - [主题与状态](../../themes.md)
+
+## 严格提交、空值与混合值
+
+`commitMode: 'strict'` 校验草稿而不通过取整或钳制悄悄修改输入；`integer: true` 会拒绝小数。默认模式仍是 `'normalize'`。`allowEmpty` 控制是否允许空输入，`parseText` 可提供自定义解析。
+
+`valueState` 支持 `'value'`、`'empty'`、`'mixed'`。`getNullableValue()` 分别返回数值、`null`、`undefined`；可用 `setNullableValue()` 更新。`draftText`、`hasPendingEdit`、`validateEdit()`、`commitEdit()` 和 `cancelEdit()` 用于协调表单提交；组合输入尚未完成时不应提交。步进使用十进制计算，避免常见的浮点尾差。

@@ -10,7 +10,7 @@ import { PopupManager } from '../core/popup_manager'
 import { RenderObject, type Offset } from '../core/render_object'
 import type { RenderBox } from '../layout/render_box'
 import { ContextMenuManager, type ContextMenuEntry } from '../widgets/context_menu'
-import { RenderModal, type ModalButton } from '../widgets/modal'
+import { RenderModal, type ModalButton, type DialogIntent } from '../widgets/modal'
 import {
   NotificationManager,
   type NotificationHandle,
@@ -65,6 +65,7 @@ export interface AppCanvasImageDownloadOptions extends RuntimeCaptureImageOption
 }
 
 export interface AppModalOptions {
+  intent?: DialogIntent | null
   source?: RenderObject
   context?: AppContextRegistry
   contextValues?: Exclude<AppContextInitialValues, AppContextRegistry>
@@ -78,6 +79,7 @@ export interface AppModalOptions {
 }
 
 export interface AppAlertDialogOptions {
+  intent?: DialogIntent | null
   source?: RenderObject
   context?: AppContextRegistry
   contextValues?: Exclude<AppContextInitialValues, AppContextRegistry>
@@ -91,6 +93,7 @@ export interface AppAlertDialogOptions {
 }
 
 export interface AppConfirmDialogOptions {
+  intent?: DialogIntent | null
   source?: RenderObject
   context?: AppContextRegistry
   contextValues?: Exclude<AppContextInitialValues, AppContextRegistry>
@@ -105,6 +108,7 @@ export interface AppConfirmDialogOptions {
 }
 
 export interface AppPromptDialogOptions {
+  intent?: DialogIntent | null
   source?: RenderObject
   context?: AppContextRegistry
   contextValues?: Exclude<AppContextInitialValues, AppContextRegistry>
@@ -868,6 +872,7 @@ export class AppOverlayService {
     let modal!: RenderModal
     modal = new RenderModal({
       title: options.title,
+      intent: options.intent,
       content: options.content,
       buttons: options.buttons,
       modalWidth: options.modalWidth,
@@ -896,6 +901,7 @@ export class AppOverlayService {
         contextValues: options.contextValues,
         disposeContextOnClose: options.disposeContextOnClose,
         title: options.title ?? '提示',
+        intent: options.intent,
         content: options.content,
         modalWidth: options.modalWidth,
         modalHeight: options.modalHeight,
@@ -921,6 +927,7 @@ export class AppOverlayService {
         contextValues: options.contextValues,
         disposeContextOnClose: options.disposeContextOnClose,
         title: options.title ?? '确认操作',
+        intent: options.intent,
         content: options.content,
         modalWidth: options.modalWidth,
         modalHeight: options.modalHeight,
@@ -949,6 +956,7 @@ export class AppOverlayService {
       let modal!: RenderPromptModal
       modal = new RenderPromptModal({
         title: options.title ?? '请输入',
+        intent: options.intent,
         content: options.content,
         value: options.initialValue ?? '',
         placeholder: options.placeholder ?? '',

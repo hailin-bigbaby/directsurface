@@ -1059,7 +1059,7 @@ function computeDropdownStyle(theme: ResolvedTheme): DropdownStyleTokens {
     itemHeight: theme.controlHeight,
     itemBg: {
       normalBg: rgba(0, 0, 0, 0),
-      hoveredBg: theme.stateHoverOverlay,
+      hoveredBg: lerpColor(theme.surfacePopup, theme.accentPrimary, 0.22),
       selectedBg,
       selectedHoveredBg,
     },
@@ -1713,13 +1713,21 @@ export interface ModalStyleTokens {
   shadowOffsetX: number
   shadowOffsetY: number
   titleBg: Color
+  titleIconSize: number
+  titleIconGap: number
+  titleIconColors: Record<'info' | 'warning' | 'success' | 'error', Color>
   titleText: Color
   separator: Color
   text: Color
   fontSize: number
+  titleFontSize: number
+  titleFontWeight: number
+  bodyLineHeight: number
   fontFamily: string
   borderRadius: number
   padding: number
+  contentSpacing: number
+  sectionSpacing: number
   titleHeight: number
   buttonHeight: number
   buttonSpacing: number
@@ -1734,14 +1742,19 @@ export interface ModalStyleTokens {
   dangerButtonText: InteractionTextTokens
 }
 
+// Shared dialog rhythm: container/section spacing differs from related-item spacing.
+const dialogSpacing = { inset: 16, related: 8, section: 16 } as const
+
 function computeModalStyle(theme: ResolvedTheme): ModalStyleTokens {
+  const typography = resolveThemeTypography(theme)
+  const padding = dialogSpacing.inset
   const elevation = resolveThemeElevation(theme)
   const secondaryBase = theme.surfaceControl
   const primaryBase = theme.accentPrimary
   const dangerBase = theme.accentDanger
   const secondaryHover = lerpColor(theme.surfaceControlHover, theme.selectionMuted, 0.45)
   const secondaryPressed = lerpColor(theme.surfaceControlActive, theme.selectionBg, 0.3)
-  const titleBg = theme.surfaceWindowTitleActive
+  const titleBg = lerpColor(theme.surfacePopup, theme.accentPrimary, 0.18)
   return {
     overlayBg: elevation.modalScrim,
     panelBg: theme.surfacePopup,
@@ -1751,16 +1764,24 @@ function computeModalStyle(theme: ResolvedTheme): ModalStyleTokens {
     shadowOffsetX: elevation.windowShadowOffsetX,
     shadowOffsetY: elevation.windowShadowOffsetY,
     titleBg,
+    titleIconSize: typography.titleFontSize,
+    titleIconGap: dialogSpacing.related,
+    titleIconColors: { info: theme.textAccent, warning: theme.accentWarning, success: theme.accentSuccess, error: theme.accentDanger },
     titleText: resolveContrastText(theme, titleBg),
     separator: theme.borderSubtle,
     text: theme.textPrimary,
-    fontSize: theme.fontSize,
+    fontSize: typography.bodyFontSize,
+    titleFontSize: typography.titleFontSize,
+    titleFontWeight: typography.titleFontWeight,
+    bodyLineHeight: typography.bodyLineHeight,
     fontFamily: theme.fontFamily,
     borderRadius: theme.windowRounding,
-    padding: theme.windowPadding,
-    titleHeight: theme.panelHeaderHeight,
+    padding,
+    contentSpacing: dialogSpacing.related,
+    sectionSpacing: dialogSpacing.section,
+    titleHeight: Math.max(40, theme.panelHeaderHeight),
     buttonHeight: theme.controlHeight,
-    buttonSpacing: theme.itemSpacing,
+    buttonSpacing: dialogSpacing.related,
     buttonMinWidth: Math.max(theme.controlHeight * 2.6, theme.fontSize * 5),
     buttonRadius: theme.frameRounding,
     secondaryButtonBg: {
@@ -2782,6 +2803,7 @@ export interface ToolbarStyleTokens {
 function computeToolbarStyle(theme: ResolvedTheme): ToolbarStyleTokens {
   const backgroundColor = lerpColor(theme.surfaceNav, theme.surfacePanel, 0.2)
   const selectedItemBg = theme.selectionMuted
+  const hoveredItemBg = lerpColor(backgroundColor, theme.accentPrimary, 0.22)
   return {
     backgroundColor,
     borderColor: theme.borderSubtle,
@@ -2789,13 +2811,13 @@ function computeToolbarStyle(theme: ResolvedTheme): ToolbarStyleTokens {
     borderWidth: 1,
     padding: Math.max(2, Math.round(theme.framePadding * 0.5)),
     itemSpacing: Math.max(1, Math.round(theme.itemSpacing * 0.3)),
-    sectionGap: Math.max(4, Math.round(theme.itemSpacing * 0.6)),
+    sectionGap: Math.max(8, theme.itemSpacing),
     minHeight: theme.toolbarHeight,
     fontSize: theme.fontSize,
     fontFamily: theme.fontFamily,
-    itemHeight: Math.max(24, theme.controlHeight - 4),
+    itemHeight: theme.controlHeight,
     itemMinWidth: 28,
-    itemIconOnlyWidth: Math.max(24, theme.controlHeight - 6),
+    itemIconOnlyWidth: theme.controlHeight,
     itemPaddingX: Math.max(3, Math.round(theme.framePadding * 0.5)),
     itemRadius: Math.max(2, theme.frameRounding - 1),
     iconSize: Math.max(12, theme.fontSize - 1),
@@ -2810,8 +2832,8 @@ function computeToolbarStyle(theme: ResolvedTheme): ToolbarStyleTokens {
     focusedBorder: theme.focusBorder,
     itemBg: {
       normalBg: rgba(0, 0, 0, 0),
-      hoveredBg: navHoverSurface(theme),
-      pressedBg: lerpColor(navHoverSurface(theme), theme.selectionMuted, 0.48),
+      hoveredBg: hoveredItemBg,
+      pressedBg: lerpColor(backgroundColor, theme.accentPrimary, 0.32),
       selectedBg: selectedItemBg,
       selectedHoveredBg: compositeColor(theme.stateHoverOverlay, selectedItemBg),
       selectedPressedBg: compositeColor(theme.statePressedOverlay, selectedItemBg),

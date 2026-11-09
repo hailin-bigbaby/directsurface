@@ -107,6 +107,28 @@ function paintTreeTextValues(tree: RenderTreeView, theme = ImGuiDarkTheme): stri
   return textValues
 }
 
+it('updates expanded leaf rows, preserves sibling hit targets, and clears removed selection', () => {
+  const parent: TreeNode = { key: 'parent', label: 'Parent', children: [{ key: 'old', label: 'Old child' }] }
+  const sibling = { key: 'sibling', label: 'Sibling' }
+  const tree = new RenderTreeView({ roots: [parent, sibling] })
+  tree.expandedKeys = ['parent']
+  layout(tree, 160, 180)
+  tree.selectedKey = 'old'
+  const siblingBefore = tree.nodeRect('sibling')!
+  const newLeaf = { key: 'new', label: 'A long new label '.repeat(15) }
+  tree.replaceLeafChildren(parent, [newLeaf, { key: 'new-2', label: 'Another leaf' }])
+  expect(tree.selectedKey).toBe('')
+  expect(tree.nodeRect('old')).toBeUndefined()
+  expect(tree.nodeRect('sibling')?.y).toBe(siblingBefore.y + tree.debugState().rowHeight)
+  const rect = tree.nodeRect('new')!
+  expect(tree.nodeAtPosition({ x: rect.x + 10, y: rect.y + rect.height / 2 })).toBe(newLeaf)
+  expect(tree.debugState().showHBar).toBe(true)
+  tree.replaceLeafChildren(parent, [])
+  expect(tree.debugState().showHBar).toBe(false)
+  expect(tree.nodeRect('new')).toBeUndefined()
+  expect(tree.nodeRect('sibling')?.y).toBe(siblingBefore.y - tree.debugState().rowHeight)
+})
+
 afterEach(() => {
   KeyboardBindingController.disposeInstance()
   FocusManager.disposeInstance()

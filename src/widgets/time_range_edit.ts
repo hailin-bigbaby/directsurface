@@ -551,7 +551,7 @@ export class TimeRangePickerPopup extends PopupSurfaceShell implements Popup {
     )
     const buttonWidth = (layout.panelW - layout.style.padding * 2) / 3
     const buttons: Array<{ key: TimeRangeFooterButton; label: string }> = [
-      { key: 'now', label: '当前栏设为现在' },
+      { key: 'now', label: '设为现在' },
       { key: 'ok', label: '确定' },
       { key: 'cancel', label: '取消' },
     ]

@@ -178,3 +178,50 @@ describe('DateCalendarPanel', () => {
     )
   })
 })
+
+for (const mode of ['month', 'year'] as const) {
+  it(`shows a distinct keyboard focus in ${mode} view only for the active panel`, () => {
+    const panel = new DateCalendarPanel()
+    panel.reset({ year: 2026, month: 4, day: 14 })
+    panel.viewMode = mode
+    panel.handleKeyDown(new KeyboardEvent('keydown', { key: 'ArrowRight' }))
+    const stroke = vi.spyOn(DrawList.prototype, 'strokeRect')
+    try {
+      countRoundedBackgrounds(panel, true)
+      expect(stroke).toHaveBeenCalledWith(expect.any(Number), expect.any(Number), expect.any(Number), expect.any(Number), ImGuiDarkTheme.focusBorder, 2, popupStyle.borderRadius)
+      stroke.mockClear()
+      countRoundedBackgrounds(panel, false)
+      expect(stroke).not.toHaveBeenCalled()
+    } finally { stroke.mockRestore() }
+    panel.handleKeyDown(new KeyboardEvent('keydown', { key: 'Enter' }))
+    expect(panel.viewMode).toBe(mode === 'month' ? 'day' : 'month')
+  })
+}
+
+for (const mode of ['month', 'year'] as const) {
+  it(`clears ${mode} mouse hover without losing the keyboard target`, () => {
+    const panel = new DateCalendarPanel()
+    panel.reset({ year: 2026, month: 4, day: 14 })
+    panel.viewMode = mode
+    panel.handleKeyDown(new KeyboardEvent('keydown', { key: 'ArrowRight' }))
+    const target = panel.focusedDate
+    panel.hoveredMonth = 0
+    panel.hoveredYear = 2020
+    expect(panel.clearHover()).toBe(true)
+    expect(panel.hoveredMonth).toBe(-1)
+    expect(panel.hoveredYear).toBe(-1)
+    expect(panel.clearHover()).toBe(false)
+    expect(panel.focusedDate).toEqual(target)
+    panel.handleKeyDown(new KeyboardEvent('keydown', { key: 'Enter' }))
+    expect(panel.focusedDate).toEqual(target)
+  })
+}
+
+it.each(['year', 'month'] as const)('%s precision activates only the selected calendar grain without descending into days', precision => {
+  const panel = new DateCalendarPanel(); panel.selectionPrecision = precision
+  panel.reset({ year: 2026, month: 2, day: 28 }); expect(panel.viewMode).toBe(precision)
+  panel.handleKeyDown(new KeyboardEvent('keydown', { key: 'ArrowDown' }))
+  const out = panel.handleKeyDown(new KeyboardEvent('keydown', { key: 'Enter' }))
+  expect(out.activatedDate).toBeDefined(); expect(panel.viewMode).toBe(precision)
+  expect(out.activatedDate?.day).toBe(1); if (precision === 'year') expect(out.activatedDate?.month).toBe(1)
+})

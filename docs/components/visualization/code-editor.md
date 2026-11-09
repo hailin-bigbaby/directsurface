@@ -601,3 +601,9 @@ const adapter: CodeEditorLanguageAdapter<DslContext> = {
 - [CommandToolbar 命令工具栏](../command/command-toolbar.md)
 - [Popup 弹出层](../overlay/popup.md)
 - DevTools 开发工具
+
+## 行内提示与补全预览
+
+`RenderCodeEditor` 可通过 `inlineSuggestions: true` 显示当前补全候选的后缀预览。预览不写入文档、选区或历史；只读、组合输入和失焦时不会显示。语言适配器可实现 `getInlayHints(source, context, { signal })`，返回 `{ position, label }` 列表；框架会丢弃取消或过期请求的结果。
+
+`signatureHelpBoundary: 'viewport'` 允许紧凑编辑器在宿主视口内显示参数提示；默认值为 `'editor'`。`hoverPlacement: 'below'` 优先将悬停提示放在词元下方，空间不足时放到上方；默认值为 `'side'`。

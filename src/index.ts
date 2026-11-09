@@ -1,3 +1,5 @@
+export type { PointerEventType, PointerEventListenerOptions, PointerEventListener, RoutedPointerEvent } from './gestures/pointer_event_listeners'
+export type { KeyboardEventType, KeyboardEventListenerOptions, KeyboardEventListener, RoutedKeyboardEvent } from './core/keyboard_event'
 export { Application, AppHost, type ApplicationRunOptions } from './app/application'
 export {
   RenderDevToolsWindow,
@@ -186,6 +188,8 @@ export {
   type AuxiliaryFocusRootRegistration,
   type FocusInputModality,
   type Focusable,
+  type FocusTransitionRequest,
+  type FocusTransitionGuard,
 } from './core/focus_manager'
 export { InputComposer, type InputSession, type InputSessionToken } from './core/input_composer'
 export { OverlayInvalidator, type OverlayPaintInvalidator } from './core/overlay_invalidator'
@@ -581,7 +585,7 @@ export {
   type TabbedDocumentPatch,
   type TabbedDocumentRecord,
 } from './widgets/tabbed_workspace'
-export { RenderToolbar, type ToolbarGroup, type ToolbarItem, type ToolbarSlot } from './widgets/toolbar'
+export { RenderToolbar, type ToolbarGroup, type ToolbarItem, type ToolbarSlot, type ToolbarActionSource } from './widgets/toolbar'
 export {
   RenderCommandToolbar,
   type CommandToolbarCommandItem,
@@ -706,6 +710,7 @@ export {
   type CodeEditorHoverSection,
   type CodeEditorHoverSectionKind,
   type CodeEditorHoverSectionPriority,
+  type CodeEditorInlayHint,
   type CodeEditorLanguageAdapter,
   type CodeEditorLocation,
   type CodeEditorReference,
@@ -758,6 +763,8 @@ export {
 } from './widgets/plain_text_tokenizer'
 export {
   RenderNumberInput,
+  type NumberInputValueState,
+  type NumberInputCommitMode,
   type NumberInputValueChangeDetail,
   type NumberInputValueChangeReason,
   type NumberInputWheelMode,
@@ -1263,7 +1270,7 @@ export {
 export { RenderDrawer, type DrawerSide } from './widgets/drawer'
 export { RenderLoadingHost, type RenderLoadingHostOptions } from './widgets/loading'
 export { RenderLoadingModal, type RenderLoadingModalOptions } from './widgets/loading_modal'
-export { RenderModal, type ModalButton } from './widgets/modal'
+export { RenderModal, type ModalButton, type DialogIntent } from './widgets/modal'
 export {
   NotificationManager,
   type NotificationAction,
@@ -1294,3 +1301,6 @@ export {
   type TooltipManagerDebugState,
   type TooltipPresenter,
 } from './widgets/tooltip'
+
+export { applicationFiles } from './runtime/application_file_binding'
+export type { ApplicationFilePort, SaveFileOptions, SaveFileResult } from './runtime/application_files'

@@ -335,6 +335,19 @@ async function openToolbarOverflow(page: Page) {
   await page.mouse.click(rect.x + rect.width / 2, rect.y + rect.height / 2)
   await expect.poll(() => page.evaluate(() => (window as any).__PROCUREMENT__.commandToolbar.debugState().openItemId)).toBe('__toolbar_overflow__')
 }
+test('toolbar buttons align with ordinary controls and show hover feedback', async ({ page }) => {
+  await boot(page, `toolbar-height-${Date.now()}`)
+  const rect = await page.evaluate(() => {
+    const t = (window as any).__PROCUREMENT__
+    const r = t.commandToolbar.itemRect('order.save'), o = t.commandToolbar.globalOffset
+    return { ...r, x: r.x + o.x, y: r.y + o.y, buttonHeight: t.createOrder.size.height, pickerHeight: t.layoutPicker.size.height }
+  })
+  expect(rect.height).toBe(rect.buttonHeight)
+  expect(rect.height).toBe(rect.pickerHeight)
+  await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2)
+  await page.screenshot({ path: test.info().outputPath('toolbar-height-hover-wide.png') })
+})
+
 test('command toolbar overflows data management and preserves menu actions and shortcuts', async ({ page }) => {
   await page.setViewportSize({ width: 560, height: 760 })
   await boot(page, `command-toolbar-${Date.now()}`)

@@ -38,6 +38,9 @@ export class RenderListView<T = unknown> extends RenderBox implements Interactiv
   onSelect?: (item: ListViewItem<T>, index: number) => void
   onActivate?: (item: ListViewItem<T>, index: number) => void
 
+  /** Pointer preview only; never changes selection or keyboard focus. */
+  onHover?: (item: ListViewItem<T> | null) => void
+
   private _items: ListViewItem<T>[]
   private _selectedKey = ''
   private _hoveredKey = ''
@@ -58,6 +61,7 @@ export class RenderListView<T = unknown> extends RenderBox implements Interactiv
     defaultSelectedItem?: ListViewItem<T> | null
     onSelect?: (item: ListViewItem<T>, index: number) => void
     onActivate?: (item: ListViewItem<T>, index: number) => void
+    onHover?: (item: ListViewItem<T> | null) => void
     disabled?: boolean
     copyable?: boolean
     copyText?: (item: ListViewItem<T>, index: number) => string | null | undefined
@@ -67,6 +71,7 @@ export class RenderListView<T = unknown> extends RenderBox implements Interactiv
     this._selectedKey = this._keyForItem(options.selectedItem ?? options.defaultSelectedItem ?? null)
     this.onSelect = options.onSelect
     this.onActivate = options.onActivate
+    this.onHover = options.onHover
     this._rowHeight = deriveListViewStyle(ImGuiDarkTheme).rowHeight
     this._disabled = options.disabled ?? false
     this._copyable = options.copyable ?? true
@@ -137,6 +142,13 @@ export class RenderListView<T = unknown> extends RenderBox implements Interactiv
     })
     if (context.pass === 'measure') return
     this._clampState()
+  }
+
+  private setHoveredKey(key: string): void {
+    if (this._hoveredKey === key) return
+    this._hoveredKey = key
+    const item = this._items.find(item => item.key === key)
+    this.onHover?.(item && !item.disabled && !this.disabled ? item : null)
   }
 
   debugState(): {
@@ -214,7 +226,7 @@ export class RenderListView<T = unknown> extends RenderBox implements Interactiv
 
     if (!this.hitTest(event.position)) {
       const hadHover = this._hoveredKey || this._vScrollbarController.clearHover()
-      this._hoveredKey = ''
+      this.setHoveredKey('')
       if (hadHover) this.markNeedsPaint()
       return
     }
@@ -223,7 +235,7 @@ export class RenderListView<T = unknown> extends RenderBox implements Interactiv
     const hoveredScrollbar = this._vScrollbar.hovered
     if (hoveredScrollbar) {
       if (this._hoveredKey) {
-        this._hoveredKey = ''
+        this.setHoveredKey('')
         this.markNeedsPaint()
       }
       return
@@ -232,7 +244,7 @@ export class RenderListView<T = unknown> extends RenderBox implements Interactiv
     const index = this._indexAtPoint(event.position)
     const nextKey = index >= 0 ? this._items[index]?.key ?? '' : ''
     if (nextKey !== this._hoveredKey) {
-      this._hoveredKey = nextKey
+      this.setHoveredKey(nextKey)
       this.markNeedsPaint()
     }
   }
@@ -267,12 +279,12 @@ export class RenderListView<T = unknown> extends RenderBox implements Interactiv
       event.releasePointerCapture?.()
     }
     this._vScrollbarController.cancelPointer(key)
-    this._hoveredKey = ''
+    this.setHoveredKey('')
   }
 
   onPointerLeave(_event: PointerEvent): void {
     const hadHover = this._hoveredKey || this._vScrollbarController.clearHover()
-    this._hoveredKey = ''
+    this.setHoveredKey('')
     if (hadHover) this.markNeedsPaint()
   }
 
@@ -461,7 +473,7 @@ export class RenderListView<T = unknown> extends RenderBox implements Interactiv
 
   private _syncItemsState(): void {
     if (this._selectedKey && !this._containsSelectableKey(this._selectedKey)) this._selectedKey = ''
-    if (this._hoveredKey && !this._containsKey(this._hoveredKey)) this._hoveredKey = ''
+    if (this._hoveredKey && !this._containsKey(this._hoveredKey)) this.setHoveredKey('')
     if (this._focusedIndex >= this._items.length) this._focusedIndex = this._items.length - 1
     if (this._focusedIndex < 0 && this._selectedKey) this._focusedIndex = this._selectedIndex()
     this._clampState()
@@ -473,7 +485,7 @@ export class RenderListView<T = unknown> extends RenderBox implements Interactiv
     } else if (this._focused) {
       this.focusOut()
     }
-    this._hoveredKey = ''
+    this.setHoveredKey('')
     this._focusedIndex = -1
     this._vScrollbarController.reset()
   }

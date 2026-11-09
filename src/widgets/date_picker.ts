@@ -138,7 +138,12 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
   private set _hoveredMonth(value: number) { this._calendar.hoveredMonth = value }
   private get _hoveredYear(): number { return this._calendar.hoveredYear }
   private set _hoveredYear(value: number) { this._calendar.hoveredYear = value }
-  constructor() {
+  private _ownerInput = false
+  private _candidateActivated = false
+  private _confirmOnEnter = true
+  protected override get popupContext(): PopupContext { return this.hostSurface?.context() ?? super.popupContext }
+  protected override requestPopupPaint(fallback?: () => void): void { if (this.hostSurface) this.hostSurface.repaint(); else super.requestPopupPaint(fallback) }
+  constructor(private readonly hostSurface?: { context: () => PopupContext; repaint: () => void }) {
     super()
     this.setPopupSurfaceRoot(new PopupRenderNode({
       paint: (_node, context, offset) => this._paintSurface(context, offset),
@@ -161,6 +166,9 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
   }
 
   debugState(): {
+    segments: Record<string, { x: number; y: number; w: number; h: number }>
+    datePrecision: 'day' | 'month' | 'year'
+    cellSize: number; headerHeight: number; padding: number; footerHeight: number
     panelX: number
     panelY: number
     panelW: number
@@ -177,7 +185,10 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
     activeSegment: PopupSegment | null
     activeTimeSegment: PopupTimeSegment | null
   }
-  debugState(popupContext: PopupContext = PopupManager.instance.context): {
+  debugState(popupContext: PopupContext = this.popupContext): {
+    segments: Record<string, { x: number; y: number; w: number; h: number }>
+    datePrecision: 'day' | 'month' | 'year'
+    cellSize: number; headerHeight: number; padding: number; footerHeight: number
     panelX: number
     panelY: number
     panelW: number
@@ -196,6 +207,8 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
   } {
     const layout = this._layout(popupContext)
     return {
+      segments: this._segmentRects(layout),
+      datePrecision: this._calendar.selectionPrecision, cellSize: layout.cs, headerHeight: layout.headerH, padding: layout.style.padding, footerHeight: layout.footerH,
       panelX: layout.panelX,
       panelY: layout.panelY,
       panelW: layout.panelW,
@@ -233,10 +246,11 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
     if (opts?.timePrecision !== undefined) {
       this._timePrecision = opts.timePrecision
     }
-    if (this._showTime === false) {
-      this._activeSegment = null
-      this._hoveredSegment = null
+    const visible = this._visibleSegments()
+    if (this._activeSegment && !visible.includes(this._activeSegment)) {
+      this._activeSegment = null; this._segmentInputBuffer = ''; this._segmentInputFresh = true
     }
+    if (this._hoveredSegment && !visible.includes(this._hoveredSegment)) this._hoveredSegment = null
     if (selectedTime) {
       this._selectedTime = normalizeTime(selectedTime)
       if (this._timePrecision === 'minute') this._selectedTime.second = 0
@@ -248,6 +262,9 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
   open(opts: {
     anchor: PopupAnchor
     selected: CalendarDate | null
+    datePrecision?: 'year' | 'month' | 'day'
+    ownerInput?: boolean
+    confirmOnEnter?: boolean
     selectedTime?: CalendarTime | null
     showTime?: boolean
     timePrecision?: CalendarTimePrecision
@@ -268,6 +285,9 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
     this._showTime = opts.showTime ?? false
     this._timePrecision = opts.timePrecision ?? 'second'
 
+    this._ownerInput = opts.ownerInput ?? false; this._candidateActivated = false
+    this._confirmOnEnter = opts.confirmOnEnter ?? true
+    this._calendar.selectionPrecision = opts.datePrecision ?? 'day'
     const sel = opts.selected
     const t = today()
     this._calendar.reset(sel, t)
@@ -280,7 +300,7 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
     this._hoveredSegment = null
 
     this.resetPopupSurface()
-    this.openPopup({ owner: resolvePopupAnchorTarget(opts.anchor) })
+    this.openPopup({ owner: resolvePopupAnchorTarget(opts.anchor), ...(this._ownerInput ? { interactionMode: 'nonmodal' as const } : {}) })
     if (previousFocus) FocusManager.instance.setFocus(previousFocus)
   }
 
@@ -305,15 +325,16 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
     return true
   }
 
-  private _handleSurfacePointerDown(event: PopupPointerEvent, popupContext: PopupContext = PopupManager.instance.context): void {
+  private _handleSurfacePointerDown(event: PopupPointerEvent, popupContext: PopupContext = this.popupContext): void {
     const point = event.position
+    this._candidateActivated = true
     if (this._hitAnchor(point)) {
       this.close()
       return
     }
     const layout = this._layout(popupContext)
     const footer = this._footerBtnAt(point, layout)
-    if (footer === 'today') { this._selectDate(today()); return }
+    if (footer === 'today') { this._selectDate(today()); this._finishCalendarSelection(); return }
     if (footer === 'clear') { this._clearAndClose(); return }
     if (footer === 'ok') { this._confirmAndClose(); return }
     if (footer === 'cancel') { this.close(); return }
@@ -323,14 +344,26 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
       return
     }
 
-    this._calendar.handlePointerDown(
+    const selected = this._calendar.handlePointerDown(
       point,
       this._calendarRect(layout),
       layout.style,
     )
+    if (selected) this._finishCalendarSelection()
   }
 
-  private _handleSurfacePointerMove(event: PopupPointerEvent, popupContext: PopupContext = PopupManager.instance.context): void {
+  private _finishCalendarSelection(): void {
+    // A calendar choice supersedes unfinished date digits. Time is independent
+    // and can still commit its pending segment without rewriting the chosen date.
+    if (isPopupTimeSegment(this._activeSegment)) this._commitActiveSegment()
+    this._activeSegment = null
+    this._segmentInputBuffer = ''
+    this._segmentInputFresh = true
+    this._hoveredSegment = null
+    this.requestPopupPaint()
+  }
+
+  private _handleSurfacePointerMove(event: PopupPointerEvent, popupContext: PopupContext = this.popupContext): void {
     const point = event.position
     const layout = this._layout(popupContext)
     let repaint = false
@@ -347,7 +380,7 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
     const segment = this._segmentAt(point, layout)
     if (segment !== this._hoveredSegment) { this._hoveredSegment = segment; repaint = true }
 
-    if (repaint) PopupManager.instance.requestPaint()
+    if (repaint) this.requestPopupPaint()
   }
 
   private _handleSurfacePointerUp(_event: PopupPointerEvent): void {}
@@ -371,7 +404,7 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
       this._hoveredSegment = null
       repaint = true
     }
-    if (repaint) PopupManager.instance.requestPaint()
+    if (repaint) this.requestPopupPaint()
   }
 
   // ---- 内部逻辑 ----
@@ -390,7 +423,7 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
         else accepted = this._onSelect?.(this._selected)
       },
       () => {
-        if (accepted === false) PopupManager.instance.requestPaint()
+        if (accepted === false) this.requestPopupPaint()
         else {
           const onTab = this._onTab
           this.close()
@@ -415,12 +448,13 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
   }
 
   private _activateSegment(segment: PopupSegment): void {
-    if (!this._showTime) return
-    if (segment === 'second' && this._timePrecision !== 'second') return
+    if (!this._visibleSegments().includes(segment)) return
+    if (this._activeSegment === segment) return
+    this._commitActiveSegment()
     this._activeSegment = segment
     this._segmentInputBuffer = ''
     this._segmentInputFresh = true
-    PopupManager.instance.requestPaint()
+    this.requestPopupPaint()
   }
 
   private _commitActiveSegment(): void {
@@ -466,7 +500,7 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
     if (segment === 'hour') this._selectedTime.hour = (this._selectedTime.hour + delta + 24) % 24
     if (segment === 'minute') this._selectedTime.minute = (this._selectedTime.minute + delta + 60) % 60
     if (segment === 'second') this._selectedTime.second = (this._selectedTime.second + delta + 60) % 60
-    PopupManager.instance.requestPaint()
+    this.requestPopupPaint()
   }
 
   private _advanceSegment(segment: PopupSegment): void {
@@ -475,13 +509,13 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
     this._activeSegment = next ?? null
     this._segmentInputBuffer = ''
     this._segmentInputFresh = true
-    PopupManager.instance.requestPaint()
+    this.requestPopupPaint()
   }
 
   private _visibleSegments(): PopupSegment[] {
-    return this._timePrecision === 'second'
-      ? ['year', 'month', 'day', 'hour', 'minute', 'second']
-      : ['year', 'month', 'day', 'hour', 'minute']
+    const date: PopupSegment[] = this._calendar.selectionPrecision === 'year' ? ['year']
+      : this._calendar.selectionPrecision === 'month' ? ['year', 'month'] : ['year', 'month', 'day']
+    return this._showTime ? [...date, 'hour', 'minute', ...(this._timePrecision === 'second' ? ['second' as const] : [])] : date
   }
 
   private _segmentInputLength(segment: PopupSegment): number {
@@ -522,10 +556,10 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
     const popupStyle = derivePopupStyle(popupContext.theme)
     const cs = style.cellSize
     const headerH = style.headerHeight
-    const timeH = this._showTime ? cs + style.padding : 0
+    const timeH = cs + style.padding
     const footerH = style.footerHeight
     const calendarW = cs * 7 + style.padding * 2
-    const segmentW = this._showTime ? this._segmentRowWidth(style) + style.padding * 2 : 0
+    const segmentW = this._segmentRowWidth(style) + style.padding * 2
     const panelW = Math.max(calendarW, segmentW)
     const panelH = headerH + cs + cs * 6 + style.padding + timeH + footerH
     const anchorRect = resolvePopupAnchorRect(this._anchor)
@@ -560,58 +594,40 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
     return null
   }
 
-  private _timeRowY(layout: ReturnType<DatePickerPopup['_layout']>): number {
+  private _segmentRowY(layout: ReturnType<DatePickerPopup['_layout']>): number {
     return layout.panelY + layout.headerH + layout.cs + layout.cs * 6 + layout.style.padding
   }
 
-  private _segmentRowWidth(style: DatePickerStyleTokens): number {
-    const fs = style.fontSize
-    const font = style.fontFamily
-    const digitW = Math.max(fs * 0.56, TextMeasurer.measureWidth('0', fs, font))
-    const fieldPadding = Math.max(3, Math.floor(style.padding / 2))
-    const yearW = Math.ceil(digitW * 4 + fieldPadding * 2)
-    const fieldW = Math.ceil(digitW * 2 + fieldPadding * 2)
-    const dateSeparatorW = Math.max(4, TextMeasurer.measureWidth('-', fs, font))
-    const timeSeparatorW = Math.max(4, TextMeasurer.measureWidth(':', fs, font))
-    const groupGap = Math.max(8, style.padding)
-    return this._timePrecision === 'second'
-      ? yearW + fieldW * 5 + dateSeparatorW * 2 + timeSeparatorW * 2 + groupGap
-      : yearW + fieldW * 4 + dateSeparatorW * 2 + timeSeparatorW + groupGap
+  private _segmentMetrics(style: DatePickerStyleTokens) {
+    const digitW = Math.max(style.fontSize * 0.56, TextMeasurer.measureWidth('0', style.fontSize, style.fontFamily))
+    const padding = Math.max(3, Math.floor(style.padding / 2))
+    const separator = (segment: PopupSegment) => segment === 'month' || segment === 'day' ? '-' : segment === 'minute' || segment === 'second' ? ':' : ''
+    return this._visibleSegments().map((segment, index) => ({ segment, separator: separator(segment),
+      width: Math.ceil(digitW * (segment === 'year' ? 4 : 2) + padding * 2),
+      gap: index === 0 ? 0 : segment === 'hour' ? Math.max(8, style.padding) : Math.max(4, TextMeasurer.measureWidth(separator(segment), style.fontSize, style.fontFamily)),
+    }))
   }
 
-  private _segmentRects(layout: ReturnType<DatePickerPopup['_layout']>): Record<PopupSegment, { x: number; y: number; w: number; h: number }> {
-    const s = layout.style
-    const fs = s.fontSize
-    const font = s.fontFamily
-    const digitW = Math.max(fs * 0.56, TextMeasurer.measureWidth('0', fs, font))
-    const fieldPadding = Math.max(3, Math.floor(s.padding / 2))
-    const yearW = Math.ceil(digitW * 4 + fieldPadding * 2)
-    const fieldW = Math.ceil(digitW * 2 + fieldPadding * 2)
-    const dateSeparatorW = Math.max(4, TextMeasurer.measureWidth('-', fs, font))
-    const timeSeparatorW = Math.max(4, TextMeasurer.measureWidth(':', fs, font))
-    const groupGap = Math.max(8, s.padding)
-    const totalW = this._segmentRowWidth(s)
-    const y = this._timeRowY(layout) + s.padding / 2
-    let x = layout.panelX + (layout.panelW - totalW) / 2
-    const year = { x, y, w: yearW, h: layout.cs }
-    x += yearW + dateSeparatorW
-    const month = { x, y, w: fieldW, h: layout.cs }
-    x += fieldW + dateSeparatorW
-    const day = { x, y, w: fieldW, h: layout.cs }
-    x += fieldW + groupGap
-    const hour = { x, y, w: fieldW, h: layout.cs }
-    x += fieldW + timeSeparatorW
-    const minute = { x, y, w: fieldW, h: layout.cs }
-    x += fieldW + timeSeparatorW
-    const second = { x, y, w: fieldW, h: layout.cs }
-    return { year, month, day, hour, minute, second }
+  private _segmentRowWidth(style: DatePickerStyleTokens): number {
+    return this._segmentMetrics(style).reduce((sum, field) => sum + field.width + field.gap, 0)
+  }
+
+  private _segmentRects(layout: ReturnType<DatePickerPopup['_layout']>): Record<string, { x: number; y: number; w: number; h: number }> {
+    const y = this._segmentRowY(layout) + layout.style.padding / 2
+    let x = layout.panelX + (layout.panelW - this._segmentRowWidth(layout.style)) / 2
+    const rects: Record<string, { x: number; y: number; w: number; h: number }> = {}
+    for (const field of this._segmentMetrics(layout.style)) {
+      x += field.gap
+      rects[field.segment] = { x, y, w: field.width, h: layout.cs }
+      x += field.width
+    }
+    return rects
   }
 
   private _segmentAt(p: Offset, layout: ReturnType<DatePickerPopup['_layout']>): PopupSegment | null {
-    if (!this._showTime) return null
     const rects = this._segmentRects(layout)
     for (const segment of this._visibleSegments()) {
-      const rect = rects[segment]
+      const rect = rects[segment]!
       if (p.x >= rect.x && p.x <= rect.x + rect.w && p.y >= rect.y && p.y <= rect.y + rect.h) return segment
     }
     return null
@@ -626,8 +642,20 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
     return true
   }
 
+  get ownsTextInput(): boolean { return this.visible && this._ownerInput && this._activeSegment !== null }
+
   onKeyDown(e: KeyboardEvent): boolean {
+    if (this._ownerInput) {
+      if (e.isComposing || e.keyCode === 229) return false
+      if (!this._activeSegment && !['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Enter', 'Escape'].includes(e.key)) return false
+      if (e.key === 'Enter' && !this._candidateActivated) return false
+      if (e.key !== 'Escape') this._candidateActivated = true
+    }
     if (!this.visible) return false
+    if (this._ownerInput && e.key === 'Escape') return this.onEscape(e)
+    if (e.key === 'Enter' && !this._confirmOnEnter) {
+      e.preventDefault(); this._commitActiveSegment(); this.requestPopupPaint(); return true
+    }
     if (e.key === 'Tab' && this._onTab) {
       e.preventDefault()
       e.stopPropagation()
@@ -651,10 +679,10 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
           if (segment === 'year' || segment === 'month') {
             this._advanceSegment(segment)
           } else {
-            PopupManager.instance.requestPaint()
+            this.requestPopupPaint()
           }
         } else {
-          PopupManager.instance.requestPaint()
+          this.requestPopupPaint()
         }
         return true
       }
@@ -662,15 +690,24 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
         e.preventDefault()
         if (this._segmentInputFresh) { this._segmentInputBuffer = ''; this._segmentInputFresh = false }
         this._segmentInputBuffer = this._segmentInputBuffer.slice(0, -1)
-        PopupManager.instance.requestPaint()
+        this.requestPopupPaint()
         return true
       }
       if (e.key === 'ArrowUp') { e.preventDefault(); this._stepSegment(segment, 1); return true }
       if (e.key === 'ArrowDown') { e.preventDefault(); this._stepSegment(segment, -1); return true }
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault(); this._commitActiveSegment()
+        const order = this._visibleSegments(), index = order.indexOf(segment), next = order[index + (e.key === 'ArrowLeft' ? -1 : 1)]
+        if (next) this._activateSegment(next)
+        return true
+      }
       if (e.key === 'Tab') {
         e.preventDefault()
         this._commitActiveSegment()
-        this._advanceSegment(segment)
+        if (e.shiftKey) {
+          const order = this._visibleSegments(), previous = order[order.indexOf(segment) - 1]
+          this._activeSegment = previous ?? null; this._segmentInputBuffer = ''; this._segmentInputFresh = true; this.requestPopupPaint()
+        } else this._advanceSegment(segment)
         return true
       }
       if (e.key === 'Enter') {
@@ -684,7 +721,7 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
         this._activeSegment = null
         this._segmentInputBuffer = ''
         this._segmentInputFresh = true
-        PopupManager.instance.requestPaint()
+        this.requestPopupPaint()
         return true
       }
       return false
@@ -706,7 +743,7 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
   }
 
   private _paintSurface(context: PaintContext, offset: Offset): void {
-    const layout = this._layout(PopupManager.instance.context)
+    const layout = this._layout(this.popupContext)
     const dl = new DrawList(context)
     const s = layout.style
     const cs = layout.cs
@@ -725,9 +762,7 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
       layout.popupStyle,
     )
 
-    if (this._showTime) {
-      this._paintTimeRow(dl, layout, offset)
-    }
+    this._paintSegmentRow(dl, layout, offset)
 
     // ---- 底部按钮 ----
     const footerY = py + ph - layout.footerH
@@ -760,9 +795,9 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
     }
   }
 
-  private _paintTimeRow(dl: DrawList, layout: ReturnType<DatePickerPopup['_layout']>, offset: Offset): void {
+  private _paintSegmentRow(dl: DrawList, layout: ReturnType<DatePickerPopup['_layout']>, offset: Offset): void {
     const s = layout.style
-    const y = this._timeRowY(layout) - layout.panelY + offset.y
+    const y = this._segmentRowY(layout) - layout.panelY + offset.y
     const panelX = offset.x
     dl.line(panelX + s.padding, y, panelX + layout.panelW - s.padding, y, s.separator, 1)
     const rects = this._segmentRects(layout)
@@ -784,7 +819,7 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
       second: 2,
     }
     for (const segment of this._visibleSegments()) {
-      const source = rects[segment]
+      const source = rects[segment]!
       const rect = {
         x: source.x - layout.panelX + offset.x,
         y: source.y - layout.panelY + offset.y,
@@ -815,18 +850,10 @@ export class DatePickerPopup extends PopupSurfaceShell implements Popup {
         'middle',
       )
     }
-    const year = rects.year
-    const month = rects.month
-    const day = rects.day
-    const hour = rects.hour
-    const minute = rects.minute
     const sepY = y + s.padding / 2 + layout.cs / 2
-    dl.fillText('-', (year.x + year.w + month.x) / 2 - layout.panelX + offset.x, sepY, s.textDisabled, s.fontSize, s.fontFamily, 'center', 'middle')
-    dl.fillText('-', (month.x + month.w + day.x) / 2 - layout.panelX + offset.x, sepY, s.textDisabled, s.fontSize, s.fontFamily, 'center', 'middle')
-    dl.fillText(':', (hour.x + hour.w + minute.x) / 2 - layout.panelX + offset.x, sepY, s.textDisabled, s.fontSize, s.fontFamily, 'center', 'middle')
-    if (this._timePrecision === 'second') {
-      const second = rects.second
-      dl.fillText(':', (minute.x + minute.w + second.x) / 2 - layout.panelX + offset.x, sepY, s.textDisabled, s.fontSize, s.fontFamily, 'center', 'middle')
+    for (const field of this._segmentMetrics(s)) if (field.separator) {
+      const rect = rects[field.segment]!
+      dl.fillText(field.separator, rect.x - field.gap / 2 - layout.panelX + offset.x, sepY, s.textDisabled, s.fontSize, s.fontFamily, 'center', 'middle')
     }
   }
 

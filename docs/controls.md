@@ -65,3 +65,16 @@ Set `autoRowHeight: true` on a text column to wrap its display text and measure 
 The first layout measures the display projection to establish exact scroll extents; only visible rows are painted. Data, width and font changes remeasure the projection, while hover, focus and selection changes remeasure affected rows and update connected merged spans. For large datasets, limit participating columns and use paging. Without `rowKey`, row objects provide identity; configure stable keys when replacing those objects.
 
 The grid has more selection, sorting, filtering, and editing options. Use TypeScript completion on `DataGridOptions` and `GridColumnDef` for the full contracts. See the [component catalog](components.md) for related table and tree controls.
+
+## Additional state and interaction options
+
+Existing controls support the following optional behavior without adding new component families:
+
+- `RenderColorPicker.valueState` accepts `'value'`, `'empty'`, and `'mixed'`. Empty and mixed states retain their visual distinction until the user chooses a color.
+- `RenderListView.onHover` receives the hovered enabled item, or `null` on exit. Hover does not change selection or keyboard focus.
+- `RenderTabs.onTabActivateRequest` can return `false` to reject an activation or `'defer'` when the owner will publish `activeKey` later.
+- `CommandManager.execute` accepts `signal` and `canContinue`. Guarded execution rechecks the source and command state after asynchronous interceptors, so an obsolete target does not execute later.
+- Date and time popup `ownerInput` mode lets the owning input retain text entry. Confirmation requires an activated candidate, and composition keys remain with the input. Date popup `datePrecision` selects year, month, or day precision.
+- Multi-select popup `preserveSelectionOrder` retains the order of selected values; `onDraftChange` reports the changed option before confirmation. Defaults preserve existing behavior.
+
+See [Event routing](event-routing.md), [NumberInput](components/input/number-input.md), and [CodeEditor](components/visualization/code-editor.md) for the related input and editor contracts.

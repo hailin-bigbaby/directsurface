@@ -21,6 +21,7 @@ import type { ContextMenuEntry } from './context_menu'
 import { MenuPopup } from './menu_popup'
 
 export type ToolbarSlot = 'leading' | 'trailing'
+export type ToolbarActionSource = 'pointer' | 'keyboard'
 
 interface ToolbarItemBase {
   id: string
@@ -34,15 +35,15 @@ export interface ToolbarButtonItem extends ToolbarItemBase {
   kind: 'button'
   label: string
   icon?: IconName
-  onClick?: () => void
+  onClick?: (source?: ToolbarActionSource) => void
 }
 
 export interface ToolbarToggleItem extends ToolbarItemBase {
   kind: 'toggle'
   label: string
   icon?: IconName
-  checked: boolean
-  onChange?: (checked: boolean) => void
+  checked: boolean | 'mixed'
+  onChange?: (checked: boolean, source?: ToolbarActionSource) => void
 }
 
 export interface ToolbarDropDownItem extends ToolbarItemBase {
@@ -50,7 +51,7 @@ export interface ToolbarDropDownItem extends ToolbarItemBase {
   label: string
   icon?: IconName
   items: ContextMenuEntry[]
-  onSelect?: (key: string) => void
+  onSelect?: (key: string, source?: ToolbarActionSource) => void
 }
 
 export interface ToolbarSeparatorItem extends ToolbarItemBase {
@@ -64,6 +65,10 @@ export type ToolbarItem =
   | ToolbarSeparatorItem
 
 export interface ToolbarGroup {
+  /** Optional user-facing overflow heading; id is never displayed. */
+  label?: string
+  /** Default: items may overflow independently. */
+  overflow?: 'items' | 'group'
   id: string
   slot: ToolbarSlot
   visible?: boolean
@@ -156,10 +161,18 @@ export class RenderToolbar extends FocusableControl implements InteractiveRender
   private _openItemId = ''
   private _popupProxy: Popup | null = null
   private _rootPopup: MenuPopup | null = null
+  private _groupsRevision = 0
+  private _menuRevision = 0
+  private readonly _reportActionSource: boolean
+  readonly preservesCurrentFocusOnPointerDown: boolean
+  private readonly _onActionRequest?: (id: string, source: ToolbarActionSource) => boolean
 
-  constructor(options?: { groups?: ToolbarGroup[]; disabled?: boolean }) {
+  constructor(options?: { groups?: ToolbarGroup[]; disabled?: boolean; preserveFocusOnPointerDown?: boolean; onActionRequest?: (id: string, source: ToolbarActionSource) => boolean }) {
     super({ disabled: options?.disabled ?? false })
     this._disabled = options?.disabled ?? false
+    this.preservesCurrentFocusOnPointerDown = options?.preserveFocusOnPointerDown ?? false
+    this._onActionRequest = options?.onActionRequest
+    this._reportActionSource = !!options?.onActionRequest || this.preservesCurrentFocusOnPointerDown
     if (options?.groups) this._groups = [...options.groups]
   }
 
@@ -175,6 +188,7 @@ export class RenderToolbar extends FocusableControl implements InteractiveRender
   }
 
   addGroup(group: ToolbarGroup): void {
+    this._groupsRevision++
     this._groups.push(group)
     this.markNeedsLayout()
   }
@@ -182,19 +196,38 @@ export class RenderToolbar extends FocusableControl implements InteractiveRender
   removeGroup(id: string): void {
     const next = this._groups.filter(group => group.id !== id)
     if (next.length === this._groups.length) return
+    this._groupsRevision++
     this._groups = next
     this._syncInteractiveStateAfterGroupChange()
     this.markNeedsLayout()
   }
 
   setGroups(groups: ToolbarGroup[]): void {
+    this._groupsRevision++
+    this._dismissMenu()
     this._groups = [...groups]
     this._syncInteractiveStateAfterGroupChange()
     this.markNeedsLayout()
   }
 
+  /** Refresh non-geometric item changes while retaining measured groups and overflow entries. */
+  protected refreshItemStates(): void {
+    this._groupsRevision++
+    this._dismissMenu()
+    for (const layout of this._resolvedLayout.itemLayouts) {
+      if (!layout.item) continue
+      const next = this._layoutEntry(layout.groupId, layout.item, layout.rect)
+      Object.assign(layout, next)
+    }
+    this._syncInteractiveStateAfterGroupChange()
+    this._syncKeyboardItem()
+    this._setHoveredItem(this._hoveredItemId)
+    this.markNeedsPaint()
+  }
+
   clearGroups(): void {
     if (this._groups.length === 0) return
+    this._groupsRevision++
     this._groups = []
     this._syncInteractiveStateAfterGroupChange()
     this.markNeedsLayout()
@@ -205,12 +238,24 @@ export class RenderToolbar extends FocusableControl implements InteractiveRender
     return item ? { ...item.rect } : null
   }
 
+  closeMenu(): void { this._dismissMenu() }
+  naturalWidth(context: LayoutContext): number {
+    const style = deriveToolbarStyle(context.theme)
+    const leading = this._measureGroups('leading', context, style), trailing = this._measureGroups('trailing', context, style)
+    return this._slotWidth(leading, style) + this._slotWidth(trailing, style) + (leading.length && trailing.length ? style.sectionGap : 0) + style.padding * 2
+  }
+  overflowWidth(context: LayoutContext): number {
+    const style = deriveToolbarStyle(context.theme)
+    return this._overflowButtonWidth(style) + style.padding * 2
+  }
+
   debugState(): {
     visibleLeadingGroupIds: string[]
     visibleTrailingGroupIds: string[]
     overflowGroupIds: string[]
     visibleItemIds: string[]
     openItemId: string
+    overflowItemIds: string[]
   } {
     return {
       visibleLeadingGroupIds: this._resolvedLayout.visibleLeading.map(group => group.group.id),
@@ -218,12 +263,17 @@ export class RenderToolbar extends FocusableControl implements InteractiveRender
       overflowGroupIds: Array.from(new Set(this._resolvedLayout.overflowEntries.map(entry => entry.groupId))),
       visibleItemIds: this._resolvedLayout.itemLayouts.map(item => item.id),
       openItemId: this._openItemId,
+      overflowItemIds: this._resolvedLayout.overflowEntries.filter(e => !isSeparator(e.item)).map(e => e.item.id),
     }
   }
 
   visitChildren(_visitor: (child: RenderObject) => void): void {}
 
   performLayout(constraints: BoxConstraints, context: LayoutContext): void {
+    if (context.pass === 'measure') {
+      this.size = constrainSize(constraints, { width: this.naturalWidth(context), height: deriveToolbarStyle(context.theme).minHeight })
+      return
+    }
     const style = deriveToolbarStyle(context.theme)
     const measuredLeading = this._measureGroups('leading', context, style)
     const measuredTrailing = this._measureGroups('trailing', context, style)
@@ -236,6 +286,8 @@ export class RenderToolbar extends FocusableControl implements InteractiveRender
       : Math.min(constraints.maxWidth, naturalWidth)
     const availableContentWidth = Math.max(0, widthTarget - style.padding * 2)
 
+    const previousLayout = JSON.stringify(this._resolvedLayout.itemLayouts.map(i => [i.id, i.rect]))
+    const previousKeyboard = this._keyboardItemId
     this._resolvedLayout = this._resolveLayout(measuredLeading, measuredTrailing, availableContentWidth, style)
     const desiredWidth = this._resolvedLayout.leftWidth +
       this._resolvedLayout.rightWidth +
@@ -244,6 +296,12 @@ export class RenderToolbar extends FocusableControl implements InteractiveRender
     const desiredHeight = Math.max(style.minHeight, this._resolvedLayout.contentHeight + style.padding * 2)
     this.size = constrainSize(constraints, { width: desiredWidth, height: desiredHeight })
     this._positionItems(style)
+    if (previousLayout !== JSON.stringify(this._resolvedLayout.itemLayouts.map(i => [i.id, i.rect]))) {
+      this._pressedItemId = ''
+      if (this._openItemId) this._dismissMenu()
+      if (!this.itemRect(this._hoveredItemId)) this._setHoveredItem('')
+      if (this._resolvedLayout.overflowEntries.some(e => e.item.id === previousKeyboard)) this._keyboardItemId = OVERFLOW_ITEM_ID
+    }
     this._syncKeyboardItem()
   }
 
@@ -300,13 +358,14 @@ export class RenderToolbar extends FocusableControl implements InteractiveRender
   onPointerDown(event: PointerEvent): void {
     if (!isPrimaryPointerButton(event)) return
     if (this.isDisabled) return
-    this.requestFocus()
     const hit = this._itemAt(event.position)
     if (!hit || !hit.interactive) {
       this._setHoveredItem('')
       this._pressedItemId = ''
       return
     }
+    if (this._onActionRequest?.(hit.id, 'pointer') === false) { event.preventActivation?.(); return }
+    if (!this.preservesCurrentFocusOnPointerDown) this.requestFocus()
     this._keyboardItemId = hit.id
     this._setHoveredItem(hit.id, event.position)
     if (this._openItemId && hit.id === this._openItemId) {
@@ -334,7 +393,7 @@ export class RenderToolbar extends FocusableControl implements InteractiveRender
       return
     }
     const target = this._resolvedLayout.itemLayouts.find(item => item.id === pressedItemId)
-    if (target) this._activateItem(target)
+    if (target) this._activateItem(target, 'pointer')
     this.markNeedsPaint()
   }
 
@@ -391,8 +450,10 @@ export class RenderToolbar extends FocusableControl implements InteractiveRender
       case ' ':
       case 'ArrowDown': {
         const target = items[currentIndex]!
+        if (this.preservesCurrentFocusOnPointerDown && event.key === 'ArrowDown' && !target.overflowButton && target.item?.kind !== 'dropdown') return false
+        if (event.repeat && (event.key === 'Enter' || event.key === ' ')) return true
         event.preventDefault()
-        this._activateItem(target)
+        this._activateItem(target, 'keyboard')
         return true
       }
       case 'Escape':
@@ -409,6 +470,12 @@ export class RenderToolbar extends FocusableControl implements InteractiveRender
     if (this._hoveredItemId) TooltipService.currentOrNull?.hide()
     this._dismissMenu()
     super.dispose()
+  }
+
+  override detach(): void { this._dismissMenu(); super.detach() }
+  protected override onVisibilityChanged(visible: boolean): void {
+    if (!visible) this._dismissMenu()
+    super.onVisibilityChanged(visible)
   }
 
   protected override onFocusChanged(focused: boolean): void {
@@ -483,25 +550,46 @@ export class RenderToolbar extends FocusableControl implements InteractiveRender
     availableWidth: number,
     style: ToolbarStyleTokens,
   ): ToolbarResolvedLayout {
-    const visibleLeading = [...leading]
-    const visibleTrailing = [...trailing]
-    const overflowEntries: ToolbarOverflowEntry[] = []
-    const moveGroupToOverflow = (group: ToolbarMeasuredGroup): void => {
-      for (const entry of group.items) overflowEntries.push({ groupId: group.group.id, item: entry.item })
+    const normalize = (items: ToolbarMeasuredItem[]): ToolbarMeasuredItem[] => {
+      const result: ToolbarMeasuredItem[] = []
+      for (const entry of items) {
+        if (isSeparator(entry.item) && (!result.length || isSeparator(result[result.length - 1]!.item))) continue
+        result.push(entry)
+      }
+      if (result.length && isSeparator(result[result.length - 1]!.item)) result.pop()
+      return result
     }
-
+    const project = (group: ToolbarMeasuredGroup, items: ToolbarMeasuredItem[]): ToolbarMeasuredGroup => {
+      items = normalize(items)
+      return { group: group.group, items, width: items.reduce((sum, entry, index) => sum + entry.width + (index ? style.itemSpacing : 0), 0) }
+    }
+    const visibleLeading = leading.map(g => project(g, [...g.items])).filter(g => g.items.length)
+    const visibleTrailing = trailing.map(g => project(g, [...g.items])).filter(g => g.items.length)
     if (!this._fitsLayout(visibleLeading, visibleTrailing, false, availableWidth, style)) {
-      while (visibleLeading.length > 0 && !this._fitsLayout(visibleLeading, visibleTrailing, true, availableWidth, style)) {
-        const removed = visibleLeading.pop()
-        if (!removed) break
-        moveGroupToOverflow(removed)
+      // An individually oversized command must not evict all its normal siblings.
+      const itemBudget = Math.max(0, availableWidth - this._overflowButtonWidth(style) - style.sectionGap)
+      for (const groups of [visibleLeading, visibleTrailing]) {
+        for (let i = groups.length - 1; i >= 0; i--) {
+          const group = groups[i]!
+          if (group.group.overflow !== 'group') groups[i] = project(group, group.items.filter(e => isSeparator(e.item) || e.width <= itemBudget))
+          if (!groups[i]!.items.length) groups.splice(i, 1)
+        }
       }
-      while (!this._fitsLayout(visibleLeading, visibleTrailing, true, availableWidth, style) && visibleTrailing.length > 0) {
-        const removed = visibleTrailing.shift()
-        if (!removed) break
-        moveGroupToOverflow(removed)
+      const remove = (groups: ToolbarMeasuredGroup[], trailing: boolean) => {
+        const index = trailing ? 0 : groups.length - 1, group = groups[index]!
+        if (group.group.overflow === 'group') { groups.splice(index, 1); return }
+        const items = [...group.items]
+        if (trailing) items.shift(); else items.pop()
+        const next = project(group, items)
+        if (next.items.length) groups[index] = next; else groups.splice(index, 1)
       }
+      while (visibleLeading.length && !this._fitsLayout(visibleLeading, visibleTrailing, true, availableWidth, style)) remove(visibleLeading, false)
+      while (visibleTrailing.length && !this._fitsLayout(visibleLeading, visibleTrailing, true, availableWidth, style)) remove(visibleTrailing, true)
     }
+    // Generate menu order from source order, never from the removal sequence.
+    const visibleItems = new Set([...visibleLeading, ...visibleTrailing].flatMap(g => g.items.map(e => e.item)))
+    const overflowEntries: ToolbarOverflowEntry[] = [...leading, ...trailing].flatMap(g =>
+      normalize(g.items.filter(e => !visibleItems.has(e.item))).map(e => ({ groupId: g.group.id, item: e.item })))
 
     const hasOverflow = overflowEntries.length > 0
     const leftWidth = this._slotWidth(visibleLeading, style)
@@ -678,6 +766,9 @@ export class RenderToolbar extends FocusableControl implements InteractiveRender
     } else if (hovered) {
       dl.strokeRect(x, y, layout.rect.width, layout.rect.height, style.hoveredBorder, 1, style.itemRadius)
     }
+    if (layout.item?.kind === 'toggle' && layout.item.checked === 'mixed') {
+      dl.line(x + style.itemPaddingX, y + layout.rect.height - 3, x + layout.rect.width - style.itemPaddingX, y + layout.rect.height - 3, resolveTextColor(style.itemText, state), 2)
+    }
   }
 
   private _paintItemContent(
@@ -739,26 +830,38 @@ export class RenderToolbar extends FocusableControl implements InteractiveRender
     dl.popClip()
   }
 
-  private _activateItem(layout: ToolbarItemLayout): void {
-    if (!layout.interactive) return
+  private _activateItem(layout: ToolbarItemLayout, source: ToolbarActionSource = 'pointer'): void {
+    if (!layout.interactive || this.isDisabled || !this.visible) return
     if (layout.overflowButton || (layout.item && isDropdown(layout.item))) {
-      this._openMenuForLayout(layout)
+      this._openMenuForLayout(layout, source)
       return
     }
-    const item = layout.item
-    if (!item || !isActionItem(item)) return
+    if (this._onActionRequest?.(layout.id, source) === false) return
+    const item = this._currentItem(layout.id)
+    if (!item || !isActionItem(item) || isDropdown(item)) return
     this._dismissMenu()
     if (isToggle(item)) {
-      item.onChange?.(!item.checked)
+      this._change(item, source)
       return
     }
-    item.onClick?.()
+    this._click(item, source)
   }
 
-  private _openMenuForLayout(layout: ToolbarItemLayout): void {
+  private _click(item: ToolbarButtonItem, source: ToolbarActionSource): void {
+    if (this._reportActionSource) item.onClick?.(source); else item.onClick?.()
+  }
+  private _change(item: ToolbarToggleItem, source: ToolbarActionSource): void {
+    if (this._reportActionSource) item.onChange?.(item.checked !== true, source); else item.onChange?.(item.checked !== true)
+  }
+  private _select(item: ToolbarDropDownItem, key: string, source: ToolbarActionSource): void {
+    if (this._reportActionSource) item.onSelect?.(key, source); else item.onSelect?.(key)
+  }
+
+  private _openMenuForLayout(layout: ToolbarItemLayout, source: ToolbarActionSource = 'pointer'): void {
+    if (this.isDisabled || !this.visible || this._onActionRequest?.(layout.id, source) === false) return
+    this._dismissMenu()
     const menu = this._menuSpecForLayout(layout)
     if (!menu) return
-    this._dismissMenu()
 
     const proxy: Popup = {
       hitTest: point => this._toolbarHitTest(point),
@@ -800,6 +903,7 @@ export class RenderToolbar extends FocusableControl implements InteractiveRender
     PopupManager.instance.open(proxy, { owner: this })
     this._popupProxy = proxy
     this._openItemId = layout.id
+    let selectionSource = source
 
     const rootPopup = new MenuPopup({
       items: menu.items,
@@ -814,9 +918,10 @@ export class RenderToolbar extends FocusableControl implements InteractiveRender
         return { x, y: rect.y + rect.height }
       },
       bounds: popupContext => this._popupBounds(popupContext),
+      onSelectRequest: (_key, nextSource) => { selectionSource = nextSource; return true },
       onSelect: key => {
         try {
-          menu.onSelect(key)
+          menu.onSelect(key, selectionSource)
         } finally {
           this._dismissMenu()
         }
@@ -831,7 +936,17 @@ export class RenderToolbar extends FocusableControl implements InteractiveRender
     this.markNeedsPaint()
   }
 
-  private _menuSpecForLayout(layout: ToolbarItemLayout): { items: ContextMenuEntry[]; onSelect: (key: string) => void } | null {
+  private _currentItem(id: string): ToolbarItem | undefined {
+    const item = this._groups.filter(g => g.visible !== false).flatMap(g => g.items).find(i => i.id === id)
+    return item && item.visible !== false && !item.disabled ? item : undefined
+  }
+
+  private _menuSpecForLayout(layout: ToolbarItemLayout): { items: ContextMenuEntry[]; onSelect: (key: string, source?: ToolbarActionSource) => void } | null {
+    const revision = this._groupsRevision
+    const menuRevision = this._menuRevision
+    const allowed = (id: string, source: ToolbarActionSource) => menuRevision === this._menuRevision && revision === this._groupsRevision && !this.isDisabled && this.visible
+      && !!this._currentItem(id) && this._onActionRequest?.(id, source) !== false
+      && menuRevision === this._menuRevision && revision === this._groupsRevision && !this.isDisabled && !!this._currentItem(id)
     if (layout.overflowButton) {
       const overflowEntries = this._resolvedLayout.overflowEntries
       const keyMap = new Map<string, ToolbarOverflowEntry>()
@@ -841,11 +956,8 @@ export class RenderToolbar extends FocusableControl implements InteractiveRender
       for (const entry of overflowEntries) {
         if (entry.groupId !== currentGroupId) {
           if (items.length > 0) items.push({ separator: true })
-          items.push({
-            key: `group:${entry.groupId}`,
-            label: entry.groupId,
-            disabled: true,
-          })
+          const label = this._groups.find(group => group.id === entry.groupId)?.label
+          if (label) items.push({ key: `group:${entry.groupId}`, label, disabled: true })
           currentGroupId = entry.groupId
         }
         if (isSeparator(entry.item)) {
@@ -868,26 +980,27 @@ export class RenderToolbar extends FocusableControl implements InteractiveRender
         items.push({
           key: menuKey,
           label: entry.item.label,
-          icon: isToggle(entry.item) && entry.item.checked ? 'check' : entry.item.icon,
+          icon: entry.item.icon,
+          checked: isToggle(entry.item) ? entry.item.checked : undefined,
           disabled: !!entry.item.disabled,
         })
       }
       return {
         items,
-        onSelect: key => {
+        onSelect: (key, source = 'pointer') => {
           const dropdown = dropdownKeyMap.get(key)
           if (dropdown) {
-            dropdown.onSelect?.(key)
+            if (allowed(dropdown.id, source)) this._select(dropdown, key, source)
             return
           }
           const entry = keyMap.get(key)
-          if (!entry || !isActionItem(entry.item)) return
+          if (!entry || !isActionItem(entry.item) || !allowed(entry.item.id, source)) return
           if (isDropdown(entry.item)) return
           if (isToggle(entry.item)) {
-            entry.item.onChange?.(!entry.item.checked)
+            this._change(entry.item, source)
             return
           }
-          entry.item.onClick?.()
+          this._click(entry.item, source)
         },
       }
     }
@@ -896,11 +1009,12 @@ export class RenderToolbar extends FocusableControl implements InteractiveRender
     if (!item || !isDropdown(item)) return null
     return {
       items: item.items,
-      onSelect: key => item.onSelect?.(key),
+      onSelect: (key, source = 'pointer') => { if (allowed(item.id, source)) this._select(item, key, source) },
     }
   }
 
   private _dismissMenu(): void {
+    this._menuRevision++
     const proxy = this._popupProxy
     const root = this._rootPopup
     if (proxy) {

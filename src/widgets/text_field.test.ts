@@ -1219,3 +1219,13 @@ describe('TextBox length and Unicode regressions', () => {
     field.dispose()
   })
 })
+
+describe('raw insertion validation',()=>{
+ it('lets an input adapter reject a pasted newline before single-line normalization',()=>{
+  const field=new RenderTextBox({value:'原值',inputAdapter:{acceptInsertion:text=>!/[\r\n]/.test(text),transform:(value,context)=>({value,selectionStart:context.selectionStart,selectionEnd:context.selectionEnd})}})
+  const result=(field as any)._replaceSelectionWithText('坏\n内容','paste')
+  expect(result.changed).toBe(false);expect(field.value).toBe('原值')
+  expect((field as any)._replaceSelectionWithText('好','paste').changed).toBe(true)
+  field.dispose()
+ })
+})

@@ -60,6 +60,8 @@ export class RenderTabs extends FocusableControl implements InteractiveRenderObj
   readonly preservesCurrentFocusOnPointerDown = true
   tabs: TabItem[]
   onTabChange?: (key: string) => void
+  /** Return false to reject, or 'defer' when the owner will publish activeKey later. */
+  onTabActivateRequest?: (key: string) => boolean | 'defer'
   onTabClose?: (key: string) => void
   onTabReorder?: (key: string, targetIndex: number) => void
   onTabContextMenu?: TabContextMenuHandler
@@ -98,6 +100,7 @@ export class RenderTabs extends FocusableControl implements InteractiveRenderObj
     activeKey: string
     disabled?: boolean
     onTabChange?: (key: string) => void
+    onTabActivateRequest?: (key: string) => boolean | 'defer'
     onTabClose?: (key: string) => void
     onTabReorder?: (key: string, targetIndex: number) => void
     onTabContextMenu?: TabContextMenuHandler
@@ -112,6 +115,7 @@ export class RenderTabs extends FocusableControl implements InteractiveRenderObj
     this._activeKey = opts.activeKey
     this._disabled = opts.disabled ?? false
     this.onTabChange = opts.onTabChange
+    this.onTabActivateRequest = opts.onTabActivateRequest
     this.onTabClose = opts.onTabClose
     this.onTabReorder = opts.onTabReorder
     this.onTabContextMenu = opts.onTabContextMenu
@@ -464,11 +468,15 @@ export class RenderTabs extends FocusableControl implements InteractiveRenderObj
     dl.strokeRect(x, y, w, h, s.separator, 1, 0)
   }
 
-  private _activateTab(key: string): void {
-    if (!key || key === this.activeKey) return
+  private _activateTab(key: string): boolean {
+    if (!key) return false
+    const decision = this.onTabActivateRequest?.(key)
+    if (decision === false || decision === 'defer') return false
+    if (key === this.activeKey) return true
     this.activeKey = key
     this.onTabChange?.(key)
     this.markNeedsPaint()
+    return true
   }
 
   private _syncUnderline(nextKey: string, animate: boolean): void {
@@ -600,7 +608,10 @@ export class RenderTabs extends FocusableControl implements InteractiveRenderObj
     this._dragTabPointerOffsetX = rect ? localX - rect.x : 0
     e.setPointerCapture?.()
     this._releasePointerCapture = e.releasePointerCapture
-    this._activateTab(key)
+    if (!this._activateTab(key)) {
+      this._clearPointerInteraction()
+      e.preventActivation?.()
+    }
   }
 
   onContextMenu(position: Offset): boolean {
@@ -963,6 +974,7 @@ export class RenderTabs extends FocusableControl implements InteractiveRenderObj
     this._underlineAnim.dispose()
     super.dispose()
     this.onTabChange = undefined
+    this.onTabActivateRequest = undefined
     this.onTabClose = undefined
     this.onTabReorder = undefined
     this.onTabContextMenu = undefined
